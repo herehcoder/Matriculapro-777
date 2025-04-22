@@ -8,6 +8,8 @@ import {
   type Enrollment, type InsertEnrollment, type WhatsappMessage, type InsertWhatsappMessage,
   type Metric, type InsertMetric
 } from "@shared/schema";
+import { db } from "./db";
+import { eq, and, gte, lte, desc, asc, sql } from "drizzle-orm";
 
 // Interface for the storage
 export interface IStorage {
@@ -1013,4 +1015,441 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+// Create a DatabaseStorage implementation
+export class DatabaseStorage implements IStorage {
+  // User management
+  async getUser(id: number): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || undefined;
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user || undefined;
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    const [newUser] = await db.insert(users).values(user).returning();
+    return newUser;
+  }
+
+  async updateUser(id: number, userData: Partial<User>): Promise<User | undefined> {
+    const [updatedUser] = await db
+      .update(users)
+      .set(userData)
+      .where(eq(users.id, id))
+      .returning();
+    return updatedUser;
+  }
+
+  async deleteUser(id: number): Promise<boolean> {
+    const result = await db.delete(users).where(eq(users.id, id));
+    return true;
+  }
+
+  async listUsers(limit = 100, offset = 0): Promise<User[]> {
+    return db.select().from(users).limit(limit).offset(offset);
+  }
+
+  // School management
+  async getSchool(id: number): Promise<School | undefined> {
+    const [school] = await db.select().from(schools).where(eq(schools.id, id));
+    return school || undefined;
+  }
+
+  async createSchool(school: InsertSchool): Promise<School> {
+    const [newSchool] = await db.insert(schools).values(school).returning();
+    return newSchool;
+  }
+
+  async updateSchool(id: number, schoolData: Partial<School>): Promise<School | undefined> {
+    const [updatedSchool] = await db
+      .update(schools)
+      .set(schoolData)
+      .where(eq(schools.id, id))
+      .returning();
+    return updatedSchool;
+  }
+
+  async deleteSchool(id: number): Promise<boolean> {
+    await db.delete(schools).where(eq(schools.id, id));
+    return true;
+  }
+
+  async listSchools(limit = 100, offset = 0): Promise<School[]> {
+    return db.select().from(schools).limit(limit).offset(offset);
+  }
+
+  // Attendant management
+  async getAttendant(id: number): Promise<Attendant | undefined> {
+    const [attendant] = await db.select().from(attendants).where(eq(attendants.id, id));
+    return attendant || undefined;
+  }
+
+  async getAttendantsBySchool(schoolId: number): Promise<Attendant[]> {
+    return db.select().from(attendants).where(eq(attendants.schoolId, schoolId));
+  }
+
+  async createAttendant(attendant: any): Promise<Attendant> {
+    const [newAttendant] = await db.insert(attendants).values(attendant).returning();
+    return newAttendant;
+  }
+
+  // Student management
+  async getStudent(id: number): Promise<Student | undefined> {
+    const [student] = await db.select().from(students).where(eq(students.id, id));
+    return student || undefined;
+  }
+
+  async getStudentsBySchool(schoolId: number): Promise<Student[]> {
+    return db.select().from(students).where(eq(students.schoolId, schoolId));
+  }
+
+  async createStudent(student: InsertStudent): Promise<Student> {
+    const [newStudent] = await db.insert(students).values(student).returning();
+    return newStudent;
+  }
+
+  async updateStudent(id: number, studentData: Partial<Student>): Promise<Student | undefined> {
+    const [updatedStudent] = await db
+      .update(students)
+      .set(studentData)
+      .where(eq(students.id, id))
+      .returning();
+    return updatedStudent;
+  }
+
+  // Lead management
+  async getLead(id: number): Promise<Lead | undefined> {
+    const [lead] = await db.select().from(leads).where(eq(leads.id, id));
+    return lead || undefined;
+  }
+
+  async getLeadsBySchool(schoolId: number): Promise<Lead[]> {
+    return db.select().from(leads).where(eq(leads.schoolId, schoolId));
+  }
+
+  async createLead(lead: InsertLead): Promise<Lead> {
+    const [newLead] = await db.insert(leads).values(lead).returning();
+    return newLead;
+  }
+
+  async updateLead(id: number, leadData: Partial<Lead>): Promise<Lead | undefined> {
+    const [updatedLead] = await db
+      .update(leads)
+      .set(leadData)
+      .where(eq(leads.id, id))
+      .returning();
+    return updatedLead;
+  }
+
+  // Course management
+  async getCourse(id: number): Promise<Course | undefined> {
+    const [course] = await db.select().from(courses).where(eq(courses.id, id));
+    return course || undefined;
+  }
+
+  async getCoursesBySchool(schoolId: number): Promise<Course[]> {
+    return db.select().from(courses).where(eq(courses.schoolId, schoolId));
+  }
+
+  async createCourse(course: InsertCourse): Promise<Course> {
+    const [newCourse] = await db.insert(courses).values(course).returning();
+    return newCourse;
+  }
+
+  async updateCourse(id: number, courseData: Partial<Course>): Promise<Course | undefined> {
+    const [updatedCourse] = await db
+      .update(courses)
+      .set(courseData)
+      .where(eq(courses.id, id))
+      .returning();
+    return updatedCourse;
+  }
+
+  // Form questions management
+  async getQuestion(id: number): Promise<Question | undefined> {
+    const [question] = await db.select().from(questions).where(eq(questions.id, id));
+    return question || undefined;
+  }
+
+  async getQuestionsBySchool(schoolId: number, section?: string): Promise<Question[]> {
+    let query = db.select().from(questions).where(eq(questions.schoolId, schoolId));
+    
+    if (section) {
+      query = query.where(eq(questions.section, section));
+    }
+    
+    return query;
+  }
+
+  async createQuestion(question: InsertQuestion): Promise<Question> {
+    const [newQuestion] = await db.insert(questions).values(question).returning();
+    return newQuestion;
+  }
+
+  async updateQuestion(id: number, questionData: Partial<Question>): Promise<Question | undefined> {
+    const [updatedQuestion] = await db
+      .update(questions)
+      .set(questionData)
+      .where(eq(questions.id, id))
+      .returning();
+    return updatedQuestion;
+  }
+
+  // Form answers management
+  async getAnswer(id: number): Promise<Answer | undefined> {
+    const [answer] = await db.select().from(answers).where(eq(answers.id, id));
+    return answer || undefined;
+  }
+
+  async getAnswersByEnrollment(enrollmentId: number): Promise<Answer[]> {
+    return db.select().from(answers).where(eq(answers.enrollmentId, enrollmentId));
+  }
+
+  async createAnswer(answer: InsertAnswer): Promise<Answer> {
+    const [newAnswer] = await db.insert(answers).values(answer).returning();
+    return newAnswer;
+  }
+
+  async updateAnswer(id: number, answerData: Partial<Answer>): Promise<Answer | undefined> {
+    const [updatedAnswer] = await db
+      .update(answers)
+      .set(answerData)
+      .where(eq(answers.id, id))
+      .returning();
+    return updatedAnswer;
+  }
+
+  // Chat history management
+  async getChatMessage(id: number): Promise<ChatMessage | undefined> {
+    const [message] = await db.select().from(chatHistory).where(eq(chatHistory.id, id));
+    return message || undefined;
+  }
+
+  async getChatHistoryBySchool(schoolId: number, userId?: number, leadId?: number): Promise<ChatMessage[]> {
+    let query = db.select().from(chatHistory).where(eq(chatHistory.schoolId, schoolId));
+    
+    if (userId) {
+      query = query.where(eq(chatHistory.userId, userId));
+    }
+    
+    if (leadId) {
+      query = query.where(eq(chatHistory.leadId, leadId));
+    }
+    
+    return query.orderBy(asc(chatHistory.timestamp));
+  }
+
+  async createChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
+    const [newMessage] = await db.insert(chatHistory).values(message).returning();
+    return newMessage;
+  }
+
+  // Enrollment management
+  async getEnrollment(id: number): Promise<Enrollment | undefined> {
+    const [enrollment] = await db.select().from(enrollments).where(eq(enrollments.id, id));
+    return enrollment || undefined;
+  }
+
+  async getEnrollmentsBySchool(schoolId: number, status?: string): Promise<Enrollment[]> {
+    let query = db.select().from(enrollments).where(eq(enrollments.schoolId, schoolId));
+    
+    if (status) {
+      query = query.where(eq(enrollments.status, status));
+    }
+    
+    return query;
+  }
+
+  async getEnrollmentsByStudent(studentId: number): Promise<Enrollment[]> {
+    return db.select().from(enrollments).where(eq(enrollments.studentId, studentId));
+  }
+
+  async createEnrollment(enrollment: InsertEnrollment): Promise<Enrollment> {
+    const [newEnrollment] = await db.insert(enrollments).values(enrollment).returning();
+    return newEnrollment;
+  }
+
+  async updateEnrollment(id: number, enrollmentData: Partial<Enrollment>): Promise<Enrollment | undefined> {
+    const [updatedEnrollment] = await db
+      .update(enrollments)
+      .set(enrollmentData)
+      .where(eq(enrollments.id, id))
+      .returning();
+    return updatedEnrollment;
+  }
+
+  // WhatsApp messages management
+  async getWhatsappMessage(id: number): Promise<WhatsappMessage | undefined> {
+    const [message] = await db.select().from(whatsappMessages).where(eq(whatsappMessages.id, id));
+    return message || undefined;
+  }
+
+  async getWhatsappMessagesBySchool(schoolId: number): Promise<WhatsappMessage[]> {
+    return db.select().from(whatsappMessages).where(eq(whatsappMessages.schoolId, schoolId));
+  }
+
+  async createWhatsappMessage(message: InsertWhatsappMessage): Promise<WhatsappMessage> {
+    const [newMessage] = await db.insert(whatsappMessages).values(message).returning();
+    return newMessage;
+  }
+
+  // Metrics management
+  async getMetric(id: number): Promise<Metric | undefined> {
+    const [metric] = await db.select().from(metrics).where(eq(metrics.id, id));
+    return metric || undefined;
+  }
+
+  async getMetricsBySchool(schoolId: number, metricType?: string): Promise<Metric[]> {
+    let query = db.select().from(metrics).where(eq(metrics.schoolId, schoolId));
+    
+    if (metricType) {
+      query = query.where(eq(metrics.metricType, metricType));
+    }
+    
+    return query.orderBy(desc(metrics.date));
+  }
+
+  async createMetric(metric: InsertMetric): Promise<Metric> {
+    const [newMetric] = await db.insert(metrics).values(metric).returning();
+    return newMetric;
+  }
+
+  async getMetricSummary(schoolId: number, metricType: string): Promise<{count: number, change: number}> {
+    // Calculate total for the current month
+    const now = new Date();
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    
+    const metricsThisMonth = await db
+      .select({ sum: sql<number>`sum(${metrics.metricValue})` })
+      .from(metrics)
+      .where(
+        and(
+          eq(metrics.schoolId, schoolId),
+          eq(metrics.metricType, metricType),
+          gte(metrics.date, firstDayOfMonth),
+          lte(metrics.date, lastDayOfMonth)
+        )
+      );
+    
+    // Calculate total for previous month
+    const firstDayOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastDayOfPrevMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+    
+    const metricsPrevMonth = await db
+      .select({ sum: sql<number>`sum(${metrics.metricValue})` })
+      .from(metrics)
+      .where(
+        and(
+          eq(metrics.schoolId, schoolId),
+          eq(metrics.metricType, metricType),
+          gte(metrics.date, firstDayOfPrevMonth),
+          lte(metrics.date, lastDayOfPrevMonth)
+        )
+      );
+    
+    const currentCount = metricsThisMonth[0]?.sum || 0;
+    const prevCount = metricsPrevMonth[0]?.sum || 0;
+    
+    // Calculate percentage change
+    let change = 0;
+    if (prevCount > 0) {
+      change = ((currentCount - prevCount) / prevCount) * 100;
+    } else if (currentCount > 0) {
+      change = 100; // If previous was 0 and current is not, that's a 100% increase
+    }
+    
+    return {
+      count: currentCount,
+      change
+    };
+  }
+
+  async getDashboardMetrics(schoolId?: number): Promise<any> {
+    if (!schoolId) {
+      const schoolsCount = await db.select({ count: sql<number>`count(*)` }).from(schools);
+      const usersCount = await db.select({ count: sql<number>`count(*)` }).from(users);
+      const enrollmentsCount = await db.select({ count: sql<number>`count(*)` }).from(enrollments);
+      
+      // Get completed enrollments
+      const completedEnrollments = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(enrollments)
+        .where(eq(enrollments.status, 'completed'));
+      
+      return {
+        schools: schoolsCount[0]?.count || 0,
+        users: usersCount[0]?.count || 0,
+        enrollments: enrollmentsCount[0]?.count || 0,
+        completedEnrollments: completedEnrollments[0]?.count || 0,
+      };
+    } else {
+      // For a specific school
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      
+      // Current month leads and enrollments
+      const leads = await this.getMetricSummary(schoolId, 'leads');
+      const enrollments = await this.getMetricSummary(schoolId, 'form_started');
+      const completedEnrollments = await this.getMetricSummary(schoolId, 'enrollment_completed');
+      
+      // Get conversion rate
+      const conversionRate = enrollments.count > 0
+        ? (completedEnrollments.count / enrollments.count) * 100
+        : 0;
+      
+      // Estimate revenue based on completed enrollments and courses
+      const estimatedRevenue = await this.calculateEstimatedRevenue(schoolId);
+      
+      return {
+        leads,
+        enrollments,
+        completedEnrollments,
+        conversionRate,
+        estimatedRevenue
+      };
+    }
+  }
+
+  private async calculateEstimatedRevenue(schoolId: number): Promise<number> {
+    // Get all completed enrollments for the school
+    const completedEnrollments = await db
+      .select()
+      .from(enrollments)
+      .where(
+        and(
+          eq(enrollments.schoolId, schoolId),
+          eq(enrollments.status, 'completed')
+        )
+      );
+    
+    // Get all courses for the school
+    const schoolCourses = await db
+      .select()
+      .from(courses)
+      .where(eq(courses.schoolId, schoolId));
+    
+    // Calculate revenue based on course prices
+    let totalRevenue = 0;
+    
+    for (const enrollment of completedEnrollments) {
+      if (enrollment.courseId) {
+        const course = schoolCourses.find(c => c.id === enrollment.courseId);
+        if (course && course.price) {
+          totalRevenue += course.price;
+        }
+      }
+    }
+    
+    return totalRevenue;
+  }
+}
+
+export const storage = new DatabaseStorage();
