@@ -14,6 +14,9 @@ import SchoolsPage from "@/pages/schools/index";
 import NewSchoolPage from "@/pages/schools/new";
 import LeadsPage from "@/pages/leads/index";
 import OnboardingPage from "@/pages/onboarding/index";
+import EnrollmentsPage from "@/pages/enrollments/index";
+import EnrollmentViewPage from "@/pages/enrollments/view";
+import FormQuestionsPage from "@/pages/form-questions/index";
 import { useAuth, AuthProvider } from "./lib/auth";
 import MainLayout from "./components/Layout/MainLayout";
 import { Loader2 } from "lucide-react";
@@ -73,6 +76,9 @@ function Router() {
         <Route path="/dashboard/attendant" component={AttendantDashboard} />
         <Route path="/dashboard/student" component={StudentDashboard} />
         <Route path="/enrollment/:schoolId/:enrollmentId?" component={EnrollmentPage} />
+        <Route path="/enrollments" component={EnrollmentsPage} />
+        <Route path="/enrollments/:enrollmentId" component={EnrollmentViewPage} />
+        <Route path="/form-questions" component={FormQuestionsPage} />
         <Route path="/chatbot" component={ChatbotPage} />
         <Route path="/schools" component={SchoolsPage} />
         <Route path="/schools/new" component={NewSchoolPage} />

@@ -80,13 +80,36 @@ export const createCourse = (courseData: any) => {
 };
 
 // Enrollments
-export const getEnrollments = (schoolId?: number, status?: string) => {
+export const getEnrollments = (
+  schoolId?: number, 
+  status?: string, 
+  page?: number,
+  limit?: number,
+  sortField?: string,
+  sortDirection?: string
+) => {
   let url = "/api/enrollments";
-  if (schoolId) url += `?schoolId=${schoolId}`;
-  if (status) url += `${schoolId ? "&" : "?"}status=${status}`;
+  const params = new URLSearchParams();
+  
+  if (schoolId) params.append("schoolId", schoolId.toString());
+  if (status && status !== 'all') params.append("status", status);
+  if (page) params.append("page", page.toString());
+  if (limit) params.append("limit", limit.toString());
+  if (sortField) params.append("sortField", sortField);
+  if (sortDirection) params.append("sortDirection", sortDirection);
+  
+  const queryString = params.toString();
+  if (queryString) url += `?${queryString}`;
   
   return fetch(url, { credentials: "include" }).then(res => {
     if (!res.ok) throw new Error("Failed to fetch enrollments");
+    return res.json();
+  });
+};
+
+export const getEnrollment = (id: number) => {
+  return fetch(`/api/enrollments/${id}`, { credentials: "include" }).then(res => {
+    if (!res.ok) throw new Error("Failed to fetch enrollment");
     return res.json();
   });
 };
@@ -106,6 +129,10 @@ export const updateEnrollment = (id: number, enrollmentData: any) => {
   return apiRequest("PUT", `/api/enrollments/${id}`, enrollmentData);
 };
 
+export const completeEnrollmentStep = (id: number, step: string, data: any) => {
+  return apiRequest("POST", `/api/enrollments/${id}/steps/${step}`, data);
+};
+
 // Form Questions
 export const getQuestions = (schoolId: number, section?: string) => {
   let url = `/api/questions?schoolId=${schoolId}`;
@@ -119,6 +146,14 @@ export const getQuestions = (schoolId: number, section?: string) => {
 
 export const createQuestion = (questionData: any) => {
   return apiRequest("POST", "/api/questions", questionData);
+};
+
+export const updateQuestion = (id: number, questionData: any) => {
+  return apiRequest("PUT", `/api/questions/${id}`, questionData);
+};
+
+export const deleteQuestion = (id: number) => {
+  return apiRequest("DELETE", `/api/questions/${id}`);
 };
 
 // Form Answers
