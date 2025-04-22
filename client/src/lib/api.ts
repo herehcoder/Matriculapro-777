@@ -212,3 +212,19 @@ export const getRecentSchools = () => {
     return res.json();
   });
 };
+
+// User Profile
+export const getUser = (id: number) => {
+  return fetch(`/api/users/${id}`, { credentials: "include" }).then(res => {
+    if (!res.ok) throw new Error("Failed to fetch user");
+    return res.json();
+  });
+};
+
+export const updateUserProfile = (id: number, userData: any) => {
+  return apiRequest("PUT", `/api/users/${id}`, userData);
+};
+
+export const updatePassword = (id: number, passwordData: any) => {
+  return apiRequest("PUT", `/api/users/${id}/password`, passwordData);
+};
