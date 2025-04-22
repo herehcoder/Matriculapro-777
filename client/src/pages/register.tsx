@@ -45,7 +45,7 @@ export default function Register() {
       email: "",
       password: "",
       fullName: "",
-      role: "admin",
+      role: "school",
     },
   });
 
@@ -168,7 +168,6 @@ export default function Register() {
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="admin">Administrador</SelectItem>
                       <SelectItem value="school">Escola</SelectItem>
                       <SelectItem value="attendant">Atendente</SelectItem>
                       <SelectItem value="student">Aluno</SelectItem>
