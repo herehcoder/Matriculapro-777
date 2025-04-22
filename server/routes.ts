@@ -1,6 +1,7 @@
 import express, { type Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { supabase } from "./db";
 import session from "express-session";
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
@@ -191,6 +192,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.json({ message: "Logged out successfully" });
       });
     });
+  });
+  
+  // Supabase Login (teste)
+  app.post("/api/auth/supabase-login", async (req, res) => {
+    try {
+      const { email, password } = req.body;
+      
+      if (!email || !password) {
+        return res.status(400).json({ message: "Email and password are required" });
+      }
+      
+      // Tenta autenticar com o Supabase
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+      
+      if (error) {
+        return res.status(401).json({ message: error.message });
+      }
+      
+      // Retorna os dados da sessão do Supabase
+      res.json({
+        user: data.user,
+        session: data.session
+      });
+    } catch (error: any) {
+      console.error("Erro no login Supabase:", error);
+      res.status(500).json({ message: error.message });
+    }
   });
 
   // Register new user
