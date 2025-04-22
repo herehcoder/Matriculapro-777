@@ -75,6 +75,7 @@ export interface IStorage {
   getEnrollmentsByStudent(studentId: number): Promise<Enrollment[]>;
   createEnrollment(enrollment: InsertEnrollment): Promise<Enrollment>;
   updateEnrollment(id: number, enrollment: Partial<Enrollment>): Promise<Enrollment | undefined>;
+  listEnrollments(limit?: number, offset?: number): Promise<Enrollment[]>;
   
   // WhatsApp messages management
   getWhatsappMessage(id: number): Promise<WhatsappMessage | undefined>;

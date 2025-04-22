@@ -347,11 +347,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       schoolId = parseInt(req.query.schoolId as string);
     }
     
+    const status = req.query.status as string;
+
+    // Se for admin e não tiver especificado uma escola, retorna todas as matrículas
+    if (user.role === "admin" && !schoolId) {
+      try {
+        // Buscar todas as matrículas (limitado a 100 para evitar sobrecarga)
+        const allEnrollments = await storage.listEnrollments(100, 0);
+        return res.json(allEnrollments);
+      } catch (error) {
+        console.error("Error fetching all enrollments:", error);
+        return res.status(500).json({ message: "Error fetching enrollments" });
+      }
+    }
+    
+    // Para usuários não admin ou admin que especificou uma escola
     if (!schoolId) {
       return res.status(400).json({ message: "School ID is required" });
     }
     
-    const status = req.query.status as string;
     const enrollments = await storage.getEnrollmentsBySchool(schoolId, status);
     res.json(enrollments);
   });
