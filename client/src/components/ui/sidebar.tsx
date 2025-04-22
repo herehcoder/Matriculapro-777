@@ -86,9 +86,9 @@ export function Sidebar({ className, isOpen, onClose, ...props }: SidebarProps) 
                 onClick={onClose}
               />
               <SidebarItem
-                href="/forms"
+                href="/form-questions"
                 icon={<FormInput size={18} />}
-                label="Formulários"
+                label="Perguntas do Formulário"
                 onClick={onClose}
               />
               <SidebarItem
