@@ -152,14 +152,15 @@ export function Sidebar({ className, isOpen, onClose, ...props }: SidebarProps) 
               <Button 
                 className="w-full justify-center" 
                 size="sm"
-                onClick={() => {
-                  const path = role === "admin" ? "/schools/new" : "/courses/new";
-                  window.location.href = path;
-                  if (onClose) onClose();
-                }}
+                asChild
               >
-                <PlusCircle className="mr-2 h-4 w-4" />
-                {role === "admin" ? "Nova Escola" : "Novo Curso"}
+                <Link 
+                  href={role === "admin" ? "/schools/new" : "/courses/new"} 
+                  onClick={onClose}
+                >
+                  <PlusCircle className="mr-2 h-4 w-4" />
+                  {role === "admin" ? "Nova Escola" : "Novo Curso"}
+                </Link>
               </Button>
             </div>
           )}
@@ -182,9 +183,9 @@ function SidebarItem({ href, icon, label, badge, onClick }: SidebarItemProps) {
 
   return (
     <Link href={href}>
-      <a
+      <div
         className={cn(
-          "flex items-center px-3 py-2 text-sm font-medium rounded-lg",
+          "flex items-center px-3 py-2 text-sm font-medium rounded-lg cursor-pointer",
           isActive
             ? "bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-400"
             : "text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
@@ -205,7 +206,7 @@ function SidebarItem({ href, icon, label, badge, onClick }: SidebarItemProps) {
             {badge}
           </span>
         )}
-      </a>
+      </div>
     </Link>
   );
 }

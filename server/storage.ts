@@ -1185,7 +1185,7 @@ export class DatabaseStorage implements IStorage {
       query = query.where(eq(questions.section, section));
     }
     
-    return query;
+    return await query;
   }
 
   async createQuestion(question: InsertQuestion): Promise<Question> {
