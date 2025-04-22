@@ -39,6 +39,11 @@ const schoolFormSchema = z.object({
   zipCode: z.string().optional(),
   mainCourse: z.string().optional(),
   description: z.string().optional(),
+  logo: z.string().optional(),
+  whatsappNumber: z.string().optional(),
+  whatsappEnabled: z.boolean().optional(),
+  apiKey: z.string().optional(),
+  webhookUrl: z.string().optional(),
 });
 
 type SchoolFormValues = z.infer<typeof schoolFormSchema>;
@@ -84,6 +89,11 @@ export default function NewSchoolPage() {
       zipCode: "",
       mainCourse: "",
       description: "",
+      logo: "",
+      whatsappNumber: "",
+      whatsappEnabled: false,
+      apiKey: "",
+      webhookUrl: "",
     },
   });
   
