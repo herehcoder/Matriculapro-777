@@ -90,8 +90,8 @@ function Router() {
         <Route path="/schools/new" component={NewSchoolPage} />
         <Route path="/leads" component={LeadsPage} />
         <Route path="/onboarding" component={OnboardingPage} />
-        <Route path="/courses" component={require("./pages/courses").default} />
-        <Route path="/courses/new" component={require("./pages/courses/new").default} />
+        <Route path="/courses" component={CoursesPage} />
+        <Route path="/courses/new" component={NewCoursePage} />
         <Route path="/account" component={AccountPage} />
         <Route path="/settings" component={SettingsPage} />
         
