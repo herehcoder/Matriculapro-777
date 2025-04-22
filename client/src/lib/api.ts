@@ -75,6 +75,14 @@ export const getCourses = (schoolId?: number) => {
   });
 };
 
+export const getCoursesBySchool = (schoolId: number) => {
+  return fetch(`/api/courses?schoolId=${schoolId}`, { credentials: "include" })
+    .then(res => {
+      if (!res.ok) throw new Error("Failed to fetch courses for school");
+      return res.json();
+    });
+};
+
 export const createCourse = (courseData: any) => {
   return apiRequest("POST", "/api/courses", courseData);
 };

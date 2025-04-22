@@ -1,162 +1,186 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@/lib/auth";
-import { getEnrollment, getAnswers, getSchool, getCourse } from "@/lib/api";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { 
-  Card, 
-  CardContent, 
-  CardDescription, 
-  CardFooter, 
-  CardHeader, 
-  CardTitle 
-} from "@/components/ui/card";
-import { 
-  Tabs, 
-  TabsContent, 
-  TabsList, 
-  TabsTrigger 
-} from "@/components/ui/tabs";
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuLabel, 
-  DropdownMenuSeparator, 
-  DropdownMenuTrigger 
-} from "@/components/ui/dropdown-menu";
-import { Badge } from "@/components/ui/badge";
+import { Loader2, ArrowLeft, CheckCircle, XCircle, Clock, FileText, MessageSquare, Send } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
-import { 
-  Sheet, 
-  SheetContent, 
-  SheetDescription, 
-  SheetHeader, 
-  SheetTitle, 
-  SheetTrigger 
-} from "@/components/ui/sheet";
-import { 
-  ArrowLeft, 
-  MoreVertical, 
-  Printer, 
-  Download, 
-  Send, 
-  Mail, 
-  MessageCircle, 
-  FileText, 
-  CheckCircle2, 
-  Calendar, 
-  User, 
-  School, 
-  BadgeInfo, 
-  DollarSign, 
-  Loader2 
-} from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth";
+import { getEnrollment, getSchool, getAnswers, updateEnrollment, sendChatMessage, getChatHistory } from "@/lib/api";
 
-interface Answer {
-  id: number;
-  questionId: number;
-  enrollmentId: number;
-  answer: string;
-  question?: {
-    question: string;
-    formSection: string;
-  };
-}
-
-interface EnrollmentStatus {
-  label: string;
-  color: string;
+interface EnrollmentViewParams {
+  enrollmentId: string;
 }
 
 export default function EnrollmentViewPage() {
-  const { enrollmentId } = useParams<{ enrollmentId: string }>();
-  const { user } = useAuth();
+  const { enrollmentId } = useParams<EnrollmentViewParams>();
   const [, navigate] = useLocation();
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(true);
+  const [enrollment, setEnrollment] = useState<any>(null);
+  const [school, setSchool] = useState<any>(null);
+  const [answers, setAnswers] = useState<any[]>([]);
+  const [message, setMessage] = useState("");
+  const [chatHistory, setChatHistory] = useState<any[]>([]);
+  const [isSending, setIsSending] = useState(false);
   
-  // Get enrollment status label and color
-  const getStatusInfo = (status: string): EnrollmentStatus => {
-    switch (status) {
-      case 'started':
-        return { label: 'Iniciada', color: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400' };
-      case 'personal_info':
-        return { label: 'Dados Pessoais', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' };
-      case 'course_info':
-        return { label: 'Dados do Curso', color: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400' };
-      case 'payment':
-        return { label: 'Aguardando Pagamento', color: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400' };
-      case 'completed':
-        return { label: 'Concluída', color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' };
-      case 'abandoned':
-        return { label: 'Abandonada', color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' };
-      default:
-        return { label: status, color: 'bg-neutral-100 text-neutral-800 dark:bg-neutral-900/30 dark:text-neutral-400' };
+  // Format date string to local date format
+  const formatDate = (dateString: string) => {
+    if (!dateString) return "";
+    const date = new Date(dateString);
+    return date.toLocaleDateString();
+  };
+  
+  // Format datetime string to local datetime format
+  const formatDateTime = (dateString: string) => {
+    if (!dateString) return "";
+    const date = new Date(dateString);
+    return date.toLocaleDateString() + " " + date.toLocaleTimeString();
+  };
+  
+  // Load enrollment data
+  useEffect(() => {
+    const loadEnrollmentData = async () => {
+      setIsLoading(true);
+      try {
+        // Fetch enrollment details
+        const enrollmentData = await getEnrollment(parseInt(enrollmentId));
+        setEnrollment(enrollmentData);
+        
+        // Fetch school details
+        const schoolData = await getSchool(enrollmentData.schoolId);
+        setSchool(schoolData);
+        
+        // Fetch enrollment answers
+        const answersData = await getAnswers(parseInt(enrollmentId));
+        setAnswers(answersData);
+        
+        // Fetch chat history
+        const historyData = await getChatHistory(
+          enrollmentData.schoolId, 
+          enrollmentData.userId || undefined, 
+          enrollmentData.leadId || undefined
+        );
+        setChatHistory(historyData);
+      } catch (error) {
+        console.error("Error loading enrollment data:", error);
+        toast({
+          title: "Erro ao carregar dados",
+          description: "Não foi possível carregar os detalhes da matrícula.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadEnrollmentData();
+  }, [enrollmentId, toast]);
+  
+  // Handle enrollment status update
+  const handleStatusUpdate = async (newStatus: string) => {
+    setIsLoading(true);
+    try {
+      await updateEnrollment(parseInt(enrollmentId), { status: newStatus });
+      
+      // Update local state
+      setEnrollment({
+        ...enrollment,
+        status: newStatus,
+      });
+      
+      toast({
+        title: "Status atualizado",
+        description: `A matrícula agora está ${getStatusLabel(newStatus).toLowerCase()}.`,
+      });
+    } catch (error) {
+      console.error("Error updating enrollment status:", error);
+      toast({
+        title: "Erro ao atualizar status",
+        description: "Não foi possível atualizar o status da matrícula.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
   
-  // Format date for display
-  const formatDate = (dateString: string) => {
-    const options: Intl.DateTimeFormatOptions = { 
-      day: '2-digit', 
-      month: '2-digit', 
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    };
-    return new Date(dateString).toLocaleDateString('pt-BR', options);
+  // Handle sending a chat message
+  const handleSendMessage = async () => {
+    if (!message.trim()) return;
+    
+    setIsSending(true);
+    try {
+      const response = await sendChatMessage({
+        schoolId: enrollment.schoolId,
+        userId: user?.id,
+        leadId: enrollment.leadId,
+        enrollmentId: parseInt(enrollmentId),
+        message: message,
+        role: user?.role,
+      });
+      
+      // Add the message to the chat history
+      setChatHistory(prev => [...prev, response]);
+      setMessage("");
+    } catch (error) {
+      console.error("Error sending message:", error);
+      toast({
+        title: "Erro ao enviar mensagem",
+        description: "Não foi possível enviar a mensagem.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSending(false);
+    }
   };
-
-  // Fetch enrollment data
-  const { data: enrollment, isLoading: isLoadingEnrollment } = useQuery({
-    queryKey: [`/api/enrollments/${enrollmentId}`],
-    enabled: !!enrollmentId,
-  });
   
-  // Fetch school data
-  const { data: school, isLoading: isLoadingSchool } = useQuery({
-    queryKey: [`/api/schools/${enrollment?.schoolId}`],
-    enabled: !!enrollment?.schoolId,
-  });
+  // Get status label based on status code
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case "started":
+        return "Iniciada";
+      case "personal_info":
+        return "Informações Pessoais";
+      case "course_info":
+        return "Informações do Curso";
+      case "payment":
+        return "Pagamento";
+      case "completed":
+        return "Concluída";
+      case "abandoned":
+        return "Abandonada";
+      default:
+        return status;
+    }
+  };
   
-  // Fetch course data
-  const { data: course, isLoading: isLoadingCourse } = useQuery({
-    queryKey: [`/api/courses/${enrollment?.courseId}`],
-    enabled: !!enrollment?.courseId,
-  });
-  
-  // Fetch answers
-  const { data: answersData, isLoading: isLoadingAnswers } = useQuery({
-    queryKey: [`/api/answers/${enrollmentId}`],
-    enabled: !!enrollmentId,
-  });
+  // Get status icon based on status code
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case "completed":
+        return <CheckCircle className="h-5 w-5 text-green-500" />;
+      case "abandoned":
+        return <XCircle className="h-5 w-5 text-red-500" />;
+      default:
+        return <Clock className="h-5 w-5 text-amber-500" />;
+    }
+  };
   
   // Group answers by section
-  const getAnswersBySection = (section: string) => {
-    if (!answersData) return [];
-    return answersData.filter((answer: Answer) => 
-      answer.question?.formSection === section
-    );
-  };
+  const groupedAnswers = answers.reduce((acc: any, answer: any) => {
+    const section = answer.question?.section || "other";
+    if (!acc[section]) {
+      acc[section] = [];
+    }
+    acc[section].push(answer);
+    return acc;
+  }, {});
   
-  const personalInfoAnswers = getAnswersBySection('personal_info');
-  const courseInfoAnswers = getAnswersBySection('course_info');
-  const paymentAnswers = getAnswersBySection('payment');
-  
-  // Permission check - only admins, the school that owns the enrollment, and the student can see
-  const canViewEnrollment = () => {
-    if (!user || !enrollment) return false;
-    
-    if (user.role === 'admin') return true;
-    if (user.role === 'school' && user.schoolId === enrollment.schoolId) return true;
-    if (user.role === 'attendant' && user.schoolId === enrollment.schoolId) return true;
-    if (user.role === 'student' && enrollment.studentId === user.id) return true;
-    
-    return false;
-  };
-  
-  // Loading state
-  if (isLoadingEnrollment || isLoadingSchool || isLoadingAnswers || isLoadingCourse) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -165,453 +189,482 @@ export default function EnrollmentViewPage() {
     );
   }
   
-  // Check permission
-  if (!canViewEnrollment()) {
+  if (!enrollment) {
     return (
-      <Card>
-        <CardContent className="py-10 text-center">
-          <div className="mx-auto h-16 w-16 rounded-full bg-red-100 flex items-center justify-center text-red-600 mb-4 dark:bg-red-900/50 dark:text-red-400">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-            </svg>
-          </div>
-          <h2 className="text-xl font-medium text-neutral-800 dark:text-neutral-200">
-            Acesso Negado
-          </h2>
-          <p className="text-neutral-500 dark:text-neutral-400 mt-2 mb-6">
-            Você não tem permissão para visualizar esta matrícula.
-          </p>
-          <Button onClick={() => navigate("/")}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Voltar para o Dashboard
-          </Button>
-        </CardContent>
-      </Card>
+      <div className="flex flex-col items-center justify-center h-64">
+        <XCircle className="h-12 w-12 text-red-500 mb-4" />
+        <h2 className="text-xl font-semibold mb-2">Matrícula não encontrada</h2>
+        <p className="text-neutral-500 mb-6">A matrícula solicitada não foi encontrada ou você não tem permissão para acessá-la.</p>
+        <Button onClick={() => navigate("/enrollments")}>
+          Voltar para matrículas
+        </Button>
+      </div>
     );
   }
   
-  const statusInfo = getStatusInfo(enrollment.status);
-  
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <Button 
-            variant="outline" 
-            size="icon" 
-            onClick={() => navigate("/enrollments")}
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div>
-            <h1 className="text-2xl font-display font-bold text-neutral-800 dark:text-neutral-100">
-              Matrícula #{enrollmentId}
-            </h1>
-            <div className="flex items-center gap-2">
-              <Badge className={statusInfo.color}>
-                {statusInfo.label}
-              </Badge>
-              <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                Criada em {formatDate(enrollment.createdAt)}
-              </p>
-            </div>
-          </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-display font-bold text-neutral-800 dark:text-neutral-100">
+            Detalhes da Matrícula #{enrollmentId}
+          </h1>
+          <p className="text-neutral-500 dark:text-neutral-400">
+            Informações completas da matrícula
+          </p>
         </div>
         
-        <div className="flex items-center gap-2">
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button variant="outline">
-                <Mail className="h-4 w-4 mr-2" />
-                Enviar por Email
-              </Button>
-            </SheetTrigger>
-            <SheetContent>
-              <SheetHeader>
-                <SheetTitle>Enviar Matrícula por Email</SheetTitle>
-                <SheetDescription>
-                  Envie os detalhes da matrícula para o aluno ou responsável.
-                </SheetDescription>
-              </SheetHeader>
-              {/* Email form would go here */}
-            </SheetContent>
-          </Sheet>
+        <div className="flex items-center space-x-2">
+          <Button variant="outline" onClick={() => navigate("/enrollments")}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Voltar
+          </Button>
           
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon">
-                <MoreVertical className="h-4 w-4" />
+          {enrollment.status !== "completed" && enrollment.status !== "abandoned" && (
+            <>
+              <Button 
+                variant="outline"
+                className="text-green-600 border-green-200 hover:bg-green-50 hover:text-green-700 dark:text-green-400 dark:border-green-950 dark:hover:bg-green-950/30"
+                onClick={() => handleStatusUpdate("completed")}
+              >
+                <CheckCircle className="h-4 w-4 mr-2" />
+                Concluir
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Ações</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="cursor-pointer">
-                <Printer className="h-4 w-4 mr-2" />
-                Imprimir
-              </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer">
-                <Download className="h-4 w-4 mr-2" />
-                Exportar PDF
-              </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer">
-                <MessageCircle className="h-4 w-4 mr-2" />
-                Enviar Mensagem
-              </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer">
-                <Send className="h-4 w-4 mr-2" />
-                Enviar WhatsApp
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+              
+              <Button 
+                variant="outline"
+                className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:border-red-950 dark:hover:bg-red-950/30"
+                onClick={() => handleStatusUpdate("abandoned")}
+              >
+                <XCircle className="h-4 w-4 mr-2" />
+                Abandonar
+              </Button>
+            </>
+          )}
         </div>
       </div>
       
-      {/* Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main enrollment information */}
-        <div className="lg:col-span-2 space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Left column - Enrollment summary */}
+        <div className="space-y-6">
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Informações da Matrícula</CardTitle>
+              <CardTitle>Informações da Matrícula</CardTitle>
             </CardHeader>
-            <CardContent>
-              <Tabs defaultValue="personal">
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="personal">
-                    <User className="h-4 w-4 mr-2" />
-                    Dados Pessoais
-                  </TabsTrigger>
-                  <TabsTrigger value="course">
-                    <School className="h-4 w-4 mr-2" />
-                    Dados do Curso
-                  </TabsTrigger>
-                  <TabsTrigger value="payment">
-                    <DollarSign className="h-4 w-4 mr-2" />
-                    Pagamento
-                  </TabsTrigger>
-                </TabsList>
-                
-                <TabsContent value="personal" className="pt-4">
-                  {personalInfoAnswers.length === 0 ? (
-                    <div className="text-center p-6 text-neutral-500 dark:text-neutral-400">
-                      Nenhuma informação pessoal foi preenchida ainda.
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {personalInfoAnswers.map((answer: Answer) => (
-                        <div key={answer.id} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <div className="text-sm font-medium text-neutral-800 dark:text-neutral-300">
-                            {answer.question?.question}:
-                          </div>
-                          <div className="text-sm text-neutral-600 dark:text-neutral-400">
-                            {answer.answer}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </TabsContent>
-                
-                <TabsContent value="course" className="pt-4">
-                  {courseInfoAnswers.length === 0 && !course ? (
-                    <div className="text-center p-6 text-neutral-500 dark:text-neutral-400">
-                      Nenhuma informação do curso foi preenchida ainda.
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {course && (
-                        <div className="p-4 bg-primary-50 dark:bg-primary-900/20 rounded-lg">
-                          <h3 className="font-semibold text-primary-700 dark:text-primary-400 mb-2">
-                            Curso Selecionado
-                          </h3>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            <div className="text-sm font-medium text-neutral-800 dark:text-neutral-300">
-                              Nome do Curso:
-                            </div>
-                            <div className="text-sm text-neutral-600 dark:text-neutral-400">
-                              {course.name}
-                            </div>
-                            {course.duration && (
-                              <>
-                                <div className="text-sm font-medium text-neutral-800 dark:text-neutral-300">
-                                  Duração:
-                                </div>
-                                <div className="text-sm text-neutral-600 dark:text-neutral-400">
-                                  {course.duration}
-                                </div>
-                              </>
-                            )}
-                            {course.price && (
-                              <>
-                                <div className="text-sm font-medium text-neutral-800 dark:text-neutral-300">
-                                  Preço:
-                                </div>
-                                <div className="text-sm text-neutral-600 dark:text-neutral-400">
-                                  R$ {(course.price / 100).toFixed(2)}
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      
-                      {courseInfoAnswers.map((answer: Answer) => (
-                        <div key={answer.id} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <div className="text-sm font-medium text-neutral-800 dark:text-neutral-300">
-                            {answer.question?.question}:
-                          </div>
-                          <div className="text-sm text-neutral-600 dark:text-neutral-400">
-                            {answer.answer}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </TabsContent>
-                
-                <TabsContent value="payment" className="pt-4">
-                  {enrollment.paymentCompleted ? (
-                    <div className="space-y-4">
-                      <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                        <div className="flex items-center">
-                          <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 mr-2" />
-                          <h3 className="font-semibold text-green-700 dark:text-green-400">
-                            Pagamento Concluído
-                          </h3>
-                        </div>
-                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <div className="text-sm font-medium text-neutral-800 dark:text-neutral-300">
-                            Método de Pagamento:
-                          </div>
-                          <div className="text-sm text-neutral-600 dark:text-neutral-400">
-                            {enrollment.paymentMethod}
-                          </div>
-                          
-                          {enrollment.paymentAmount && (
-                            <>
-                              <div className="text-sm font-medium text-neutral-800 dark:text-neutral-300">
-                                Valor:
-                              </div>
-                              <div className="text-sm text-neutral-600 dark:text-neutral-400">
-                                R$ {(enrollment.paymentAmount / 100).toFixed(2)}
-                              </div>
-                            </>
-                          )}
-                          
-                          {enrollment.paymentReference && (
-                            <>
-                              <div className="text-sm font-medium text-neutral-800 dark:text-neutral-300">
-                                Referência:
-                              </div>
-                              <div className="text-sm text-neutral-600 dark:text-neutral-400">
-                                {enrollment.paymentReference}
-                              </div>
-                            </>
-                          )}
-                          
-                          <div className="text-sm font-medium text-neutral-800 dark:text-neutral-300">
-                            Data:
-                          </div>
-                          <div className="text-sm text-neutral-600 dark:text-neutral-400">
-                            {formatDate(enrollment.updatedAt)}
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {paymentAnswers.map((answer: Answer) => (
-                        <div key={answer.id} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <div className="text-sm font-medium text-neutral-800 dark:text-neutral-300">
-                            {answer.question?.question}:
-                          </div>
-                          <div className="text-sm text-neutral-600 dark:text-neutral-400">
-                            {answer.answer}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center p-6 text-neutral-500 dark:text-neutral-400">
-                      O pagamento ainda não foi concluído.
-                    </div>
-                  )}
-                </TabsContent>
-              </Tabs>
+            <CardContent className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                  Status
+                </span>
+                <div className="flex items-center">
+                  {getStatusIcon(enrollment.status)}
+                  <span className="ml-2 font-medium">
+                    {getStatusLabel(enrollment.status)}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                  Data de Criação
+                </span>
+                <span>
+                  {formatDate(enrollment.createdAt)}
+                </span>
+              </div>
+              
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                  Última Atualização
+                </span>
+                <span>
+                  {formatDate(enrollment.updatedAt)}
+                </span>
+              </div>
+              
+              {enrollment.course && (
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                    Curso
+                  </span>
+                  <span>
+                    {enrollment.course.name}
+                  </span>
+                </div>
+              )}
+              
+              <Separator />
+              
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                  Escola
+                </span>
+                <span className="font-medium">
+                  {school.name}
+                </span>
+              </div>
+              
+              {enrollment.lead && (
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                    Lead
+                  </span>
+                  <span>
+                    {enrollment.lead.name}
+                  </span>
+                </div>
+              )}
+              
+              {enrollment.user && (
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                    Aluno
+                  </span>
+                  <span>
+                    {enrollment.user.fullName}
+                  </span>
+                </div>
+              )}
             </CardContent>
           </Card>
           
+          {/* Progress steps */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Histórico da Matrícula</CardTitle>
+              <CardTitle>Progresso da Matrícula</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                <div className="flex items-start">
-                  <div className="h-8 w-8 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center dark:bg-primary-900/50 dark:text-primary-400">
-                    <FileText className="h-4 w-4" />
+                <div className="flex items-center">
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center border-2 ${
+                    enrollment.personalInfoCompleted ? "border-green-500 bg-green-500 text-white" : "border-neutral-300 dark:border-neutral-600"
+                  }`}>
+                    {enrollment.personalInfoCompleted ? (
+                      <CheckCircle className="h-4 w-4" />
+                    ) : (
+                      <div className="h-4 w-4 rounded-full bg-neutral-300 dark:bg-neutral-600" />
+                    )}
                   </div>
                   <div className="ml-3">
-                    <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
-                      Matrícula iniciada
-                    </p>
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                      {formatDate(enrollment.createdAt)}
-                    </p>
+                    <p className="font-medium">Informações Pessoais</p>
+                    {enrollment.personalInfoCompleted && (
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                        Concluído em {formatDate(enrollment.personalInfoCompletedAt || enrollment.updatedAt)}
+                      </p>
+                    )}
                   </div>
                 </div>
                 
-                {enrollment.personalInfoCompleted && (
-                  <div className="flex items-start">
-                    <div className="h-8 w-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center dark:bg-blue-900/50 dark:text-blue-400">
-                      <User className="h-4 w-4" />
-                    </div>
-                    <div className="ml-3">
-                      <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
-                        Dados pessoais preenchidos
-                      </p>
-                      <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                        {formatDate(enrollment.updatedAt)}
-                      </p>
-                    </div>
-                  </div>
-                )}
+                <div className="h-6 border-l-2 border-dashed border-neutral-300 dark:border-neutral-600 ml-4"></div>
                 
-                {enrollment.courseInfoCompleted && (
-                  <div className="flex items-start">
-                    <div className="h-8 w-8 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center dark:bg-purple-900/50 dark:text-purple-400">
-                      <School className="h-4 w-4" />
-                    </div>
-                    <div className="ml-3">
-                      <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
-                        Curso selecionado
-                      </p>
-                      <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                        {formatDate(enrollment.updatedAt)}
-                      </p>
-                    </div>
+                <div className="flex items-center">
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center border-2 ${
+                    enrollment.courseInfoCompleted ? "border-green-500 bg-green-500 text-white" : "border-neutral-300 dark:border-neutral-600"
+                  }`}>
+                    {enrollment.courseInfoCompleted ? (
+                      <CheckCircle className="h-4 w-4" />
+                    ) : (
+                      <div className="h-4 w-4 rounded-full bg-neutral-300 dark:bg-neutral-600" />
+                    )}
                   </div>
-                )}
+                  <div className="ml-3">
+                    <p className="font-medium">Informações do Curso</p>
+                    {enrollment.courseInfoCompleted && (
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                        Concluído em {formatDate(enrollment.courseInfoCompletedAt || enrollment.updatedAt)}
+                      </p>
+                    )}
+                  </div>
+                </div>
                 
-                {enrollment.paymentCompleted && (
-                  <div className="flex items-start">
-                    <div className="h-8 w-8 rounded-full bg-green-100 text-green-600 flex items-center justify-center dark:bg-green-900/50 dark:text-green-400">
-                      <CheckCircle2 className="h-4 w-4" />
-                    </div>
-                    <div className="ml-3">
-                      <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
-                        Pagamento concluído
-                      </p>
-                      <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                        {formatDate(enrollment.updatedAt)}
-                      </p>
-                    </div>
+                <div className="h-6 border-l-2 border-dashed border-neutral-300 dark:border-neutral-600 ml-4"></div>
+                
+                <div className="flex items-center">
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center border-2 ${
+                    enrollment.paymentCompleted ? "border-green-500 bg-green-500 text-white" : "border-neutral-300 dark:border-neutral-600"
+                  }`}>
+                    {enrollment.paymentCompleted ? (
+                      <CheckCircle className="h-4 w-4" />
+                    ) : (
+                      <div className="h-4 w-4 rounded-full bg-neutral-300 dark:bg-neutral-600" />
+                    )}
                   </div>
-                )}
+                  <div className="ml-3">
+                    <p className="font-medium">Pagamento</p>
+                    {enrollment.paymentCompleted && (
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                        Concluído em {formatDate(enrollment.paymentCompletedAt || enrollment.updatedAt)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="h-6 border-l-2 border-dashed border-neutral-300 dark:border-neutral-600 ml-4"></div>
+                
+                <div className="flex items-center">
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center border-2 ${
+                    enrollment.status === "completed" ? "border-green-500 bg-green-500 text-white" : "border-neutral-300 dark:border-neutral-600"
+                  }`}>
+                    {enrollment.status === "completed" ? (
+                      <CheckCircle className="h-4 w-4" />
+                    ) : (
+                      <div className="h-4 w-4 rounded-full bg-neutral-300 dark:bg-neutral-600" />
+                    )}
+                  </div>
+                  <div className="ml-3">
+                    <p className="font-medium">Matrícula Finalizada</p>
+                    {enrollment.status === "completed" && (
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                        Concluído em {formatDate(enrollment.completedAt || enrollment.updatedAt)}
+                      </p>
+                    )}
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>
         </div>
         
-        {/* Side panel */}
-        <div className="space-y-6">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Detalhes</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <h3 className="text-sm font-medium mb-2 text-neutral-800 dark:text-neutral-300">
-                  Escola
-                </h3>
-                <div className="flex items-center p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg">
-                  {school.logo ? (
-                    <img 
-                      src={school.logo} 
-                      alt={school.name} 
-                      className="h-10 w-10 rounded-md object-cover mr-3"
-                    />
+        {/* Right column - Tabs with details */}
+        <div className="md:col-span-2">
+          <Tabs defaultValue="details">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="details">
+                <FileText className="h-4 w-4 mr-2" />
+                Detalhes
+              </TabsTrigger>
+              <TabsTrigger value="communication">
+                <MessageSquare className="h-4 w-4 mr-2" />
+                Comunicação
+              </TabsTrigger>
+              <TabsTrigger value="history">
+                <Clock className="h-4 w-4 mr-2" />
+                Histórico
+              </TabsTrigger>
+            </TabsList>
+            
+            {/* Details Tab */}
+            <TabsContent value="details" className="space-y-6">
+              {Object.keys(groupedAnswers).length > 0 ? (
+                Object.entries(groupedAnswers).map(([section, sectionAnswers]: [string, any]) => (
+                  <Card key={section}>
+                    <CardHeader className="pb-3">
+                      <CardTitle>{section === "personal_info" ? "Informações Pessoais" : 
+                                 section === "course_info" ? "Informações do Curso" :
+                                 section === "payment" ? "Informações de Pagamento" : 
+                                 "Outras Informações"}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {sectionAnswers.map((answer: any) => (
+                          <div key={answer.id} className="space-y-1">
+                            <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                              {answer.question?.text || "Pergunta"}
+                            </p>
+                            <p className="font-medium">
+                              {answer.answer || <span className="text-neutral-400">Não preenchido</span>}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <Card>
+                  <CardContent className="flex flex-col items-center justify-center p-6">
+                    <FileText className="h-10 w-10 text-neutral-400 mb-4" />
+                    <p className="text-neutral-500 dark:text-neutral-400 text-center">
+                      Nenhuma informação foi preenchida ainda nesta matrícula.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+            
+            {/* Communication Tab */}
+            <TabsContent value="communication">
+              <Card className="h-[600px] flex flex-col">
+                <CardHeader className="pb-3">
+                  <CardTitle>Comunicação</CardTitle>
+                  <CardDescription>
+                    Histórico de mensagens com o aluno
+                  </CardDescription>
+                </CardHeader>
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {chatHistory.length > 0 ? (
+                    chatHistory.map((msg) => (
+                      <div 
+                        key={msg.id} 
+                        className={`flex ${msg.role === user?.role ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div className={`max-w-[75%] px-4 py-2 rounded-lg ${
+                          msg.role === user?.role 
+                            ? 'bg-primary text-primary-foreground' 
+                            : 'bg-neutral-100 dark:bg-neutral-800'
+                        }`}>
+                          <div className="text-xs text-neutral-500 dark:text-neutral-400 mb-1">
+                            {msg.sender} • {formatDateTime(msg.createdAt)}
+                          </div>
+                          <p>{msg.message}</p>
+                        </div>
+                      </div>
+                    ))
                   ) : (
-                    <div className="h-10 w-10 rounded-md bg-primary-100 flex items-center justify-center text-primary-600 mr-3 dark:bg-primary-900/50 dark:text-primary-400">
-                      <School className="h-5 w-5" />
+                    <div className="flex flex-col items-center justify-center h-full">
+                      <MessageSquare className="h-10 w-10 text-neutral-400 mb-4" />
+                      <p className="text-neutral-500 dark:text-neutral-400 text-center">
+                        Nenhuma mensagem encontrada. Inicie uma conversa abaixo.
+                      </p>
                     </div>
                   )}
-                  <div>
-                    <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
-                      {school.name}
-                    </p>
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                      {school.city}, {school.state}
-                    </p>
+                </div>
+                <CardContent className="border-t p-4">
+                  <div className="flex space-x-2">
+                    <Textarea
+                      placeholder="Digite uma mensagem..."
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      className="resize-none"
+                    />
+                    <Button 
+                      onClick={handleSendMessage}
+                      disabled={isSending || !message.trim()}
+                      className="px-3"
+                    >
+                      {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    </Button>
                   </div>
-                </div>
-              </div>
-              
-              <Separator />
-              
-              <div>
-                <h3 className="text-sm font-medium mb-2 text-neutral-800 dark:text-neutral-300">
-                  ID da Matrícula
-                </h3>
-                <p className="p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg text-sm text-neutral-600 dark:text-neutral-400">
-                  #{enrollmentId}
-                </p>
-              </div>
-              
-              <div>
-                <h3 className="text-sm font-medium mb-2 text-neutral-800 dark:text-neutral-300">
-                  Status
-                </h3>
-                <Badge className={`${statusInfo.color} w-full justify-center p-2 h-auto text-sm font-normal`}>
-                  {statusInfo.label}
-                </Badge>
-              </div>
-              
-              <div>
-                <h3 className="text-sm font-medium mb-2 text-neutral-800 dark:text-neutral-300">
-                  Data de Criação
-                </h3>
-                <div className="p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg flex items-center text-sm text-neutral-600 dark:text-neutral-400">
-                  <Calendar className="h-4 w-4 mr-2 text-neutral-500" />
-                  {formatDate(enrollment.createdAt)}
-                </div>
-              </div>
-              
-              <div>
-                <h3 className="text-sm font-medium mb-2 text-neutral-800 dark:text-neutral-300">
-                  Última Atualização
-                </h3>
-                <div className="p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg flex items-center text-sm text-neutral-600 dark:text-neutral-400">
-                  <Calendar className="h-4 w-4 mr-2 text-neutral-500" />
-                  {formatDate(enrollment.updatedAt)}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Ações</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Button className="w-full justify-start">
-                <MessageCircle className="h-4 w-4 mr-2" />
-                Enviar Mensagem
-              </Button>
-              <Button variant="outline" className="w-full justify-start">
-                <Send className="h-4 w-4 mr-2" />
-                Enviar por WhatsApp
-              </Button>
-              <Button variant="outline" className="w-full justify-start">
-                <Mail className="h-4 w-4 mr-2" />
-                Enviar por Email
-              </Button>
-              <Button variant="outline" className="w-full justify-start">
-                <Printer className="h-4 w-4 mr-2" />
-                Imprimir Matrícula
-              </Button>
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            </TabsContent>
+            
+            {/* History Tab */}
+            <TabsContent value="history">
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle>Histórico de Eventos</CardTitle>
+                  <CardDescription>
+                    Registro completo de atividades desta matrícula
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-6">
+                    {/* Created event */}
+                    <div className="flex">
+                      <div className="flex flex-col items-center mr-4">
+                        <div className="h-10 w-10 rounded-full bg-primary text-white flex items-center justify-center">
+                          <FileText className="h-5 w-5" />
+                        </div>
+                        <div className="h-full w-0.5 bg-neutral-200 dark:bg-neutral-700 mt-2"></div>
+                      </div>
+                      <div>
+                        <p className="font-medium">
+                          Matrícula criada
+                        </p>
+                        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                          {formatDateTime(enrollment.createdAt)}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {/* Personal info completed */}
+                    {enrollment.personalInfoCompleted && (
+                      <div className="flex">
+                        <div className="flex flex-col items-center mr-4">
+                          <div className="h-10 w-10 rounded-full bg-green-500 text-white flex items-center justify-center">
+                            <CheckCircle className="h-5 w-5" />
+                          </div>
+                          <div className="h-full w-0.5 bg-neutral-200 dark:bg-neutral-700 mt-2"></div>
+                        </div>
+                        <div>
+                          <p className="font-medium">
+                            Informações pessoais completadas
+                          </p>
+                          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                            {formatDateTime(enrollment.personalInfoCompletedAt || enrollment.updatedAt)}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Course info completed */}
+                    {enrollment.courseInfoCompleted && (
+                      <div className="flex">
+                        <div className="flex flex-col items-center mr-4">
+                          <div className="h-10 w-10 rounded-full bg-green-500 text-white flex items-center justify-center">
+                            <CheckCircle className="h-5 w-5" />
+                          </div>
+                          <div className="h-full w-0.5 bg-neutral-200 dark:bg-neutral-700 mt-2"></div>
+                        </div>
+                        <div>
+                          <p className="font-medium">
+                            Informações do curso completadas
+                          </p>
+                          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                            {formatDateTime(enrollment.courseInfoCompletedAt || enrollment.updatedAt)}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Payment completed */}
+                    {enrollment.paymentCompleted && (
+                      <div className="flex">
+                        <div className="flex flex-col items-center mr-4">
+                          <div className="h-10 w-10 rounded-full bg-green-500 text-white flex items-center justify-center">
+                            <CheckCircle className="h-5 w-5" />
+                          </div>
+                          <div className="h-full w-0.5 bg-neutral-200 dark:bg-neutral-700 mt-2"></div>
+                        </div>
+                        <div>
+                          <p className="font-medium">
+                            Pagamento realizado
+                          </p>
+                          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                            {formatDateTime(enrollment.paymentCompletedAt || enrollment.updatedAt)}
+                          </p>
+                          <p className="text-sm mt-1">
+                            Método: {enrollment.paymentMethod === "credit_card" ? "Cartão de Crédito" : 
+                                    enrollment.paymentMethod === "bank_slip" ? "Boleto Bancário" : 
+                                    enrollment.paymentMethod === "pix" ? "PIX" : 
+                                    enrollment.paymentMethod || "Não informado"}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Status completed or abandoned */}
+                    {(enrollment.status === "completed" || enrollment.status === "abandoned") && (
+                      <div className="flex">
+                        <div className="flex flex-col items-center mr-4">
+                          <div className={`h-10 w-10 rounded-full ${
+                            enrollment.status === "completed" 
+                              ? "bg-green-500" 
+                              : "bg-red-500"
+                          } text-white flex items-center justify-center`}>
+                            {enrollment.status === "completed" ? (
+                              <CheckCircle className="h-5 w-5" />
+                            ) : (
+                              <XCircle className="h-5 w-5" />
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <p className="font-medium">
+                            Matrícula {enrollment.status === "completed" ? "concluída" : "abandonada"}
+                          </p>
+                          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                            {formatDateTime(enrollment.completedAt || enrollment.abandonedAt || enrollment.updatedAt)}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
     </div>
