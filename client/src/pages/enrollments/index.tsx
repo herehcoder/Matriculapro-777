@@ -286,7 +286,7 @@ export default function EnrollmentsPage() {
                     <SelectValue placeholder="Todas as escolas" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Todas</SelectItem>
+                    <SelectItem value="all">Todas</SelectItem>
                     {schools.map((school) => (
                       <SelectItem key={school.id} value={school.id.toString()}>
                         {school.name}
