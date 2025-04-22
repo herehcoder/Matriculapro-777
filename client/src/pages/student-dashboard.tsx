@@ -23,14 +23,6 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 import {
   Book,
@@ -49,7 +41,6 @@ import {
   Bookmark,
   Award,
   ArrowRight,
-  Bell,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -853,3 +844,14 @@ export default function StudentDashboard() {
     </div>
   );
 }
+
+// Componentes UI internos
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Bell } from "lucide-react";
