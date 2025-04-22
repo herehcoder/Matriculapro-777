@@ -4,9 +4,9 @@ import * as schema from "@shared/schema";
 import { createClient } from '@supabase/supabase-js';
 
 // Validate Supabase configuration
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY || !process.env.SUPABASE_DB_URL) {
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY || !process.env.DATABASE_URL) {
   throw new Error(
-    "Supabase configuration missing. SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_DB_URL must be set."
+    "Supabase configuration missing. SUPABASE_URL, SUPABASE_ANON_KEY, and DATABASE_URL must be set."
   );
 }
 
@@ -18,7 +18,7 @@ export const supabase = createClient(
 
 // Create PostgreSQL pool and Drizzle ORM instance for database operations
 export const pool = new Pool({
-  connectionString: process.env.SUPABASE_DB_URL,
+  connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
