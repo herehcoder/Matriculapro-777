@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { getCurrentUser, loginUser, logoutUser } from "./api";
+import { getCurrentUser, loginUser, logoutUser, registerUser } from "./api";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "./supabase";
 
 interface User {
   id: number;
@@ -18,14 +17,13 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string, role: string) => Promise<void>;
   logout: () => Promise<void>;
-  supabaseUser: any;
+  register: (userData: any) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [supabaseUser, setSupabaseUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [, navigate] = useLocation();
   const { toast } = useToast();
@@ -34,78 +32,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        // Check session with Supabase
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session) {
-          setSupabaseUser(session.user);
-          
-          // Also get our application user data
-          const userData = await getCurrentUser();
+        const userData = await getCurrentUser();
+        if (userData) {
           setUser(userData);
-        } else {
-          // No Supabase session, but check our app session as fallback
-          try {
-            const userData = await getCurrentUser();
-            if (userData) {
-              setUser(userData);
-            }
-          } catch (err) {
-            // Not authenticated in our app either
-            console.log("No authenticated session found");
-          }
         }
-      } catch (error) {
-        console.error("Error checking authentication:", error);
+      } catch (err) {
+        console.log("No authenticated session found");
       } finally {
         setIsLoading(false);
       }
     };
     
-    // Set up Supabase auth state change listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (session) {
-          setSupabaseUser(session.user);
-          
-          // When Supabase auth changes, sync with our application
-          try {
-            const userData = await getCurrentUser();
-            setUser(userData);
-          } catch (err) {
-            console.error("Error syncing user data:", err);
-          }
-        } else {
-          setSupabaseUser(null);
-          setUser(null);
-        }
-      }
-    );
-    
     checkAuth();
-    
-    // Cleanup subscription on unmount
-    return () => {
-      subscription.unsubscribe();
-    };
   }, []);
   
   const login = async (email: string, password: string, role: string) => {
     try {
       setIsLoading(true);
       
-      // First authenticate with Supabase
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      });
+      const response = await loginUser(email, password, role);
       
-      if (error) {
-        throw error;
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Erro ao fazer login");
       }
       
-      // Then authenticate with our session-based system
-      const response = await loginUser(email, password, role);
       const userData = await response.json();
       setUser(userData);
       
@@ -115,11 +66,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       
       navigate("/");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login error:", error);
       toast({
         title: "Erro no login",
-        description: "Email ou senha incorretos. Tente novamente.",
+        description: error.message || "Email ou senha incorretos. Tente novamente.",
+        variant: "destructive",
+      });
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  const register = async (userData: any) => {
+    try {
+      setIsLoading(true);
+      
+      const response = await registerUser(userData);
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Erro ao registrar");
+      }
+      
+      const newUser = await response.json();
+      
+      toast({
+        title: "Registro realizado com sucesso",
+        description: "Você já pode fazer login com suas credenciais.",
+      });
+      
+      navigate("/login");
+    } catch (error: any) {
+      console.error("Registration error:", error);
+      toast({
+        title: "Erro no registro",
+        description: error.message || "Erro ao registrar usuário. Tente novamente.",
         variant: "destructive",
       });
       throw error;
@@ -132,14 +115,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setIsLoading(true);
       
-      // Sign out from Supabase
-      await supabase.auth.signOut();
-      
-      // Sign out from our session system
       await logoutUser();
       
       setUser(null);
-      setSupabaseUser(null);
       
       navigate("/login");
       toast({
@@ -160,7 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   
   return React.createElement(
     AuthContext.Provider,
-    { value: { user, isLoading, login, logout, supabaseUser } },
+    { value: { user, isLoading, login, logout, register } },
     children
   );
 };

@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import { registerUser } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 
 const registerSchema = z.object({
@@ -49,32 +49,17 @@ export default function Register() {
     },
   });
 
+  const { register } = useAuth();
+  
   const onSubmit = async (values: z.infer<typeof registerSchema>) => {
     setError(null);
     setIsLoading(true);
     
     try {
-      const response = await registerUser(values);
-      
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.message || "Erro ao registrar usuário");
-      }
-      
-      toast({
-        title: "Registro realizado com sucesso",
-        description: "Você já pode fazer login com suas credenciais.",
-      });
-      
-      // Redirect to login page
-      navigate("/login");
+      await register(values);
+      // Navegação e toast são manipulados pelo hook auth
     } catch (err: any) {
       setError(err.message || "Erro ao registrar usuário. Tente novamente.");
-      toast({
-        title: "Erro no registro",
-        description: err.message || "Erro ao registrar usuário. Tente novamente.",
-        variant: "destructive",
-      });
     } finally {
       setIsLoading(false);
     }
