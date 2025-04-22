@@ -274,7 +274,7 @@ export default function SettingsPage() {
               
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
-                  <Tablet className="h-5 w-5" />
+                  <MonitorSmartphone className="h-5 w-5" />
                   <div>
                     <Label htmlFor="compact-mode">Modo compacto</Label>
                     <p className="text-sm text-muted-foreground">
