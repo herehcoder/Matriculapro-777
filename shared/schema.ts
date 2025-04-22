@@ -20,6 +20,7 @@ export const users = pgTable('users', {
   schoolId: integer('school_id').references(() => schools.id),
   phone: text('phone'),
   profileImage: text('profile_image'),
+  supabaseId: text('supabase_id'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
