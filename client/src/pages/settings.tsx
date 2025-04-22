@@ -23,7 +23,7 @@ import {
   Sun, 
   Shield, 
   Mail, 
-  Tablet, 
+  MonitorSmartphone, 
   Smartphone
 } from "lucide-react";
 
@@ -224,9 +224,9 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label htmlFor="verificacao-2fa">Verificação em duas etapas</Label>
-                    <FormDescription>
+                    <p className="text-sm text-muted-foreground">
                       Proteja sua conta com um código adicional ao fazer login.
-                    </FormDescription>
+                    </p>
                   </div>
                   <Switch id="verificacao-2fa" />
                 </div>
@@ -234,9 +234,9 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label htmlFor="sessoes-ativas">Gerenciar sessões ativas</Label>
-                    <FormDescription>
+                    <p className="text-sm text-muted-foreground">
                       Visualize e encerre sessões em outros dispositivos.
-                    </FormDescription>
+                    </p>
                   </div>
                   <Button variant="outline" size="sm">Gerenciar</Button>
                 </div>
@@ -260,9 +260,9 @@ export default function SettingsPage() {
                   {darkMode ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
                   <div>
                     <Label htmlFor="dark-mode">Tema Escuro</Label>
-                    <FormDescription>
+                    <p className="text-sm text-muted-foreground">
                       Alterna entre os temas claro e escuro.
-                    </FormDescription>
+                    </p>
                   </div>
                 </div>
                 <Switch 
@@ -277,9 +277,9 @@ export default function SettingsPage() {
                   <Tablet className="h-5 w-5" />
                   <div>
                     <Label htmlFor="compact-mode">Modo compacto</Label>
-                    <FormDescription>
+                    <p className="text-sm text-muted-foreground">
                       Reduz o espaçamento e tamanho dos elementos.
-                    </FormDescription>
+                    </p>
                   </div>
                 </div>
                 <Switch id="compact-mode" />
@@ -306,9 +306,9 @@ export default function SettingsPage() {
                   <Mail className="h-5 w-5" />
                   <div>
                     <Label htmlFor="email-notifications">Notificações por Email</Label>
-                    <FormDescription>
+                    <p className="text-sm text-muted-foreground">
                       Receba atualizações importantes por email.
-                    </FormDescription>
+                    </p>
                   </div>
                 </div>
                 <Switch 
@@ -323,9 +323,9 @@ export default function SettingsPage() {
                   <Smartphone className="h-5 w-5" />
                   <div>
                     <Label htmlFor="push-notifications">Notificações Push</Label>
-                    <FormDescription>
+                    <p className="text-sm text-muted-foreground">
                       Receba alertas diretamente no navegador.
-                    </FormDescription>
+                    </p>
                   </div>
                 </div>
                 <Switch 
@@ -340,9 +340,9 @@ export default function SettingsPage() {
                   <Mail className="h-5 w-5" />
                   <div>
                     <Label htmlFor="sms-notifications">Notificações por SMS</Label>
-                    <FormDescription>
+                    <p className="text-sm text-muted-foreground">
                       Receba alertas por mensagem de texto (SMS).
-                    </FormDescription>
+                    </p>
                   </div>
                 </div>
                 <Switch 
@@ -357,9 +357,9 @@ export default function SettingsPage() {
                   <Mail className="h-5 w-5" />
                   <div>
                     <Label htmlFor="whatsapp-notifications">Notificações por WhatsApp</Label>
-                    <FormDescription>
+                    <p className="text-sm text-muted-foreground">
                       Receba alertas por mensagem no WhatsApp.
-                    </FormDescription>
+                    </p>
                   </div>
                 </div>
                 <Switch 
