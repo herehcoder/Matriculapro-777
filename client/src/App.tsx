@@ -3,6 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
+import Register from "@/pages/register";
 import AdminDashboard from "@/pages/dashboard/admin";
 import SchoolDashboard from "@/pages/dashboard/school";
 import AttendantDashboard from "@/pages/dashboard/attendant";
@@ -35,6 +36,7 @@ function Router() {
       <Switch>
         <Route path="/" component={Login} />
         <Route path="/login" component={Login} />
+        <Route path="/register" component={Register} />
         <Route path="/enrollment/:schoolId/:enrollmentId?" component={EnrollmentPage} />
         <Route component={Login} />
       </Switch>

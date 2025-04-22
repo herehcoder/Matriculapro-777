@@ -1,0 +1,234 @@
+import React, { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { Link, useLocation } from "wouter";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Loader2 } from "lucide-react";
+import { registerUser } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
+
+const registerSchema = z.object({
+  username: z.string().min(3, "Username deve ter no mínimo 3 caracteres"),
+  email: z.string().email("Email inválido"),
+  password: z.string().min(6, "Senha deve ter no mínimo 6 caracteres"),
+  fullName: z.string().min(3, "Nome completo é obrigatório"),
+  role: z.string().min(1, "Selecione um tipo de usuário"),
+});
+
+export default function Register() {
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [, navigate] = useLocation();
+  const { toast } = useToast();
+  
+  const form = useForm<z.infer<typeof registerSchema>>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: {
+      username: "",
+      email: "",
+      password: "",
+      fullName: "",
+      role: "admin",
+    },
+  });
+
+  const onSubmit = async (values: z.infer<typeof registerSchema>) => {
+    setError(null);
+    setIsLoading(true);
+    
+    try {
+      const response = await registerUser(values);
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.message || "Erro ao registrar usuário");
+      }
+      
+      toast({
+        title: "Registro realizado com sucesso",
+        description: "Você já pode fazer login com suas credenciais.",
+      });
+      
+      // Redirect to login page
+      navigate("/login");
+    } catch (err: any) {
+      setError(err.message || "Erro ao registrar usuário. Tente novamente.");
+      toast({
+        title: "Erro no registro",
+        description: err.message || "Erro ao registrar usuário. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-primary-700 to-primary-900 p-4">
+      <div className="w-full max-w-md p-8 bg-white rounded-xl shadow-lg dark:bg-neutral-900">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-display font-bold mb-2">
+            <span className="text-primary-600 dark:text-primary-400">EduMatrik</span>
+            <span className="text-secondary-500">AI</span>
+          </h1>
+          <p className="text-neutral-500 dark:text-neutral-400">
+            Registro de novo usuário
+          </p>
+        </div>
+        
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
+            <FormField
+              control={form.control}
+              name="username"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Username</FormLabel>
+                  <FormControl>
+                    <Input 
+                      placeholder="usuario123" 
+                      type="text" 
+                      {...field} 
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            <FormField
+              control={form.control}
+              name="fullName"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Nome Completo</FormLabel>
+                  <FormControl>
+                    <Input 
+                      placeholder="Seu Nome Completo" 
+                      type="text" 
+                      {...field} 
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            <FormField
+              control={form.control}
+              name="email"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Email</FormLabel>
+                  <FormControl>
+                    <Input 
+                      placeholder="seu@email.com" 
+                      type="email" 
+                      {...field} 
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            <FormField
+              control={form.control}
+              name="password"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Senha</FormLabel>
+                  <FormControl>
+                    <Input 
+                      placeholder="••••••••" 
+                      type="password" 
+                      {...field} 
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            <FormField
+              control={form.control}
+              name="role"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Tipo de Usuário</FormLabel>
+                  <Select 
+                    onValueChange={field.onChange} 
+                    defaultValue={field.value}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione um perfil" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="admin">Administrador</SelectItem>
+                      <SelectItem value="school">Escola</SelectItem>
+                      <SelectItem value="attendant">Atendente</SelectItem>
+                      <SelectItem value="student">Aluno</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            {error && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm dark:bg-red-900/20 dark:border-red-800 dark:text-red-400">
+                {error}
+              </div>
+            )}
+            
+            <Button 
+              type="submit" 
+              className="w-full" 
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Registrando...
+                </>
+              ) : (
+                "Registrar"
+              )}
+            </Button>
+          </form>
+        </Form>
+        
+        <div className="mt-6 text-center text-sm text-neutral-500 dark:text-neutral-400">
+          <p>
+            Já possui uma conta?{" "}
+            <Link 
+              href="/login" 
+              className="text-primary-600 font-medium hover:text-primary-800 dark:text-primary-400 dark:hover:text-primary-300"
+            >
+              Faça login
+            </Link>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
