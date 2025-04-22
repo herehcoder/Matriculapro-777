@@ -1,9 +1,7 @@
 import express, { type Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import session from "express-session";
-import passport from "passport";
-import { Strategy as LocalStrategy } from "passport-local";
+import { setupAuth } from "./auth";
 import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
@@ -27,60 +25,8 @@ declare module "express-session" {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Session configuration
-  app.use(
-    session({
-      secret: process.env.SESSION_SECRET || "edumatrik-secret",
-      resave: false,
-      saveUninitialized: false,
-      cookie: { 
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-      },
-    })
-  );
-
-  // Initialize passport for authentication
-  app.use(passport.initialize());
-  app.use(passport.session());
-
-  // Passport configuration
-  passport.use(
-    new LocalStrategy(
-      { usernameField: "email" },
-      async (email, password, done) => {
-        try {
-          const user = await storage.getUserByEmail(email);
-          if (!user) {
-            return done(null, false, { message: "Usuário não encontrado" });
-          }
-          
-          // In a real app, we would hash passwords
-          if (user.password !== password) {
-            return done(null, false, { message: "Senha incorreta" });
-          }
-          
-          return done(null, user);
-        } catch (error) {
-          return done(error);
-        }
-      }
-    )
-  );
-
-  passport.serializeUser((user: any, done) => {
-    done(null, user.id);
-  });
-
-  passport.deserializeUser(async (id: number, done) => {
-    try {
-      const user = await storage.getUser(id);
-      done(null, user);
-    } catch (error) {
-      done(error, null);
-    }
-  });
+  // Setup authentication
+  await setupAuth(app);
 
   // Middleware for error handling
   const handleZodError = (
@@ -124,121 +70,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     };
   };
 
-  // Auth routes
-  // Login
-  app.post(
-    "/api/auth/login",
-    (req, res, next) => {
-      passport.authenticate("local", (err, user, info) => {
-        if (err) {
-          return next(err);
-        }
-        if (!user) {
-          return res.status(401).json(info);
-        }
-        req.logIn(user, (err) => {
-          if (err) {
-            return next(err);
-          }
-          
-          // Store user info in session
-          req.session.userId = user.id;
-          req.session.role = user.role;
-          if (user.schoolId) {
-            req.session.schoolId = user.schoolId;
-          }
-          
-          return res.json({
-            id: user.id,
-            username: user.username,
-            email: user.email,
-            fullName: user.fullName,
-            role: user.role,
-            schoolId: user.schoolId,
-          });
-        });
-      })(req, res, next);
-    }
-  );
-
-  // Get current user
-  app.get("/api/auth/me", (req, res) => {
-    if (req.isAuthenticated()) {
-      const user = req.user as any;
-      res.json({
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        fullName: user.fullName,
-        role: user.role,
-        schoolId: user.schoolId,
-      });
-    } else {
-      res.status(401).json({ message: "Unauthorized" });
-    }
-  });
-
-  // Logout
-  app.post("/api/auth/logout", (req, res, next) => {
-    req.logout((err) => {
-      if (err) {
-        return next(err);
-      }
-      req.session.destroy((err) => {
-        if (err) {
-          console.error("Error destroying session:", err);
-        }
-        res.json({ message: "Logged out successfully" });
-      });
-    });
-  });
-  
-  // Login route is already handled by passport local strategy
-  
-  // Note: Removed Supabase login route as we're only using Postgres now
-  
-  // Register new user
-  app.post("/api/auth/register", async (req, res, next) => {
-    try {
-      const userData = insertUserSchema.parse(req.body);
-      
-      // Check if user already exists
-      const existingUser = await storage.getUserByEmail(userData.email);
-      if (existingUser) {
-        return res.status(400).json({ message: "User already exists" });
-      }
-      
-      // In a real app, we would hash the password before saving
-      const newUser = await storage.createUser(userData);
-      
-      // Create student if role is student
-      if (userData.role === "student" && userData.schoolId) {
-        await storage.createStudent({
-          userId: newUser.id,
-          schoolId: userData.schoolId,
-        });
-      }
-      
-      // Create attendant if role is attendant
-      if (userData.role === "attendant" && userData.schoolId) {
-        await storage.createAttendant({
-          userId: newUser.id,
-          schoolId: userData.schoolId,
-          department: req.body.department || "General",
-        });
-      }
-      
-      res.status(201).json({
-        id: newUser.id,
-        username: newUser.username,
-        email: newUser.email,
-        fullName: newUser.fullName,
-        role: newUser.role,
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
+  // All authentication routes are now handled by setupAuth
 
   // User routes
   app.get("/api/users", isAuthenticated, hasRole(["admin"]), async (req, res) => {

@@ -161,7 +161,7 @@ export default function Login() {
           <p>
             Ainda não tem uma conta?{" "}
             <Link 
-              href="#" 
+              href="/register" 
               className="text-primary-600 font-medium hover:text-primary-800 dark:text-primary-400 dark:hover:text-primary-300"
             >
               Registre-se
