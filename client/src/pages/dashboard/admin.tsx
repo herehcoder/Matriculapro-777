@@ -26,20 +26,26 @@ export default function AdminDashboard() {
     refetchOnWindowFocus: false,
   });
   
-  // Transform data for charts
-  const funnelData = metrics ? [
-    { title: "Visitantes", value: metrics.funnel.visits.count, percentage: 100 },
-    { title: "Formulário Iniciado", value: metrics.funnel.formStarted.count, percentage: Math.round((metrics.funnel.formStarted.count / metrics.funnel.visits.count) * 100) },
-    { title: "Dados do Curso", value: metrics.funnel.courseInfo.count, percentage: Math.round((metrics.funnel.courseInfo.count / metrics.funnel.visits.count) * 100) },
-    { title: "Pagamento", value: metrics.enrollments.count, percentage: Math.round((metrics.enrollments.count / metrics.funnel.visits.count) * 100) },
-  ] : [];
+  // Transform data for charts with safeguards for missing data
+  const funnelData = metrics && metrics.funnel && metrics.funnel.visits ? [
+    { title: "Visitantes", value: metrics.funnel.visits.count || 0, percentage: 100 },
+    { title: "Formulário Iniciado", value: metrics.funnel?.formStarted?.count || 0, percentage: metrics.funnel.visits.count ? Math.round(((metrics.funnel?.formStarted?.count || 0) / metrics.funnel.visits.count) * 100) : 0 },
+    { title: "Dados do Curso", value: metrics.funnel?.courseInfo?.count || 0, percentage: metrics.funnel.visits.count ? Math.round(((metrics.funnel?.courseInfo?.count || 0) / metrics.funnel.visits.count) * 100) : 0 },
+    { title: "Pagamento", value: metrics.enrollments?.count || 0, percentage: metrics.funnel.visits.count ? Math.round(((metrics.enrollments?.count || 0) / metrics.funnel.visits.count) * 100) : 0 },
+  ] : [
+    { title: "Visitantes", value: 0, percentage: 100 },
+    { title: "Formulário Iniciado", value: 0, percentage: 0 },
+    { title: "Dados do Curso", value: 0, percentage: 0 },
+    { title: "Pagamento", value: 0, percentage: 0 },
+  ];
   
-  const pieChartData = metrics?.leadsBySource ? [
-    { name: "WhatsApp", value: metrics.leadsBySource.whatsapp, color: "hsl(33, 100%, 50%)", percentage: Math.round((metrics.leadsBySource.whatsapp / metrics.leads.count) * 100) },
-    { name: "Site", value: metrics.leadsBySource.website, color: "hsl(211, 100%, 50%)", percentage: Math.round((metrics.leadsBySource.website / metrics.leads.count) * 100) },
-    { name: "Redes Sociais", value: metrics.leadsBySource.socialMedia, color: "hsl(142, 71%, 45%)", percentage: Math.round((metrics.leadsBySource.socialMedia / metrics.leads.count) * 100) },
-    { name: "Indicações", value: metrics.leadsBySource.referral, color: "hsl(291, 64%, 42%)", percentage: Math.round((metrics.leadsBySource.referral / metrics.leads.count) * 100) },
-  ] : [];
+  // Valores padrão para o gráfico de pizza enquanto não há dados reais
+  const pieChartData = [
+    { name: "WhatsApp", value: 0, color: "hsl(33, 100%, 50%)", percentage: 0 },
+    { name: "Site", value: 0, color: "hsl(211, 100%, 50%)", percentage: 0 },
+    { name: "Redes Sociais", value: 0, color: "hsl(142, 71%, 45%)", percentage: 0 },
+    { name: "Indicações", value: 0, color: "hsl(291, 64%, 42%)", percentage: 0 },
+  ];
   
   // Transform recent schools data
   const recentSchools = recentSchoolsData ? recentSchoolsData.map((school: any) => ({
@@ -153,30 +159,30 @@ export default function AdminDashboard() {
         
         <StatsCard
           title="Novas Matrículas"
-          value={metrics?.enrollments.count || 0}
+          value={metrics?.enrollments?.count || 0}
           icon={<ClipboardCheck size={20} />}
           iconColor="text-secondary-600 dark:text-secondary-400"
           iconBgColor="bg-secondary-50 dark:bg-secondary-900/20"
-          change={metrics?.enrollments.change || 0}
+          change={metrics?.enrollments?.change || 0}
         />
         
         <StatsCard
           title="Leads Gerados"
-          value={metrics?.leads.count || 0}
+          value={metrics?.leads?.count || 0}
           icon={<Users size={20} />}
           iconColor="text-accent-600 dark:text-accent-400"
           iconBgColor="bg-accent-50 dark:bg-accent-900/20"
-          change={metrics?.leads.change || 0}
+          change={metrics?.leads?.change || 0}
         />
         
         <StatsCard
           title="Taxa de Conversão"
-          value={metrics?.conversionRate.count || 0}
+          value={metrics?.conversionRate?.count || 0}
           formatter={(value) => `${value}%`}
           icon={<TrendingUp size={20} />}
           iconColor="text-purple-600 dark:text-purple-400"
           iconBgColor="bg-purple-50 dark:bg-purple-900/20"
-          change={metrics?.conversionRate.change || 0}
+          change={metrics?.conversionRate?.change || 0}
         />
       </div>
 
@@ -195,7 +201,7 @@ export default function AdminDashboard() {
           <PieChart
             title="Leads por Origem"
             data={pieChartData}
-            total={metrics?.leads.count || 0}
+            total={metrics?.leads?.count || 0}
           />
         </div>
       </div>
