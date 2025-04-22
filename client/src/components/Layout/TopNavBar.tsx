@@ -59,8 +59,7 @@ export function TopNavBar({ onSidebarToggle }: TopNavBarProps) {
           <span className="sr-only">Toggle menu</span>
         </Button>
         
-        <Link href="/">
-          <a className="flex items-center ml-2 lg:ml-0">
+        <Link href="/" className="flex items-center ml-2 lg:ml-0">
             <div className="h-9 w-9 bg-primary-100 text-primary-600 rounded-lg flex items-center justify-center font-bold text-lg dark:bg-primary-900 dark:text-primary-300">
               EM
             </div>
@@ -68,7 +67,6 @@ export function TopNavBar({ onSidebarToggle }: TopNavBarProps) {
               <span className="text-primary-600 dark:text-primary-400">EduMatrik</span>
               <span className="text-secondary-500">AI</span>
             </h1>
-          </a>
         </Link>
       </div>
       
@@ -126,19 +124,15 @@ export function TopNavBar({ onSidebarToggle }: TopNavBarProps) {
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
-                <Link href="/account">
-                  <a className="flex cursor-pointer items-center">
+                <Link href="/account" className="flex cursor-pointer items-center">
                     <User className="mr-2 h-4 w-4" />
                     <span>Minha Conta</span>
-                  </a>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <Link href="/settings">
-                  <a className="flex cursor-pointer items-center">
+                <Link href="/settings" className="flex cursor-pointer items-center">
                     <Settings className="mr-2 h-4 w-4" />
                     <span>Configurações</span>
-                  </a>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
