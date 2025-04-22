@@ -133,6 +133,13 @@ export async function setupAuth(app: Express) {
       if (existingUsername) {
         return res.status(400).json({ message: "Username já está em uso" });
       }
+      
+      // Não permitir criação de usuário com role "admin"
+      if (req.body.role === "admin") {
+        return res.status(403).json({ 
+          message: "Não é permitido criar usuários com perfil de administrador" 
+        });
+      }
 
       // Hash the password before storing
       const hashedPassword = await hashPassword(req.body.password);
