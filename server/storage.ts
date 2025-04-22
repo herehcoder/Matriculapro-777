@@ -1209,7 +1209,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAnswersByEnrollment(enrollmentId: number): Promise<Answer[]> {
-    return db.select().from(answers).where(eq(answers.enrollmentId, enrollmentId));
+    return await db.select().from(answers).where(eq(answers.enrollmentId, enrollmentId));
   }
 
   async createAnswer(answer: InsertAnswer): Promise<Answer> {
@@ -1243,7 +1243,7 @@ export class DatabaseStorage implements IStorage {
       query = query.where(eq(chatHistory.leadId, leadId));
     }
     
-    return query.orderBy(asc(chatHistory.timestamp));
+    return await query.orderBy(asc(chatHistory.createdAt));
   }
 
   async createChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
@@ -1261,14 +1261,14 @@ export class DatabaseStorage implements IStorage {
     let query = db.select().from(enrollments).where(eq(enrollments.schoolId, schoolId));
     
     if (status) {
-      query = query.where(eq(enrollments.status, status));
+      query = query.where(eq(enrollments.status, status as any));
     }
     
-    return query;
+    return await query;
   }
 
   async getEnrollmentsByStudent(studentId: number): Promise<Enrollment[]> {
-    return db.select().from(enrollments).where(eq(enrollments.studentId, studentId));
+    return await db.select().from(enrollments).where(eq(enrollments.studentId, studentId));
   }
 
   async createEnrollment(enrollment: InsertEnrollment): Promise<Enrollment> {
@@ -1292,7 +1292,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getWhatsappMessagesBySchool(schoolId: number): Promise<WhatsappMessage[]> {
-    return db.select().from(whatsappMessages).where(eq(whatsappMessages.schoolId, schoolId));
+    return await db.select().from(whatsappMessages).where(eq(whatsappMessages.schoolId, schoolId));
   }
 
   async createWhatsappMessage(message: InsertWhatsappMessage): Promise<WhatsappMessage> {
@@ -1313,7 +1313,7 @@ export class DatabaseStorage implements IStorage {
       query = query.where(eq(metrics.metricType, metricType));
     }
     
-    return query.orderBy(desc(metrics.date));
+    return await query.orderBy(desc(metrics.date));
   }
 
   async createMetric(metric: InsertMetric): Promise<Metric> {
