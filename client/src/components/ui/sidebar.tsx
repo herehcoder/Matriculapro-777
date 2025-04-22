@@ -149,7 +149,15 @@ export function Sidebar({ className, isOpen, onClose, ...props }: SidebarProps) 
           {/* Quick actions */}
           {(role === "admin" || role === "school") && (
             <div className="mt-8 px-3">
-              <Button className="w-full justify-center" size="sm">
+              <Button 
+                className="w-full justify-center" 
+                size="sm"
+                onClick={() => {
+                  const path = role === "admin" ? "/schools/new" : "/courses/new";
+                  window.location.href = path;
+                  if (onClose) onClose();
+                }}
+              >
                 <PlusCircle className="mr-2 h-4 w-4" />
                 {role === "admin" ? "Nova Escola" : "Novo Curso"}
               </Button>

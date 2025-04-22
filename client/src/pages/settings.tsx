@@ -1,0 +1,382 @@
+import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { useAuth } from "@/lib/auth";
+import { updatePassword } from "@/lib/api";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { useToast } from "@/hooks/use-toast";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { 
+  Loader2, 
+  Settings, 
+  Lock, 
+  BellRing, 
+  Moon, 
+  Sun, 
+  Shield, 
+  Mail, 
+  Tablet, 
+  Smartphone
+} from "lucide-react";
+
+// Schema para formulário de alteração de senha
+const passwordFormSchema = z.object({
+  currentPassword: z.string().min(6, { message: "Senha atual é obrigatória" }),
+  newPassword: z.string().min(6, { message: "Nova senha deve ter pelo menos 6 caracteres" }),
+  confirmPassword: z.string().min(6, { message: "Confirmação de senha é obrigatória" }),
+}).refine((data) => data.newPassword === data.confirmPassword, {
+  message: "As senhas não coincidem",
+  path: ["confirmPassword"],
+});
+
+type PasswordFormValues = z.infer<typeof passwordFormSchema>;
+
+export default function SettingsPage() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [isUpdating, setIsUpdating] = useState(false);
+  
+  // Estado para as configurações de notificação (simulação)
+  const [notificationSettings, setNotificationSettings] = useState({
+    email: true,
+    push: false,
+    sms: true,
+    whatsapp: true,
+  });
+  
+  // Estado para o tema (simulação)
+  const [darkMode, setDarkMode] = useState(false);
+
+  // Form para alteração de senha
+  const form = useForm<PasswordFormValues>({
+    resolver: zodResolver(passwordFormSchema),
+    defaultValues: {
+      currentPassword: "",
+      newPassword: "",
+      confirmPassword: "",
+    },
+  });
+
+  // Mutação para alterar senha
+  const updatePasswordMutation = useMutation({
+    mutationFn: (data: PasswordFormValues) => {
+      if (!user) throw new Error("Usuário não autenticado");
+      return updatePassword(user.id, {
+        currentPassword: data.currentPassword,
+        newPassword: data.newPassword,
+      });
+    },
+    onSuccess: () => {
+      toast({
+        title: "Senha alterada",
+        description: "Sua senha foi alterada com sucesso.",
+      });
+      form.reset();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro ao alterar senha",
+        description: error.message || "Ocorreu um erro ao alterar sua senha. Tente novamente.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Handler para alterar senha
+  const onSubmit = async (data: PasswordFormValues) => {
+    setIsUpdating(true);
+    try {
+      await updatePasswordMutation.mutateAsync(data);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  // Handler para notificações (simulação)
+  const handleNotificationChange = (key: string, value: boolean) => {
+    setNotificationSettings(prev => ({
+      ...prev,
+      [key]: value,
+    }));
+    
+    toast({
+      title: "Configurações atualizadas",
+      description: "Suas preferências de notificação foram salvas.",
+    });
+  };
+
+  // Handler para alteração de tema (simulação)
+  const handleThemeChange = (value: boolean) => {
+    setDarkMode(value);
+    
+    toast({
+      title: "Tema alterado",
+      description: `Tema ${value ? "escuro" : "claro"} ativado.`,
+    });
+  };
+
+  return (
+    <div className="container mx-auto py-6">
+      <div className="flex items-center mb-8">
+        <Settings className="h-6 w-6 mr-2" />
+        <h1 className="text-2xl font-bold">Configurações</h1>
+      </div>
+
+      <Tabs defaultValue="account" className="space-y-6">
+        <TabsList className="grid w-full md:w-auto grid-cols-3 md:inline-flex">
+          <TabsTrigger value="account">Conta</TabsTrigger>
+          <TabsTrigger value="appearance">Aparência</TabsTrigger>
+          <TabsTrigger value="notifications">Notificações</TabsTrigger>
+        </TabsList>
+
+        {/* Tab de Conta */}
+        <TabsContent value="account" className="space-y-6">
+          {/* Alterar Senha */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Lock className="h-5 w-5 mr-2" />
+                Segurança
+              </CardTitle>
+              <CardDescription>
+                Altere sua senha para manter sua conta segura.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Form {...form}>
+                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                  <FormField
+                    control={form.control}
+                    name="currentPassword"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Senha Atual</FormLabel>
+                        <FormControl>
+                          <Input type="password" placeholder="Digite sua senha atual" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="newPassword"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Nova Senha</FormLabel>
+                          <FormControl>
+                            <Input type="password" placeholder="Digite a nova senha" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="confirmPassword"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Confirmar Nova Senha</FormLabel>
+                          <FormControl>
+                            <Input type="password" placeholder="Confirme a nova senha" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <div className="flex justify-end">
+                    <Button type="submit" disabled={isUpdating}>
+                      {isUpdating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Alterar Senha
+                    </Button>
+                  </div>
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
+
+          {/* Configurações de Segurança */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Shield className="h-5 w-5 mr-2" />
+                Configurações Avançadas
+              </CardTitle>
+              <CardDescription>
+                Configurações adicionais de segurança e privacidade.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="verificacao-2fa">Verificação em duas etapas</Label>
+                    <FormDescription>
+                      Proteja sua conta com um código adicional ao fazer login.
+                    </FormDescription>
+                  </div>
+                  <Switch id="verificacao-2fa" />
+                </div>
+                
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="sessoes-ativas">Gerenciar sessões ativas</Label>
+                    <FormDescription>
+                      Visualize e encerre sessões em outros dispositivos.
+                    </FormDescription>
+                  </div>
+                  <Button variant="outline" size="sm">Gerenciar</Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Tab de Aparência */}
+        <TabsContent value="appearance" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Aparência</CardTitle>
+              <CardDescription>
+                Personalize a aparência da interface do sistema.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  {darkMode ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+                  <div>
+                    <Label htmlFor="dark-mode">Tema Escuro</Label>
+                    <FormDescription>
+                      Alterna entre os temas claro e escuro.
+                    </FormDescription>
+                  </div>
+                </div>
+                <Switch 
+                  id="dark-mode" 
+                  checked={darkMode} 
+                  onCheckedChange={handleThemeChange} 
+                />
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <Tablet className="h-5 w-5" />
+                  <div>
+                    <Label htmlFor="compact-mode">Modo compacto</Label>
+                    <FormDescription>
+                      Reduz o espaçamento e tamanho dos elementos.
+                    </FormDescription>
+                  </div>
+                </div>
+                <Switch id="compact-mode" />
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Tab de Notificações */}
+        <TabsContent value="notifications" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <BellRing className="h-5 w-5 mr-2" />
+                Preferências de Notificação
+              </CardTitle>
+              <CardDescription>
+                Escolha como deseja receber notificações do sistema.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <Mail className="h-5 w-5" />
+                  <div>
+                    <Label htmlFor="email-notifications">Notificações por Email</Label>
+                    <FormDescription>
+                      Receba atualizações importantes por email.
+                    </FormDescription>
+                  </div>
+                </div>
+                <Switch 
+                  id="email-notifications"
+                  checked={notificationSettings.email}
+                  onCheckedChange={(value) => handleNotificationChange('email', value)}
+                />
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <Smartphone className="h-5 w-5" />
+                  <div>
+                    <Label htmlFor="push-notifications">Notificações Push</Label>
+                    <FormDescription>
+                      Receba alertas diretamente no navegador.
+                    </FormDescription>
+                  </div>
+                </div>
+                <Switch 
+                  id="push-notifications"
+                  checked={notificationSettings.push}
+                  onCheckedChange={(value) => handleNotificationChange('push', value)}
+                />
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <Mail className="h-5 w-5" />
+                  <div>
+                    <Label htmlFor="sms-notifications">Notificações por SMS</Label>
+                    <FormDescription>
+                      Receba alertas por mensagem de texto (SMS).
+                    </FormDescription>
+                  </div>
+                </div>
+                <Switch 
+                  id="sms-notifications"
+                  checked={notificationSettings.sms}
+                  onCheckedChange={(value) => handleNotificationChange('sms', value)}
+                />
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <Mail className="h-5 w-5" />
+                  <div>
+                    <Label htmlFor="whatsapp-notifications">Notificações por WhatsApp</Label>
+                    <FormDescription>
+                      Receba alertas por mensagem no WhatsApp.
+                    </FormDescription>
+                  </div>
+                </div>
+                <Switch 
+                  id="whatsapp-notifications"
+                  checked={notificationSettings.whatsapp}
+                  onCheckedChange={(value) => handleNotificationChange('whatsapp', value)}
+                />
+              </div>
+            </CardContent>
+            <CardFooter className="border-t px-6 py-4 bg-neutral-50">
+              <p className="text-xs text-neutral-500">
+                Algumas notificações são obrigatórias e não podem ser desativadas.
+              </p>
+            </CardFooter>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}

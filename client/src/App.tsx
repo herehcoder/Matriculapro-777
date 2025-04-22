@@ -18,6 +18,10 @@ import EnrollmentsPage from "@/pages/enrollments/index";
 import EnrollmentViewPage from "@/pages/enrollments/view";
 import NewEnrollmentPage from "@/pages/enrollments/new";
 import FormQuestionsPage from "@/pages/form-questions/index";
+import CoursesPage from "@/pages/courses/index";
+import NewCoursePage from "@/pages/courses/new";
+import AccountPage from "@/pages/account";
+import SettingsPage from "@/pages/settings";
 import { useAuth, AuthProvider } from "./lib/auth";
 import MainLayout from "./components/Layout/MainLayout";
 import { Loader2 } from "lucide-react";
@@ -86,6 +90,10 @@ function Router() {
         <Route path="/schools/new" component={NewSchoolPage} />
         <Route path="/leads" component={LeadsPage} />
         <Route path="/onboarding" component={OnboardingPage} />
+        <Route path="/courses" component={require("./pages/courses").default} />
+        <Route path="/courses/new" component={require("./pages/courses/new").default} />
+        <Route path="/account" component={AccountPage} />
+        <Route path="/settings" component={SettingsPage} />
         
         {/* Fallback to 404 */}
         <Route component={NotFound} />

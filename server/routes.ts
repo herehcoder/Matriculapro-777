@@ -79,11 +79,101 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/users/:id", isAuthenticated, async (req, res) => {
-    const user = await storage.getUser(parseInt(req.params.id));
+    const userId = parseInt(req.params.id);
+    const user = await storage.getUser(userId);
+    
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    res.json(user);
+    
+    // Only allow users to access their own profile, unless they're an admin
+    const currentUser = req.user as any;
+    if (currentUser.id !== userId && currentUser.role !== "admin") {
+      return res.status(403).json({ message: "Forbidden - You can only access your own profile" });
+    }
+    
+    // Don't return the password
+    const { password, ...userWithoutPassword } = user;
+    res.json(userWithoutPassword);
+  });
+  
+  app.put("/api/users/:id", isAuthenticated, async (req, res, next) => {
+    try {
+      const userId = parseInt(req.params.id);
+      
+      // Only allow users to update their own profile, unless they're an admin
+      const currentUser = req.user as any;
+      if (currentUser.id !== userId && currentUser.role !== "admin") {
+        return res.status(403).json({ message: "Forbidden - You can only update your own profile" });
+      }
+      
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      // Don't allow changing role or schoolId unless admin
+      const updateData = { ...req.body };
+      if (currentUser.role !== "admin") {
+        delete updateData.role;
+        delete updateData.schoolId;
+      }
+      
+      // Don't allow changing password through this endpoint
+      delete updateData.password;
+      
+      const updatedUser = await storage.updateUser(userId, updateData);
+      
+      // Don't return the password
+      const { password, ...userWithoutPassword } = updatedUser!;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      next(error);
+    }
+  });
+  
+  app.put("/api/users/:id/password", isAuthenticated, async (req, res, next) => {
+    try {
+      const userId = parseInt(req.params.id);
+      
+      // Only allow users to update their own password, unless they're an admin
+      const currentUser = req.user as any;
+      if (currentUser.id !== userId && currentUser.role !== "admin") {
+        return res.status(403).json({ message: "Forbidden - You can only update your own password" });
+      }
+      
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      const { currentPassword, newPassword } = req.body;
+      
+      // Regular users need to provide current password
+      if (currentUser.id === userId && currentUser.role !== "admin") {
+        // Import the comparePasswords function
+        const { comparePasswords } = await import("./auth");
+        
+        // Verify current password
+        const isMatch = await comparePasswords(currentPassword, user.password);
+        if (!isMatch) {
+          return res.status(400).json({ message: "Current password is incorrect" });
+        }
+      }
+      
+      // Import the hashPassword function
+      const { hashPassword } = await import("./auth");
+      
+      // Hash the new password
+      const hashedPassword = await hashPassword(newPassword);
+      
+      // Update the password
+      const updatedUser = await storage.updateUser(userId, { password: hashedPassword });
+      
+      res.json({ message: "Password updated successfully" });
+    } catch (error) {
+      next(error);
+    }
   });
 
   // School routes
