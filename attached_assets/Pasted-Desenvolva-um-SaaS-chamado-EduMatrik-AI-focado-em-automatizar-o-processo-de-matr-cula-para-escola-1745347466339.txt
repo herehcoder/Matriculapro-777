@@ -1,0 +1,73 @@
+Desenvolva um SaaS chamado "EduMatrik AI", focado em automatizar o processo de matrícula para escolas, cursos livres e instituições educacionais, utilizando inteligência artificial. O sistema deve incluir:
+
+### *Funcionalidades Gerais*
+- *Quatro níveis de acesso*: Administrador, Escola, Atendente e Aluno, cada um com permissões específicas.
+- *Funil de matrícula* em 3 etapas (dados pessoais, dados do curso, pagamento) com validação automática.
+- *Integração com WhatsApp* via webhook para comunicação automatizada.
+- *Painel de estatísticas* em tempo real com métricas de desempenho.
+
+### *Estrutura do Banco de Dados*
+Crie um schema de banco de dados completo com as seguintes tabelas:
+- *Usuários*: com papéis (Admin, Escola, Atendente, Aluno).
+- *Escolas*: informações das instituições cadastradas.
+- *Atendentes*: vinculados a uma escola.
+- *Alunos*: dados dos estudantes.
+- *Leads*: registros de potenciais alunos.
+- *Perguntas e Respostas*: para formulários dinâmicos.
+- *Histórico de Conversas*: interações no chatbot.
+- *Funil de Matrícula*: com etapas (dados pessoais, dados do curso, pagamento).
+- *Métricas e Estatísticas*: visitas, conversão, origem do lead.
+- *Mensagens WhatsApp*: histórico de interações.
+
+Inclua chaves estrangeiras, tipos de dados apropriados, restrições (constraints) e timestamps para rastreamento.
+
+### *Telas do Sistema*
+Desenvolva telas funcionais e interativas para:
+1. *Login*: com seleção de papel (Admin, Escola, Atendente, Aluno).
+2. *Dashboard do Admin*: com gráficos de escolas cadastradas, leads e taxas de conversão.
+3. *Dashboard da Escola*: exibindo número de matrículas, leads ativos e status do funil.
+4. *Formulário de Matrícula*: em 3 etapas com transições suaves.
+5. *Chatbot*: interface para interação dinâmica com o aluno.
+6. *Tela do Atendente*: com histórico de conversas, leads e status do funil.
+7. *Configurações da Escola*: personalização do funil e integração com WhatsApp.
+8. *Tela do Aluno*: status da matrícula, formulário salvo e mensagens.
+
+### *Funcionalidades Específicas*
+Implemente a lógica para:
+- *Cadastro de escolas* e associação com atendentes.
+- *Funil de matrícula* com salvamento automático por etapa.
+- *Chatbot dinâmico* baseado em perguntas cadastradas.
+- *Rastreamento de origem do lead* (ex.: utm_source, utm_campaign).
+- *Dashboard de métricas* com estatísticas reais (conversão, abandono, acessos).
+- *Mensagens automáticas* via webhook (simulando integração com WhatsApp).
+- *Gerenciamento de perguntas e respostas* do formulário (criação, edição, exclusão).
+- *Autenticação e gerenciamento de sessão* por nível de acesso.
+
+### *Fluxo de Onboarding*
+Crie um processo de integração para novas escolas:
+- No cadastro, a escola informa nome, logo, curso principal e objetivos.
+- O sistema gera automaticamente um funil de matrícula personalizado.
+- Desenvolva uma página de boas-vindas com vídeo explicativo, botão para iniciar e um assistente de configuração inicial.
+
+### *API do Sistema*
+Crie uma API RESTful com autenticação segura e os seguintes endpoints:
+- Autenticação: login e registro.
+- Escolas: criar, listar, atualizar, excluir.
+- Leads: gerenciar leads.
+- Alunos: gerenciar estudantes.
+- Funil de matrícula: endpoints para cada etapa (dados pessoais, dados do curso, pagamento).
+- Chatbot: gerenciar sessões de conversa.
+- WhatsApp: webhook para mensagens.
+- Dashboard: métricas e estatísticas.
+
+Inclua validações robustas e proteção com middlewares.
+
+### *Dashboard de Métricas*
+Desenvolva um painel visual com gráficos interativos exibindo:
+- Leads por origem.
+- Taxa de conversão por etapa do funil.
+- Matriculados vs. abandonos.
+- Visualizações do funil por hora/dia.
+- ROI estimado com base nas conversões.
+
+A solução deve ser funcional, intuitiva e pronta para uso em cenários reais, com foco em usabilidade e automação.
