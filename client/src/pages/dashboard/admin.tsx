@@ -43,6 +43,7 @@ import { Input } from "@/components/ui/input";
 import {
   School,
   Users,
+  Users2,
   Book,
   Building,
   BarChart,
@@ -60,6 +61,7 @@ import {
   Edit,
   Trash2,
   Eye,
+  GraduationCap,
 } from "lucide-react";
 import { Link } from "wouter";
 
