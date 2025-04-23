@@ -6,6 +6,7 @@ import fs from "fs";
 import { db } from "./db";
 import { documents, enrollments } from "../shared/schema";
 import { eq } from "drizzle-orm";
+import { recognizeText, assessImageQuality, compareUserDataWithExtracted } from "./utils/ocr";
 
 // Set up multer for handling file uploads
 const storage = multer.diskStorage({
@@ -57,6 +58,162 @@ const upload = multer({
 });
 
 export function registerDocumentRoutes(app: Express) {
+  // Rota para análise OCR de documentos
+  app.post('/api/documents/analyze', async (req: Request, res: Response) => {
+    try {
+      const { documentId, documentType } = req.body;
+      
+      if (!documentId) {
+        return res.status(400).json({
+          success: false,
+          error: 'ID do documento é obrigatório'
+        });
+      }
+      
+      // Busca o documento no banco de dados
+      const document = await db.select().from(documents)
+        .where(eq(documents.id, parseInt(documentId)))
+        .limit(1)
+        .then(rows => rows[0]);
+      
+      if (!document) {
+        return res.status(404).json({
+          success: false,
+          error: 'Documento não encontrado'
+        });
+      }
+      
+      // Verifica se o arquivo existe e é uma imagem
+      if (!document.filePath || !fs.existsSync(document.filePath)) {
+        return res.status(404).json({
+          success: false,
+          error: 'Arquivo do documento não encontrado'
+        });
+      }
+      
+      // Verifica se o tipo de arquivo é uma imagem
+      const isImage = document.fileType?.startsWith('image/');
+      if (!isImage) {
+        return res.status(400).json({
+          success: false,
+          error: 'OCR só pode ser realizado em imagens'
+        });
+      }
+      
+      // Avalia a qualidade da imagem para OCR
+      const imageQuality = await assessImageQuality(document.filePath);
+      
+      // Executa OCR com base no tipo de documento
+      const ocrResult = await recognizeText(document.filePath, {
+        documentType: documentType || 'generic',
+        language: 'por'
+      });
+      
+      // Atualiza o documento com os dados extraídos
+      const [updatedDocument] = await db
+        .update(documents)
+        .set({
+          ocrData: JSON.stringify(ocrResult),
+          ocrQuality: ocrResult.confidence,
+          status: ocrResult.confidence > 50 ? 'verified' : 'needs_review',
+          updatedAt: new Date()
+        })
+        .where(eq(documents.id, document.id))
+        .returning();
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Análise OCR realizada com sucesso',
+        ocrResult,
+        imageQuality,
+        document: updatedDocument
+      });
+    } catch (error) {
+      console.error('Erro ao analisar documento com OCR:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Erro ao processar a análise OCR'
+      });
+    }
+  });
+  
+  // Rota para verificar dados de documento com dados do formulário
+  app.post('/api/documents/verify', async (req: Request, res: Response) => {
+    try {
+      const { documentId, userData } = req.body;
+      
+      if (!documentId || !userData) {
+        return res.status(400).json({
+          success: false,
+          error: 'ID do documento e dados do usuário são obrigatórios'
+        });
+      }
+      
+      // Busca o documento no banco de dados
+      const document = await db.select().from(documents)
+        .where(eq(documents.id, parseInt(documentId)))
+        .limit(1)
+        .then(rows => rows[0]);
+      
+      if (!document) {
+        return res.status(404).json({
+          success: false,
+          error: 'Documento não encontrado'
+        });
+      }
+      
+      if (!document.ocrData) {
+        return res.status(400).json({
+          success: false,
+          error: 'Este documento não possui dados de OCR para verificação'
+        });
+      }
+      
+      // Extrai os dados do OCR
+      const ocrData = JSON.parse(document.ocrData);
+      
+      // Compara os dados extraídos com os dados fornecidos pelo usuário
+      const comparisonResult = compareUserDataWithExtracted(
+        ocrData.extractedData || {},
+        userData
+      );
+      
+      // Atualiza o status do documento com base no resultado da comparação
+      let newStatus = 'needs_review';
+      if (comparisonResult.similarityIndex >= 90) {
+        newStatus = 'verified';
+      } else if (comparisonResult.similarityIndex >= 70) {
+        newStatus = 'partial_match';
+      } else {
+        newStatus = 'mismatch';
+      }
+      
+      // Atualiza o documento com o resultado da verificação
+      const [updatedDocument] = await db
+        .update(documents)
+        .set({
+          verificationResult: JSON.stringify(comparisonResult),
+          status: newStatus,
+          updatedAt: new Date()
+        })
+        .where(eq(documents.id, document.id))
+        .returning();
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Verificação de dados realizada com sucesso',
+        comparisonResult,
+        status: newStatus,
+        document: updatedDocument
+      });
+    } catch (error) {
+      console.error('Erro ao verificar dados do documento:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Erro ao processar a verificação de dados'
+      });
+    }
+  });
   // Route for document uploads
   app.post('/api/documents/upload', upload.single('file'), async (req: Request, res: Response) => {
     try {
