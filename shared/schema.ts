@@ -387,3 +387,34 @@ export type InsertDocument = z.infer<typeof insertDocumentSchema>;
 
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type InsertPasswordResetToken = z.infer<typeof insertPasswordResetTokenSchema>;
+
+// User settings table
+export const userSettings = pgTable('user_settings', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id).unique(),
+  notifications: json('notifications').notNull().default({
+    email: true,
+    push: false,
+    sms: true,
+    whatsapp: true,
+  }),
+  appearance: json('appearance').notNull().default({
+    darkMode: false,
+    compactMode: false,
+  }),
+  security: json('security').notNull().default({
+    twoFactorEnabled: false,
+  }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Schema for inserting user settings
+export const insertUserSettingsSchema = createInsertSchema(userSettings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true
+});
+
+export type UserSettings = typeof userSettings.$inferSelect;
+export type InsertUserSettings = z.infer<typeof insertUserSettingsSchema>;

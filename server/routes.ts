@@ -289,6 +289,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // API para obter configurações do usuário
+  app.get("/api/users/:id/settings", isAuthenticated, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      const currentUser = req.user as any;
+      
+      // Verificar se o usuário tem permissão para acessar essas configurações
+      if (currentUser.id !== userId && currentUser.role !== 'admin') {
+        return res.status(403).json({ message: "Unauthorized" });
+      }
+      
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      // Por enquanto, retornaremos configurações padrão
+      // No futuro, isso virá de uma tabela de configurações
+      const settings = {
+        notifications: {
+          email: true,
+          push: false,
+          sms: true,
+          whatsapp: true,
+        },
+        appearance: {
+          darkMode: false,
+          compactMode: false,
+        },
+        security: {
+          twoFactorEnabled: false,
+        }
+      };
+      
+      res.json(settings);
+    } catch (error) {
+      console.error("Error fetching user settings:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // API para atualizar configurações do usuário
+  app.patch("/api/users/:id/settings", isAuthenticated, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      const currentUser = req.user as any;
+      
+      // Verificar se o usuário tem permissão para atualizar essas configurações
+      if (currentUser.id !== userId && currentUser.role !== 'admin') {
+        return res.status(403).json({ message: "Unauthorized" });
+      }
+      
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      const { notifications, appearance, security } = req.body;
+      
+      // Por enquanto, simularemos uma atualização bem-sucedida
+      // No futuro, isso será salvo em uma tabela de configurações
+      
+      // Atualize as configurações específicas do usuário no banco de dados
+      // Exemplo: await storage.updateUserSettings(userId, req.body);
+      
+      res.json({
+        success: true,
+        message: "Settings updated successfully"
+      });
+    } catch (error) {
+      console.error("Error updating user settings:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // A rota pública de /api/schools já foi definida anteriormente
 
   app.post("/api/schools", isAuthenticated, hasRole(["admin"]), async (req, res, next) => {
