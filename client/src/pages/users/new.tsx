@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { useLocation } from "wouter";
+import { useAuth } from "../../lib/auth";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { useAuth } from "@/lib/auth";
-import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
-import { useLocation } from "wouter";
-
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Form,
   FormControl,
@@ -32,306 +33,285 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
 import { ArrowLeft, Loader2 } from "lucide-react";
 
 // Schema para validação do formulário
-const userFormSchema = z.object({
-  fullName: z.string().min(1, "Nome completo é obrigatório"),
-  email: z.string().email("Email inválido").min(1, "Email é obrigatório"),
-  username: z.string().min(3, "Nome de usuário deve ter no mínimo 3 caracteres"),
-  password: z.string().min(6, "Senha deve ter no mínimo 6 caracteres"),
-  confirmPassword: z.string().min(6, "Confirmação de senha é obrigatória"),
-  role: z.enum(["admin", "school", "attendant", "student"], {
-    required_error: "Papel do usuário é obrigatório",
+const userSchema = z.object({
+  username: z.string().min(3, {
+    message: "O nome de usuário deve ter pelo menos 3 caracteres",
   }),
-  schoolId: z.number().optional(),
+  email: z.string().email({
+    message: "Informe um endereço de e-mail válido",
+  }),
+  password: z.string().min(6, {
+    message: "A senha deve ter pelo menos 6 caracteres",
+  }),
+  fullName: z.string().min(3, {
+    message: "O nome completo deve ter pelo menos 3 caracteres",
+  }),
+  role: z.enum(["admin", "school", "attendant", "student"], {
+    required_error: "Selecione um papel",
+  }),
   phone: z.string().optional(),
-  active: z.boolean().default(true),
-}).refine((data) => data.password === data.confirmPassword, {
-  message: "As senhas não coincidem",
-  path: ["confirmPassword"],
+  schoolId: z.number().optional(),
 });
 
-type UserFormValues = z.infer<typeof userFormSchema>;
+type UserFormValues = z.infer<typeof userSchema>;
 
-export default function NewUserPage() {
-  const [, navigate] = useLocation();
+export default function NewUser() {
   const { user } = useAuth();
+  const [, navigate] = useLocation();
   const { toast } = useToast();
-  const [isLoading, setIsLoading] = useState(false);
 
-  // Consulta as escolas disponíveis
+  // Configuração do formulário com React Hook Form e Zod
+  const form = useForm<UserFormValues>({
+    resolver: zodResolver(userSchema),
+    defaultValues: {
+      username: "",
+      email: "",
+      password: "",
+      fullName: "",
+      role: "student", // Default para o papel mais comum
+      phone: "",
+      schoolId: undefined,
+    },
+  });
+
+  // Query para escolas (caso seja necessário associar um usuário a uma escola)
   const { data: schools } = useQuery({
     queryKey: ["/api/schools"],
-    queryFn: async () => {
-      const res = await apiRequest("GET", "/api/schools");
-      return res;
-    },
+    enabled: !!user && (user.role === "admin" || user.role === "school"),
   });
 
-  // Form com validação
-  const form = useForm<UserFormValues>({
-    resolver: zodResolver(userFormSchema),
-    defaultValues: {
-      fullName: "",
-      email: "",
-      username: "",
-      password: "",
-      confirmPassword: "",
-      role: "student",
-      phone: "",
-      active: true,
-    },
-  });
-
-  // Função para lidar com a mudança de papel do usuário
-  const watchRole = form.watch("role");
-
-  // Mutação para criar usuário
+  // Mutação para criar um novo usuário
   const createUserMutation = useMutation({
     mutationFn: async (userData: UserFormValues) => {
-      // Remove a confirmação de senha antes de enviar para a API
-      const { confirmPassword, ...dataToSend } = userData;
-      return await apiRequest("POST", "/api/users", dataToSend);
+      return await apiRequest("POST", "/api/users", userData);
     },
     onSuccess: () => {
       toast({
         title: "Usuário criado",
         description: "O usuário foi criado com sucesso.",
-        variant: "default",
       });
-      navigate("/users/list");
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      navigate("/users");
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       toast({
         title: "Erro ao criar usuário",
-        description: error.message || "Ocorreu um erro ao criar o usuário. Tente novamente.",
+        description: error.message,
         variant: "destructive",
       });
     },
   });
 
-  // Manipulador de envio do formulário
+  // Função para lidar com o envio do formulário
   const onSubmit = (data: UserFormValues) => {
-    setIsLoading(true);
-    
-    // Se o papel do usuário não for vinculado a uma escola, remova o schoolId
-    if (data.role !== "attendant" && data.role !== "student") {
-      data.schoolId = undefined;
-    }
-
     createUserMutation.mutate(data);
-    setIsLoading(false);
   };
 
+  // Se o usuário não for admin ou escola, não deve ter acesso a esta página
+  if (user && user.role !== "admin" && user.role !== "school") {
+    navigate("/dashboard");
+    return null;
+  }
+
   return (
-    <div className="container mx-auto py-6">
+    <div className="container mx-auto py-10">
       <div className="flex items-center mb-6">
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          className="mr-2"
-          onClick={() => navigate("/users/list")}
-        >
-          <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
+        <Button variant="ghost" onClick={() => navigate("/users")} className="mr-4">
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Voltar
         </Button>
-        <h1 className="text-3xl font-bold">Novo Usuário</h1>
+        <h1 className="text-3xl font-bold">Adicionar Novo Usuário</h1>
       </div>
 
-      <Card className="max-w-4xl mx-auto">
+      <Card className="max-w-2xl mx-auto">
         <CardHeader>
-          <CardTitle>Adicionar Novo Usuário</CardTitle>
+          <CardTitle>Informações do Usuário</CardTitle>
           <CardDescription>
-            Preencha o formulário abaixo para criar um novo usuário na plataforma.
+            Preencha os campos abaixo para criar um novo usuário.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <FormField
-                  control={form.control}
-                  name="fullName"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Nome Completo</FormLabel>
-                      <FormControl>
-                        <Input placeholder="João da Silva" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="username"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Nome de Usuário</FormLabel>
-                      <FormControl>
-                        <Input placeholder="joao.silva" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input type="email" placeholder="joao.silva@exemplo.com" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="phone"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Telefone</FormLabel>
-                      <FormControl>
-                        <Input placeholder="(11) 98765-4321" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="password"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Senha</FormLabel>
-                      <FormControl>
-                        <Input type="password" placeholder="********" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="confirmPassword"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Confirmar Senha</FormLabel>
-                      <FormControl>
-                        <Input type="password" placeholder="********" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="role"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Papel do Usuário</FormLabel>
-                      <Select 
-                        onValueChange={field.onChange} 
-                        defaultValue={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione um papel" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="admin">Administrador</SelectItem>
-                          <SelectItem value="school">Escola</SelectItem>
-                          <SelectItem value="attendant">Atendente</SelectItem>
-                          <SelectItem value="student">Aluno</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                {(watchRole === "attendant" || watchRole === "student") && (
-                  <FormField
-                    control={form.control}
-                    name="schoolId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Escola</FormLabel>
-                        <Select 
-                          onValueChange={(value) => field.onChange(parseInt(value, 10))} 
-                          defaultValue={field.value?.toString()}
-                        >
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Selecione uma escola" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {schools && schools.map((school: any) => (
-                              <SelectItem key={school.id} value={school.id.toString()}>
-                                {school.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                )}
-              </div>
-
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)}>
+            <CardContent className="space-y-4">
               <FormField
                 control={form.control}
-                name="active"
+                name="fullName"
                 render={({ field }) => (
-                  <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+                  <FormItem>
+                    <FormLabel>Nome Completo</FormLabel>
                     <FormControl>
-                      <Checkbox
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
+                      <Input placeholder="João Silva" {...field} />
                     </FormControl>
-                    <div className="space-y-1 leading-none">
-                      <FormLabel>Usuário Ativo</FormLabel>
-                      <FormDescription>
-                        Usuários inativos não podem acessar o sistema.
-                      </FormDescription>
-                    </div>
+                    <FormMessage />
                   </FormItem>
                 )}
               />
 
-              <CardFooter className="flex justify-end px-0 pt-5">
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  className="mr-2"
-                  onClick={() => navigate("/users/list")}
-                >
-                  Cancelar
-                </Button>
-                <Button type="submit" disabled={isLoading}>
-                  {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Criar Usuário
-                </Button>
-              </CardFooter>
-            </form>
-          </Form>
-        </CardContent>
+              <FormField
+                control={form.control}
+                name="username"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nome de Usuário</FormLabel>
+                    <FormControl>
+                      <Input placeholder="joao.silva" {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      O nome de usuário deve ser único e será usado para login.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email</FormLabel>
+                    <FormControl>
+                      <Input placeholder="joao.silva@exemplo.com" type="email" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Senha</FormLabel>
+                    <FormControl>
+                      <Input placeholder="******" type="password" {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      A senha deve ter pelo menos 6 caracteres.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="phone"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Telefone</FormLabel>
+                    <FormControl>
+                      <Input placeholder="(11) 99999-9999" {...field} />
+                    </FormControl>
+                    <FormDescription>Opcional</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="role"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Papel</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione um papel" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {user && user.role === "admin" && (
+                          <SelectItem value="admin">Administrador</SelectItem>
+                        )}
+                        {user && user.role === "admin" && (
+                          <SelectItem value="school">Escola</SelectItem>
+                        )}
+                        <SelectItem value="attendant">Atendente</SelectItem>
+                        <SelectItem value="student">Estudante</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      O papel determina as permissões do usuário no sistema.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {form.watch("role") !== "admin" && (
+                <FormField
+                  control={form.control}
+                  name="schoolId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Escola</FormLabel>
+                      <Select
+                        onValueChange={(value) => field.onChange(parseInt(value))}
+                        value={field.value?.toString()}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione uma escola" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {user && user.role === "school" ? (
+                            <SelectItem value={user.schoolId?.toString() || ""}>
+                              {schools?.find((s: any) => s.id === user.schoolId)?.name || "Minha Escola"}
+                            </SelectItem>
+                          ) : (
+                            schools?.map((school: any) => (
+                              <SelectItem key={school.id} value={school.id.toString()}>
+                                {school.name}
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        {form.watch("role") === "school"
+                          ? "A escola a qual este usuário será o gestor."
+                          : "A escola a qual este usuário pertence."}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+            </CardContent>
+            <CardFooter className="flex justify-between">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => navigate("/users")}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={createUserMutation.isPending}
+              >
+                {createUserMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Criando...
+                  </>
+                ) : (
+                  "Criar Usuário"
+                )}
+              </Button>
+            </CardFooter>
+          </form>
+        </Form>
       </Card>
     </div>
   );

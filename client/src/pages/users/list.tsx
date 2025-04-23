@@ -1,18 +1,9 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "@/lib/auth";
-import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
-import { Link } from "wouter";
-
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  CardFooter,
-} from "@/components/ui/card";
+import { useQuery } from "@tanstack/react-query";
+import { Link, useLocation } from "wouter";
+import { useAuth } from "../../lib/auth";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -22,198 +13,84 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Loader2, MoreHorizontal, Plus, Search, ArrowUpDown, Pencil, Trash } from "lucide-react";
+import { queryClient } from "@/lib/queryClient";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
-import {
-  Users,
-  Search,
-  Filter,
-  RefreshCw,
-  PlusCircle,
-  MoreHorizontal,
-  Eye,
-  Edit,
-  Trash2,
-  XCircle,
-  CheckCircle,
-  UserPlus,
-} from "lucide-react";
-
-// Componente para exibir um usuário na tabela
-const UserRow = ({ user, onViewDetails, onEdit, onDelete, onToggleActive }: { 
-  user: any; 
-  onViewDetails: (user: any) => void;
-  onEdit: (user: any) => void;
-  onDelete: (user: any) => void;
-  onToggleActive: (user: any) => void;
-}) => {
-  const getRoleBadge = (role: string) => {
-    switch (role) {
-      case "admin":
-        return <Badge className="bg-red-100 text-red-800 hover:bg-red-100">Administrador</Badge>;
-      case "school":
-        return <Badge className="bg-purple-100 text-purple-800 hover:bg-purple-100">Escola</Badge>;
-      case "attendant":
-        return <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Atendente</Badge>;
-      case "student":
-        return <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">Aluno</Badge>;
-      default:
-        return <Badge variant="outline">Não definido</Badge>;
-    }
-  };
-
-  return (
-    <TableRow key={user.id}>
-      <TableCell>
-        <div className="flex items-center">
-          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mr-3">
-            {user.profileImage ? (
-              <img 
-                src={user.profileImage} 
-                alt={user.fullName} 
-                className="w-10 h-10 rounded-full object-cover" 
-              />
-            ) : (
-              <Users className="h-5 w-5 text-primary" />
-            )}
-          </div>
-          <div>
-            <div className="font-medium">{user.fullName}</div>
-            <div className="text-xs text-muted-foreground">{user.email}</div>
-          </div>
-        </div>
-      </TableCell>
-      <TableCell>{getRoleBadge(user.role)}</TableCell>
-      <TableCell>{user.schoolId ? user.schoolName || `ID: ${user.schoolId}` : "N/A"}</TableCell>
-      <TableCell>
-        <Badge
-          variant={user.active ? "default" : "secondary"}
-          className={user.active ? "bg-green-100 text-green-800 hover:bg-green-100" : ""}
-        >
-          {user.active ? "Ativo" : "Inativo"}
-        </Badge>
-      </TableCell>
-      <TableCell>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="h-8 w-8 p-0">
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Ações</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onViewDetails(user)}>
-              <Eye className="mr-2 h-4 w-4" />
-              <span>Visualizar Detalhes</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onEdit(user)}>
-              <Edit className="mr-2 h-4 w-4" />
-              <span>Editar Usuário</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onToggleActive(user)}>
-              {user.active ? (
-                <>
-                  <XCircle className="mr-2 h-4 w-4" />
-                  <span>Desativar</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle className="mr-2 h-4 w-4" />
-                  <span>Ativar</span>
-                </>
-              )}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onDelete(user)} className="text-red-600">
-              <Trash2 className="mr-2 h-4 w-4" />
-              <span>Excluir</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </TableCell>
-    </TableRow>
-  );
+// Função para obter as iniciais do nome
+const getInitials = (name: string) => {
+  return name
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase()
+    .substring(0, 2);
 };
 
-export default function UsersListPage() {
+// Função para traduzir o papel do usuário
+const translateRole = (role: string) => {
+  const translations: Record<string, string> = {
+    admin: "Administrador",
+    school: "Escola",
+    attendant: "Atendente",
+    student: "Estudante",
+  };
+  return translations[role] || role;
+};
+
+// Função para obter a cor do badge baseado no papel
+const getRoleBadgeVariant = (role: string): "default" | "outline" | "secondary" | "destructive" => {
+  switch (role) {
+    case "admin":
+      return "destructive";
+    case "school":
+      return "default";
+    case "attendant":
+      return "secondary";
+    case "student":
+      return "outline";
+    default:
+      return "outline";
+  }
+};
+
+export default function UsersList() {
   const { user } = useAuth();
+  const [, navigate] = useLocation();
   const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedUser, setSelectedUser] = useState<any>(null);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [isViewDetailsOpen, setIsViewDetailsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>("all");
+  const [searchTerm, setSearchTerm] = useState<string>("");
 
-  // Buscar usuários
-  const { data: usersData, isLoading: isLoadingUsers } = useQuery({
+  // Query para buscar todos os usuários
+  const { data: users, isLoading: isLoadingUsers, error } = useQuery({
     queryKey: ["/api/users"],
-    queryFn: async () => {
-      const res = await apiRequest("GET", "/api/users");
-      return res;
-    },
+    enabled: !!user && (user.role === "admin" || user.role === "school"),
   });
-
-  // Buscar escolas para exibir nomes ao invés de IDs
-  const { data: schoolsData } = useQuery({
-    queryKey: ["/api/schools"],
-    queryFn: async () => {
-      const res = await apiRequest("GET", "/api/schools");
-      return res;
-    },
-  });
-
-  // Processar usuários para exibir nome da escola
-  const processedUsers = usersData && schoolsData
-    ? usersData.map((user: any) => {
-        if (user.schoolId) {
-          const school = schoolsData.find((s: any) => s.id === user.schoolId);
-          return {
-            ...user,
-            schoolName: school ? school.name : null,
-          };
-        }
-        return user;
-      })
-    : [];
-
-  // Filtra usuários com base na busca
-  const filteredUsers = processedUsers
-    ? processedUsers.filter((user: any) =>
-        user.fullName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.role?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.schoolName?.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : [];
 
   // Mutação para deletar usuário
   const deleteUserMutation = useMutation({
@@ -221,276 +98,182 @@ export default function UsersListPage() {
       return await apiRequest("DELETE", `/api/users/${userId}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
       toast({
         title: "Usuário excluído",
         description: "O usuário foi excluído com sucesso.",
-        variant: "default",
       });
-      setIsDeleteDialogOpen(false);
+      // Invalidar a consulta para recarregar a lista
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       toast({
         title: "Erro ao excluir usuário",
-        description: error.message || "Ocorreu um erro ao excluir o usuário. Tente novamente.",
+        description: error.message,
         variant: "destructive",
       });
     },
   });
 
-  // Mutação para ativar/desativar usuário
-  const toggleUserStatusMutation = useMutation({
-    mutationFn: async ({ userId, active }: { userId: number; active: boolean }) => {
-      return await apiRequest("PATCH", `/api/users/${userId}`, { active });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
-      toast({
-        title: "Status atualizado",
-        description: "O status do usuário foi atualizado com sucesso.",
-        variant: "default",
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Erro ao atualizar status",
-        description: error.message || "Ocorreu um erro ao atualizar o status do usuário. Tente novamente.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleViewDetails = (user: any) => {
-    setSelectedUser(user);
-    setIsViewDetailsOpen(true);
-  };
-
-  const handleEdit = (user: any) => {
-    // Redirecionar para a página de edição com o ID do usuário
-    window.location.href = `/users/edit/${user.id}`;
-  };
-
-  const handleDelete = (user: any) => {
-    setSelectedUser(user);
-    setIsDeleteDialogOpen(true);
-  };
-
-  const confirmDelete = () => {
-    if (selectedUser) {
-      deleteUserMutation.mutate(selectedUser.id);
+  // Função para confirmar e excluir um usuário
+  const handleDeleteUser = (userId: number) => {
+    if (confirm("Tem certeza que deseja excluir este usuário? Esta ação não pode ser desfeita.")) {
+      deleteUserMutation.mutate(userId);
     }
   };
 
-  const handleToggleActive = (user: any) => {
-    toggleUserStatusMutation.mutate({
-      userId: user.id,
-      active: !user.active,
-    });
-  };
+  // Filtrar usuários com base na aba ativa e termo de pesquisa
+  const filteredUsers = users
+    ? users.filter((user: any) => {
+        // Filtrar por papel (aba ativa)
+        const roleMatch = activeTab === "all" || user.role === activeTab;
+        
+        // Filtrar por termo de pesquisa (nome, email ou username)
+        const searchMatch =
+          searchTerm === "" ||
+          user.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          user.username.toLowerCase().includes(searchTerm.toLowerCase());
+        
+        return roleMatch && searchMatch;
+      })
+    : [];
 
-  if (isLoadingUsers) {
+  if (error) {
     return (
-      <div className="container mx-auto py-10">
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-        </div>
+      <div className="flex flex-col items-center justify-center h-[500px]">
+        <p className="text-red-500 mb-4">Erro ao carregar usuários: {(error as Error).message}</p>
+        <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['/api/users'] })}>
+          Tentar novamente
+        </Button>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto py-6">
-      <div className="flex flex-col md:flex-row justify-between items-start mb-8">
-        <div>
-          <h1 className="text-3xl font-bold mb-1">Usuários</h1>
-          <p className="text-muted-foreground">
-            Gerencie usuários da plataforma
-          </p>
-        </div>
-        <div className="mt-4 md:mt-0 flex space-x-2">
-          <Button asChild>
-            <Link href="/users/new">
-              <UserPlus className="h-4 w-4 mr-2" />
-              Novo Usuário
-            </Link>
-          </Button>
-        </div>
+    <div className="container mx-auto py-10">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold">Gerenciamento de Usuários</h1>
+        <Button onClick={() => navigate("/users/new")}>
+          <Plus className="mr-2 h-4 w-4" /> Novo Usuário
+        </Button>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Gerenciamento de Usuários</CardTitle>
+          <CardTitle>Usuários</CardTitle>
           <CardDescription>
-            Lista de usuários cadastrados na plataforma
+            Gerencie os usuários do sistema. Você pode adicionar, editar e excluir usuários.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2 flex-1">
+          <div className="flex flex-col gap-4">
+            <div className="flex justify-between items-center gap-4">
               <div className="relative flex-1">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Buscar por nome, email, papel ou escola..."
-                  className="pl-8"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Buscar usuários..."
+                  className="pl-10 pr-4"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
-              <Button variant="outline" size="icon">
-                <Filter className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="icon" onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/users"] })}>
-                <RefreshCw className="h-4 w-4" />
-              </Button>
+              <Select value={activeTab} onValueChange={setActiveTab}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Filtrar por papel" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="admin">Administradores</SelectItem>
+                  <SelectItem value="school">Escolas</SelectItem>
+                  <SelectItem value="attendant">Atendentes</SelectItem>
+                  <SelectItem value="student">Estudantes</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <Button className="ml-2" asChild>
-              <Link href="/users/new">
-                <PlusCircle className="h-4 w-4 mr-2" />
-                Novo Usuário
-              </Link>
-            </Button>
-          </div>
 
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Usuário</TableHead>
-                  <TableHead>Papel</TableHead>
-                  <TableHead>Escola</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="w-[80px]">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredUsers.length > 0 ? (
-                  filteredUsers.map((user: any) => (
-                    <UserRow 
-                      key={user.id} 
-                      user={user} 
-                      onViewDetails={handleViewDetails}
-                      onEdit={handleEdit}
-                      onDelete={handleDelete}
-                      onToggleActive={handleToggleActive}
-                    />
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={5} className="h-24 text-center">
-                      Nenhum resultado encontrado.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+            {isLoadingUsers ? (
+              <div className="flex justify-center items-center h-64">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[60px]"></TableHead>
+                      <TableHead>Nome</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Usuário</TableHead>
+                      <TableHead>
+                        <div className="flex items-center">
+                          Papel
+                          <ArrowUpDown className="ml-2 h-4 w-4" />
+                        </div>
+                      </TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredUsers.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="h-24 text-center">
+                          Nenhum usuário encontrado.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredUsers.map((user: any) => (
+                        <TableRow key={user.id}>
+                          <TableCell>
+                            <Avatar>
+                              <AvatarImage src={user.profileImage || ""} alt={user.fullName} />
+                              <AvatarFallback>{getInitials(user.fullName)}</AvatarFallback>
+                            </Avatar>
+                          </TableCell>
+                          <TableCell>
+                            <div className="font-medium">{user.fullName}</div>
+                          </TableCell>
+                          <TableCell>{user.email}</TableCell>
+                          <TableCell>{user.username}</TableCell>
+                          <TableCell>
+                            <Badge variant={getRoleBadgeVariant(user.role)}>
+                              {translateRole(user.role)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" className="h-8 w-8 p-0">
+                                  <span className="sr-only">Abrir menu</span>
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => navigate(`/users/edit/${user.id}`)}>
+                                  <Pencil className="mr-2 h-4 w-4" />
+                                  Editar
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleDeleteUser(user.id)}>
+                                  <Trash className="mr-2 h-4 w-4" />
+                                  Excluir
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </div>
         </CardContent>
+        <CardFooter className="flex justify-between">
+          <div className="text-sm text-muted-foreground">
+            Mostrando {filteredUsers.length} usuários
+          </div>
+        </CardFooter>
       </Card>
-
-      {/* Dialog para visualizar detalhes do usuário */}
-      <Dialog open={isViewDetailsOpen} onOpenChange={setIsViewDetailsOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Detalhes do Usuário</DialogTitle>
-            <DialogDescription>
-              Informações completas sobre o usuário selecionado.
-            </DialogDescription>
-          </DialogHeader>
-          {selectedUser && (
-            <div className="py-4">
-              <div className="flex items-center justify-center mb-4">
-                <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center">
-                  {selectedUser.profileImage ? (
-                    <img 
-                      src={selectedUser.profileImage} 
-                      alt={selectedUser.fullName} 
-                      className="w-24 h-24 rounded-full object-cover" 
-                    />
-                  ) : (
-                    <Users className="h-10 w-10 text-primary" />
-                  )}
-                </div>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500">Nome completo</h3>
-                  <p className="text-base">{selectedUser.fullName}</p>
-                </div>
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500">Email</h3>
-                  <p className="text-base">{selectedUser.email}</p>
-                </div>
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500">Papel</h3>
-                  <p className="text-base">{
-                    selectedUser.role === "admin" ? "Administrador" :
-                    selectedUser.role === "school" ? "Escola" :
-                    selectedUser.role === "attendant" ? "Atendente" :
-                    selectedUser.role === "student" ? "Aluno" : 
-                    "Não definido"
-                  }</p>
-                </div>
-                {selectedUser.schoolName && (
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-500">Escola</h3>
-                    <p className="text-base">{selectedUser.schoolName}</p>
-                  </div>
-                )}
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500">Telefone</h3>
-                  <p className="text-base">{selectedUser.phone || "Não informado"}</p>
-                </div>
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500">Data de cadastro</h3>
-                  <p className="text-base">{new Date(selectedUser.createdAt).toLocaleDateString('pt-BR')}</p>
-                </div>
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500">Status</h3>
-                  <Badge
-                    variant={selectedUser.active ? "default" : "secondary"}
-                    className={selectedUser.active ? "bg-green-100 text-green-800 hover:bg-green-100" : ""}
-                  >
-                    {selectedUser.active ? "Ativo" : "Inativo"}
-                  </Badge>
-                </div>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsViewDetailsOpen(false)}>
-              Fechar
-            </Button>
-            <Button onClick={() => {
-              setIsViewDetailsOpen(false);
-              if (selectedUser) handleEdit(selectedUser);
-            }}>
-              Editar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog de confirmação para excluir usuário */}
-      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Tem certeza?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta ação não pode ser desfeita. Isso excluirá permanentemente o usuário 
-              <strong> {selectedUser?.fullName}</strong> e todos os dados associados a ele.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={confirmDelete} 
-              className="bg-red-600 hover:bg-red-700"
-            >
-              Excluir
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
