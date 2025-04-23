@@ -138,6 +138,8 @@ export class MemStorage implements IStorage {
   private metricIdCounter: number;
   private notificationIdCounter: number;
   private messageIdCounter: number;
+  
+  // Notification and message methods will be added dynamically
 
   constructor() {
     this.usersMap = new Map();
@@ -1492,4 +1494,10 @@ export class DatabaseStorage implements IStorage {
   }
 }
 
+import { addNotificationMethodsToDatabaseStorage } from './storage.notification';
+
+// Storage instance
 export const storage = new DatabaseStorage();
+
+// Add notification methods
+addNotificationMethodsToDatabaseStorage(storage);

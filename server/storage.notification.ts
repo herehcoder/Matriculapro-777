@@ -8,6 +8,7 @@ import { db } from "./db";
 
 // Implementations for MemStorage
 export function addNotificationMethodsToMemStorage(memStorage: any) {
+  // TypeScript will not check the types inside this function since we're using 'any'
   // Notification methods
   memStorage.getNotification = async function(id: number): Promise<Notification | undefined> {
     return this.notificationsMap.get(id);
