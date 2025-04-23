@@ -232,6 +232,16 @@ export const messages = pgTable('messages', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// Password reset tokens table
+export const passwordResetTokens = pgTable('password_reset_tokens', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id),
+  token: text('token').notNull().unique(),
+  expiresAt: timestamp('expires_at').notNull(),
+  used: boolean('used').default(false),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // Schema for inserting a new user
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -325,6 +335,12 @@ export const insertDocumentSchema = createInsertSchema(documents).omit({
   updatedAt: true
 });
 
+// Schema for inserting a new password reset token
+export const insertPasswordResetTokenSchema = createInsertSchema(passwordResetTokens).omit({
+  id: true,
+  createdAt: true
+});
+
 // Types for Drizzle ORM - All types consolidated in one place
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -368,3 +384,6 @@ export type InsertMessage = z.infer<typeof insertMessageSchema>;
 
 export type Document = typeof documents.$inferSelect;
 export type InsertDocument = z.infer<typeof insertDocumentSchema>;
+
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type InsertPasswordResetToken = z.infer<typeof insertPasswordResetTokenSchema>;
