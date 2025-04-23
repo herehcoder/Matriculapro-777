@@ -1,12 +1,13 @@
 import {
   users, schools, attendants, students, leads, courses, questions, answers,
-  chatHistory, enrollments, whatsappMessages, metrics,
+  chatHistory, enrollments, whatsappMessages, metrics, notifications, messages,
   type User, type InsertUser, type School, type InsertSchool,
   type Attendant, type Student, type InsertStudent, type Lead, type InsertLead,
   type Course, type InsertCourse, type Question, type InsertQuestion,
   type Answer, type InsertAnswer, type ChatMessage, type InsertChatMessage,
   type Enrollment, type InsertEnrollment, type WhatsappMessage, type InsertWhatsappMessage,
-  type Metric, type InsertMetric
+  type Metric, type InsertMetric, type Notification, type InsertNotification,
+  type Message, type InsertMessage
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql } from "drizzle-orm";
@@ -88,6 +89,22 @@ export interface IStorage {
   createMetric(metric: InsertMetric): Promise<Metric>;
   getMetricSummary(schoolId: number, metricType: string): Promise<{count: number, change: number}>;
   getDashboardMetrics(schoolId?: number): Promise<any>;
+  
+  // Notification management
+  getNotification(id: number): Promise<Notification | undefined>;
+  getNotificationsByUser(userId: number, read?: boolean): Promise<Notification[]>;
+  getNotificationsBySchool(schoolId: number): Promise<Notification[]>;
+  createNotification(notification: InsertNotification): Promise<Notification>;
+  updateNotification(id: number, notification: Partial<Notification>): Promise<Notification | undefined>;
+  markNotificationAsRead(id: number): Promise<Notification | undefined>;
+  markAllNotificationsAsRead(userId: number): Promise<boolean>;
+  
+  // Message management
+  getMessage(id: number): Promise<Message | undefined>;
+  getMessagesByUser(userId: number, asReceiver?: boolean): Promise<Message[]>;
+  getConversation(user1Id: number, user2Id: number): Promise<Message[]>;
+  createMessage(message: InsertMessage): Promise<Message>;
+  updateMessageStatus(id: number, status: 'sent' | 'delivered' | 'read'): Promise<Message | undefined>;
 }
 
 // In-memory storage implementation
@@ -104,6 +121,8 @@ export class MemStorage implements IStorage {
   private enrollmentsMap: Map<number, Enrollment>;
   private whatsappMessagesMap: Map<number, WhatsappMessage>;
   private metricsMap: Map<number, Metric>;
+  private notificationsMap: Map<number, Notification>;
+  private messagesMap: Map<number, Message>;
   
   private userIdCounter: number;
   private schoolIdCounter: number;
@@ -117,6 +136,8 @@ export class MemStorage implements IStorage {
   private enrollmentIdCounter: number;
   private whatsappMessageIdCounter: number;
   private metricIdCounter: number;
+  private notificationIdCounter: number;
+  private messageIdCounter: number;
 
   constructor() {
     this.usersMap = new Map();
@@ -131,6 +152,8 @@ export class MemStorage implements IStorage {
     this.enrollmentsMap = new Map();
     this.whatsappMessagesMap = new Map();
     this.metricsMap = new Map();
+    this.notificationsMap = new Map();
+    this.messagesMap = new Map();
     
     this.userIdCounter = 1;
     this.schoolIdCounter = 1;
@@ -144,6 +167,8 @@ export class MemStorage implements IStorage {
     this.enrollmentIdCounter = 1;
     this.whatsappMessageIdCounter = 1;
     this.metricIdCounter = 1;
+    this.notificationIdCounter = 1;
+    this.messageIdCounter = 1;
     
     // Initialize with some test data
     this.initializeTestData();
