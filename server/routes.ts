@@ -1,5 +1,6 @@
 import express, { type Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
+import { WebSocketServer } from "ws";
 import { storage } from "./storage";
 import { setupAuth } from "./auth";
 import { z } from "zod";
@@ -13,8 +14,19 @@ import {
   insertCourseSchema,
   insertEnrollmentSchema,
   insertChatHistorySchema,
-  insertQuestionSchema
+  insertQuestionSchema,
+  insertNotificationSchema,
+  insertMessageSchema
 } from "@shared/schema";
+import pusher, { 
+  sendUserNotification, 
+  sendGlobalNotification, 
+  sendSchoolNotification, 
+  sendPrivateMessage,
+  authorizeChannel,
+  type NotificationPayload,
+  type MessagePayload 
+} from "./pusher";
 
 declare module "express-session" {
   interface SessionData {
@@ -1024,7 +1036,290 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Pusher Auth endpoint
+  app.post("/api/pusher/auth", isAuthenticated, (req, res) => {
+    const { socket_id, channel_name } = req.body;
+    const user = req.user as any;
+
+    // Check if this is a private channel request for the current user
+    if (channel_name === `private-${user.id}`) {
+      // Authorize the user's own private channel
+      const auth = authorizeChannel(socket_id, channel_name, user.id);
+      res.send(auth);
+    } else if (channel_name === 'presence-global') {
+      // Authorize the presence channel with user data
+      const presenceData = {
+        user_id: user.id.toString(),
+        user_info: {
+          name: user.fullName,
+          role: user.role
+        }
+      };
+      const auth = pusher.authorizePresenceChannel(socket_id, channel_name, presenceData);
+      res.send(auth);
+    } else {
+      res.status(403).json({ error: 'Unauthorized' });
+    }
+  });
+
+  // Notification routes
+  app.get("/api/notifications", isAuthenticated, async (req, res) => {
+    const user = req.user as any;
+    const unreadOnly = req.query.unread === 'true';
+
+    const notifications = await storage.getNotificationsByUser(user.id, unreadOnly ? false : undefined);
+    res.json(notifications);
+  });
+
+  app.post("/api/notifications", isAuthenticated, hasRole(["admin", "school"]), async (req, res, next) => {
+    try {
+      const user = req.user as any;
+      const { targetUserId, schoolId, notification } = req.body;
+
+      // Validate notification data
+      const notificationData = insertNotificationSchema.parse({
+        ...notification,
+        userId: targetUserId,
+        schoolId: schoolId || (user.role === 'school' ? user.schoolId : null),
+      });
+
+      // Create notification in database
+      const savedNotification = await storage.createNotification(notificationData);
+
+      // Send real-time notification via Pusher
+      await sendUserNotification(targetUserId, {
+        title: notification.title,
+        message: notification.message,
+        type: notification.type,
+        data: notification.data,
+        relatedId: notification.relatedId,
+        relatedType: notification.relatedType
+      });
+
+      res.status(201).json(savedNotification);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/notifications/global", isAuthenticated, hasRole(["admin"]), async (req, res, next) => {
+    try {
+      const { notification } = req.body;
+
+      // Send global notification via Pusher
+      await sendGlobalNotification({
+        title: notification.title,
+        message: notification.message,
+        type: notification.type,
+        data: notification.data || null,
+        relatedId: notification.relatedId || null,
+        relatedType: notification.relatedType || null
+      });
+
+      res.status(200).json({ success: true, message: 'Global notification sent' });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/notifications/school/:schoolId", isAuthenticated, hasRole(["admin", "school"]), async (req, res, next) => {
+    try {
+      const user = req.user as any;
+      const schoolId = parseInt(req.params.schoolId);
+      const { notification } = req.body;
+
+      // Check access for school users
+      if (user.role === 'school' && user.schoolId !== schoolId) {
+        return res.status(403).json({ message: 'Forbidden - You can only send notifications to your own school' });
+      }
+
+      // Send school notification via Pusher
+      await sendSchoolNotification(schoolId, {
+        title: notification.title,
+        message: notification.message,
+        type: notification.type,
+        data: notification.data || null,
+        relatedId: notification.relatedId || null,
+        relatedType: notification.relatedType || null
+      });
+
+      res.status(200).json({ success: true, message: 'School notification sent' });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/notifications/:id/read", isAuthenticated, async (req, res, next) => {
+    try {
+      const user = req.user as any;
+      const notificationId = parseInt(req.params.id);
+
+      // Get the notification
+      const notification = await storage.getNotification(notificationId);
+      if (!notification) {
+        return res.status(404).json({ message: 'Notification not found' });
+      }
+
+      // Check if the notification belongs to the user
+      if (notification.userId !== user.id) {
+        return res.status(403).json({ message: 'Forbidden - You can only mark your own notifications as read' });
+      }
+
+      // Mark as read
+      const updatedNotification = await storage.markNotificationAsRead(notificationId);
+      res.json(updatedNotification);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/notifications/read-all", isAuthenticated, async (req, res, next) => {
+    try {
+      const user = req.user as any;
+      
+      // Mark all as read
+      await storage.markAllNotificationsAsRead(user.id);
+      res.json({ success: true, message: 'All notifications marked as read' });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Message routes
+  app.get("/api/messages", isAuthenticated, async (req, res) => {
+    const user = req.user as any;
+    const asReceiver = req.query.as !== 'sender';
+    
+    const messages = await storage.getMessagesByUser(user.id, asReceiver);
+    res.json(messages);
+  });
+
+  app.get("/api/messages/conversation/:userId", isAuthenticated, async (req, res) => {
+    const currentUser = req.user as any;
+    const otherUserId = parseInt(req.params.userId);
+    
+    const conversation = await storage.getConversation(currentUser.id, otherUserId);
+    res.json(conversation);
+  });
+
+  app.post("/api/messages", isAuthenticated, async (req, res, next) => {
+    try {
+      const user = req.user as any;
+      const { receiverId, content } = req.body;
+      
+      // Validate data
+      const messageData = insertMessageSchema.parse({
+        senderId: user.id,
+        receiverId,
+        content,
+        schoolId: user.schoolId || null,
+        status: 'sent'
+      });
+      
+      // Save to database
+      const savedMessage = await storage.createMessage(messageData);
+      
+      // Send via Pusher
+      await sendPrivateMessage(user.id, receiverId, {
+        content,
+        senderId: user.id,
+        senderName: user.fullName,
+        senderRole: user.role,
+        timestamp: new Date().toISOString()
+      });
+      
+      res.status(201).json(savedMessage);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/messages/:id/status", isAuthenticated, async (req, res, next) => {
+    try {
+      const user = req.user as any;
+      const messageId = parseInt(req.params.id);
+      const { status } = req.body;
+      
+      // Get the message
+      const message = await storage.getMessage(messageId);
+      if (!message) {
+        return res.status(404).json({ message: 'Message not found' });
+      }
+      
+      // Check if the user is the receiver
+      if (message.receiverId !== user.id) {
+        return res.status(403).json({ message: 'Forbidden - You can only update status of messages you received' });
+      }
+      
+      // Update status
+      const updatedMessage = await storage.updateMessageStatus(messageId, status);
+      res.json(updatedMessage);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   const httpServer = createServer(app);
+  
+  // Create WebSocket server with a specific path to avoid conflicts with Vite HMR
+  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  
+  // Store connected clients
+  const clients = new Map();
+  
+  wss.on('connection', (ws) => {
+    // Expect client to send their ID on connection
+    ws.on('message', (message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        
+        // If this is an identification message, store the client
+        if (data.type === 'identify') {
+          const userId = parseInt(data.userId);
+          clients.set(userId, ws);
+          console.log(`User ${userId} connected to WebSocket`);
+        }
+        // If this is a message, send it to the recipient
+        else if (data.type === 'message') {
+          const { recipientId, content, senderId } = data;
+          const recipientWs = clients.get(parseInt(recipientId));
+          
+          // If recipient is connected, send them the message
+          if (recipientWs && recipientWs.readyState === WebSocket.OPEN) {
+            recipientWs.send(JSON.stringify({
+              type: 'message',
+              content,
+              senderId,
+              timestamp: new Date().toISOString()
+            }));
+          }
+          
+          // Store message in database regardless
+          storage.createMessage({
+            senderId: parseInt(senderId),
+            receiverId: parseInt(recipientId),
+            content,
+            status: 'sent',
+            schoolId: null // This would be populated from user data in a real implementation
+          });
+        }
+      } catch (err) {
+        console.error('Error processing WebSocket message:', err);
+      }
+    });
+    
+    // Remove client when they disconnect
+    ws.on('close', () => {
+      for (const [userId, client] of clients.entries()) {
+        if (client === ws) {
+          clients.delete(userId);
+          console.log(`User ${userId} disconnected from WebSocket`);
+          break;
+        }
+      }
+    });
+  });
+
   return httpServer;
 }
 
