@@ -15,6 +15,10 @@ import { registerUserRoutes } from "./routes.user";
 import { registerPaymentRoutes } from "./routes.payment";
 import { registerWhatsAppRoutes } from "./routes.whatsapp";
 import { registerAdminWhatsAppRoutes } from "./routes.admin.whatsapp";
+// Importar novas rotas avançadas
+import { registerEvolutionApiRoutes } from "./routes.evolution";
+import { registerOcrRoutes } from "./routes.ocr";
+import { registerEnhancedPaymentRoutes } from "./routes.payment.enhanced";
 import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
@@ -71,6 +75,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     '/api/enrollments',
     '/api/answers',
     '/api/payments/webhook',
+    '/api/evolutionapi/webhook', // Webhook da Evolution API (WhatsApp avançado)
   ];
   
   // Middleware to check if user is authenticated
@@ -142,6 +147,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Registrar rotas administrativas do WhatsApp
   registerAdminWhatsAppRoutes(app, isAuthenticated);
+  
+  // Registrar novas rotas avançadas
+  registerEvolutionApiRoutes(app, isAuthenticated);
+  registerOcrRoutes(app, isAuthenticated);
+  registerEnhancedPaymentRoutes(app, isAuthenticated);
 
   // Middleware for error handling
   const handleZodError = (
