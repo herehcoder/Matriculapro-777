@@ -38,9 +38,10 @@ export function NotificationCenter({ userId, schoolId }: NotificationCenterProps
     // Load existing unread notifications
     const fetchNotifications = async () => {
       try {
-        const response = await apiRequest(`/api/notifications/user/${userId}?read=false`, 'GET');
-        if (response && Array.isArray(response)) {
-          setUnreadNotifications(response);
+        const response = await apiRequest('GET', `/api/notifications/user/${userId}?read=false`);
+        const data = await response.json();
+        if (data && Array.isArray(data)) {
+          setUnreadNotifications(data);
         }
       } catch (error) {
         console.error('Error fetching notifications:', error);
@@ -59,7 +60,7 @@ export function NotificationCenter({ userId, schoolId }: NotificationCenterProps
   
   const markAllAsRead = async () => {
     try {
-      await apiRequest('/api/notifications/read-all', 'PATCH');
+      await apiRequest('PATCH', `/api/notifications/user/${userId}/read-all`);
       
       setUnreadNotifications([]);
       clearNotifications();
