@@ -1,435 +1,284 @@
 import React, { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { useToast } from '@/hooks/use-toast';
 import { useQuery } from '@tanstack/react-query';
-import { useLocation } from 'wouter';
-import { Loader2, FileText, FileImage, File, Download, Eye, HelpCircle } from 'lucide-react';
-import { format } from 'date-fns';
-import DocumentsView from '@/components/Documents/DocumentsView';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Loader2, FileText, CheckCircle, XCircle, AlertCircle, Eye, Download, Upload } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
+import { useToast } from '@/hooks/use-toast';
+import { apiRequest, getQueryFn } from '@/lib/queryClient';
+import MainLayout from '@/components/Layout/MainLayout';
 
-// Componente para exibir a página de documentos
-const DocumentsPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('all');
-  const [selectedEnrollmentId, setSelectedEnrollmentId] = useState<number | null>(null);
-  const [userData, setUserData] = useState<any>(null);
-  const [showAnalysis, setShowAnalysis] = useState(false);
+interface Document {
+  id: number;
+  fileName: string;
+  fileType: string;
+  fileUrl: string;
+  fileSize: number;
+  documentType: string;
+  status: 'pending' | 'approved' | 'rejected';
+  enrollmentId: number;
+  uploadedAt: string;
+  courseName: string;
+  ocrData?: any;
+  ocrQuality?: number;
+  verificationResult?: any;
+}
+
+export default function DocumentsPage() {
+  const { user } = useAuth();
   const { toast } = useToast();
-  const [, navigate] = useLocation();
+  const [activeTab, setActiveTab] = useState('all');
+  const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
 
-  // Buscar informações do usuário logado
-  const { data: user, isLoading: loadingUser } = useQuery({
-    queryKey: ['/api/auth/me'],
-    staleTime: 1000 * 60 * 5, // 5 minutos
-  });
-
-  // Buscar matrículas do usuário
-  const { data: enrollments, isLoading: loadingEnrollments } = useQuery({
-    queryKey: ['/api/enrollments/student'],
-    enabled: !!user,
-  });
-
-  // Buscar documentos do usuário
-  const { data: documents, isLoading: loadingDocuments } = useQuery({
+  const { data: documents, isLoading, error, refetch } = useQuery<Document[]>({
     queryKey: ['/api/student/documents'],
-    enabled: !!user,
+    queryFn: getQueryFn(),
+    enabled: !!user && user.role === 'student'
   });
 
-  // Efeito para configurar os dados do usuário para análise
-  useEffect(() => {
-    if (user) {
-      setUserData({
-        name: user.fullName,
-        cpf: user.cpf,
-        email: user.email,
-        phone: user.phone,
-        birthDate: user.birthDate,
-        address: user.address
+  const handleViewDocument = (doc: Document) => {
+    setSelectedDoc(doc);
+  };
+
+  const handleDownloadDocument = async (doc: Document) => {
+    try {
+      window.open(doc.fileUrl, '_blank');
+    } catch (error) {
+      console.error('Erro ao baixar documento:', error);
+      toast({
+        title: 'Erro ao baixar',
+        description: 'Não foi possível baixar o documento.',
+        variant: 'destructive',
       });
     }
-  }, [user]);
+  };
 
-  // Função para formatar o status do documento
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'verified':
-        return <Badge className="bg-green-100 text-green-800 hover:bg-green-200">Verificado</Badge>;
-      case 'uploaded':
-        return <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-200">Enviado</Badge>;
-      case 'needs_review':
-        return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-200">Requer Revisão</Badge>;
+      case 'approved':
+        return <Badge className="bg-green-500 hover:bg-green-600"><CheckCircle className="w-3 h-3 mr-1" /> Aprovado</Badge>;
       case 'rejected':
-        return <Badge className="bg-red-100 text-red-800 hover:bg-red-200">Rejeitado</Badge>;
+        return <Badge className="bg-red-500 hover:bg-red-600"><XCircle className="w-3 h-3 mr-1" /> Rejeitado</Badge>;
       default:
-        return <Badge className="bg-neutral-100 text-neutral-800 hover:bg-neutral-200">{status}</Badge>;
+        return <Badge className="bg-yellow-500 hover:bg-yellow-600"><AlertCircle className="w-3 h-3 mr-1" /> Pendente</Badge>;
     }
   };
 
-  // Função para obter o ícone baseado no tipo de arquivo
-  const getFileIcon = (fileType: string) => {
-    if (!fileType) return <File className="h-4 w-4" />;
-    
-    if (fileType.startsWith('image/')) {
-      return <FileImage className="h-4 w-4" />;
-    } else if (fileType === 'application/pdf') {
-      return <FileText className="h-4 w-4" />;
-    } else {
-      return <File className="h-4 w-4" />;
-    }
-  };
-
-  // Função para formatar o tipo de documento
-  const formatDocumentType = (type: string): string => {
-    const types: Record<string, string> = {
-      identityDocument: 'Documento de Identidade',
-      proofOfAddress: 'Comprovante de Residência',
-      photo: 'Foto',
-      schoolRecords: 'Histórico Escolar',
+  const getDocumentType = (type: string) => {
+    const types = {
+      'id': 'Documento de Identidade',
+      'cpf': 'CPF',
+      'address_proof': 'Comprovante de Endereço',
+      'school_record': 'Histórico Escolar',
+      'diploma': 'Diploma',
+      'photo': 'Foto',
+      'medical_certificate': 'Atestado Médico',
+      'contract': 'Contrato',
+      'payment_proof': 'Comprovante de Pagamento',
+      'other': 'Outro Documento'
     };
-    return types[type] || type;
+    
+    return types[type as keyof typeof types] || 'Documento';
   };
 
-  // Função para abrir a análise de um documento específico
-  const openAnalysis = (enrollmentId: number) => {
-    setSelectedEnrollmentId(enrollmentId);
-    setShowAnalysis(true);
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  // Função para lidar com a conclusão da análise
-  const handleAnalysisComplete = () => {
-    toast({
-      title: 'Análise concluída',
-      description: 'O documento foi analisado com sucesso.',
-    });
-  };
-
-  // Carregando...
-  if (loadingUser || loadingEnrollments || loadingDocuments) {
+  if (isLoading) {
     return (
-      <div className="container mx-auto py-10 space-y-6">
-        <div className="flex justify-center items-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <span className="ml-2 text-lg">Carregando dados...</span>
-        </div>
+      <div className="flex items-center justify-center min-h-[80vh]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <span className="ml-2 text-lg">Carregando documentos...</span>
       </div>
     );
   }
 
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[80vh]">
+        <AlertCircle className="h-12 w-12 text-red-500 mb-4" />
+        <h2 className="text-xl font-bold mb-2">Erro ao carregar documentos</h2>
+        <p className="text-gray-600 mb-4">Não foi possível carregar seus documentos. Tente novamente mais tarde.</p>
+        <Button onClick={() => refetch()}>Tentar novamente</Button>
+      </div>
+    );
+  }
+
+  const filteredDocuments = activeTab === 'all' 
+    ? documents
+    : documents?.filter(doc => doc.status === activeTab);
+
   return (
-    <div className="container mx-auto py-10 space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="container mx-auto py-6">
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Documentos</h1>
-          <p className="text-muted-foreground">
-            Visualize e gerencie todos os seus documentos
-          </p>
+          <h1 className="text-3xl font-bold">Meus Documentos</h1>
+          <p className="text-gray-600 mt-1">Gerencie todos os documentos das suas matrículas</p>
         </div>
-        <Button onClick={() => navigate('/enrollment')}>
-          Iniciar Nova Matrícula
+        
+        <Button className="flex items-center gap-2">
+          <Upload className="h-4 w-4" />
+          Enviar Novo Documento
         </Button>
       </div>
 
-      {!showAnalysis ? (
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="all">Todos</TabsTrigger>
-            <TabsTrigger value="verified">Verificados</TabsTrigger>
-            <TabsTrigger value="pending">Pendentes</TabsTrigger>
-            <TabsTrigger value="rejected">Rejeitados</TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="all" className="mt-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Todos os Documentos</CardTitle>
-                <CardDescription>
-                  Lista completa de documentos enviados
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {documents && documents.length > 0 ? (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Documento</TableHead>
-                        <TableHead>Curso</TableHead>
-                        <TableHead>Data de Envio</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Ações</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {documents.map((doc: any) => (
-                        <TableRow key={doc.id}>
-                          <TableCell className="font-medium">
-                            <div className="flex items-center">
-                              {getFileIcon(doc.fileType)}
-                              <span className="ml-2">{formatDocumentType(doc.documentType)}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell>{doc.courseName || 'N/A'}</TableCell>
-                          <TableCell>
-                            {doc.uploadedAt ? format(new Date(doc.uploadedAt), 'dd/MM/yyyy') : 'N/A'}
-                          </TableCell>
-                          <TableCell>{getStatusBadge(doc.status)}</TableCell>
-                          <TableCell>
-                            <div className="flex space-x-2">
-                              <Button variant="outline" size="sm" onClick={() => window.open(doc.fileUrl, '_blank')}>
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                              <Button variant="outline" size="sm">
-                                <Download className="h-4 w-4" />
-                              </Button>
-                              <Button 
-                                variant="outline" 
-                                size="sm"
-                                onClick={() => openAnalysis(doc.enrollmentId)}
-                              >
-                                <HelpCircle className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <div className="text-center py-10">
-                    <FileText className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                    <p className="text-lg font-medium mb-2">Nenhum documento encontrado</p>
-                    <p className="text-sm text-muted-foreground mb-6">
-                      Você ainda não enviou nenhum documento.
-                    </p>
-                    <Button onClick={() => navigate('/enrollment')}>
-                      Iniciar Matrícula
+      <Tabs defaultValue="all" value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-4 mb-8">
+          <TabsTrigger value="all">Todos os Documentos</TabsTrigger>
+          <TabsTrigger value="pending">Pendentes</TabsTrigger>
+          <TabsTrigger value="approved">Aprovados</TabsTrigger>
+          <TabsTrigger value="rejected">Rejeitados</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value={activeTab} className="space-y-4">
+          {!filteredDocuments || filteredDocuments.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 bg-gray-50 rounded-lg border border-dashed border-gray-300">
+              <FileText className="h-16 w-16 text-gray-400 mb-4" />
+              <h3 className="text-xl font-medium text-gray-700">Nenhum documento encontrado</h3>
+              <p className="text-gray-500 mt-2 text-center max-w-md">
+                {activeTab === 'all' 
+                  ? 'Você ainda não possui documentos cadastrados. Envie documentos durante suas matrículas.'
+                  : `Você não possui documentos com status "${activeTab === 'pending' ? 'pendente' : activeTab === 'approved' ? 'aprovado' : 'rejeitado'}".`}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredDocuments.map(doc => (
+                <Card key={doc.id} className="overflow-hidden">
+                  <CardHeader className="p-4 bg-gray-50 border-b">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <CardTitle className="text-md font-semibold truncate" title={doc.fileName}>
+                          {doc.fileName.length > 25 ? `${doc.fileName.substring(0, 25)}...` : doc.fileName}
+                        </CardTitle>
+                        <CardDescription className="mt-1">
+                          {getDocumentType(doc.documentType)}
+                        </CardDescription>
+                      </div>
+                      {getStatusBadge(doc.status)}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-4">
+                    <div className="text-sm text-gray-600 space-y-2">
+                      <div className="flex justify-between">
+                        <span>Curso:</span>
+                        <span className="font-medium">{doc.courseName}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Tipo de arquivo:</span>
+                        <span className="font-medium">{doc.fileType.toUpperCase()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Tamanho:</span>
+                        <span className="font-medium">{formatFileSize(doc.fileSize)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Enviado em:</span>
+                        <span className="font-medium">
+                          {new Date(doc.uploadedAt).toLocaleDateString('pt-BR')}
+                        </span>
+                      </div>
+                      {doc.ocrQuality !== undefined && (
+                        <div className="flex justify-between">
+                          <span>Qualidade OCR:</span>
+                          <span className="font-medium">
+                            {doc.ocrQuality.toFixed(1)}%
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                  <CardFooter className="flex justify-between gap-2 p-4 pt-0 border-t">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleViewDocument(doc)}
+                      className="flex-1"
+                    >
+                      <Eye className="h-4 w-4 mr-1" /> Visualizar
                     </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-          
-          <TabsContent value="verified" className="mt-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Documentos Verificados</CardTitle>
-                <CardDescription>
-                  Documentos aprovados pela instituição
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {documents && documents.filter((doc: any) => doc.status === 'verified').length > 0 ? (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Documento</TableHead>
-                        <TableHead>Curso</TableHead>
-                        <TableHead>Data de Envio</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Ações</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {documents
-                        .filter((doc: any) => doc.status === 'verified')
-                        .map((doc: any) => (
-                          <TableRow key={doc.id}>
-                            <TableCell className="font-medium">
-                              <div className="flex items-center">
-                                {getFileIcon(doc.fileType)}
-                                <span className="ml-2">{formatDocumentType(doc.documentType)}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell>{doc.courseName || 'N/A'}</TableCell>
-                            <TableCell>
-                              {doc.uploadedAt ? format(new Date(doc.uploadedAt), 'dd/MM/yyyy') : 'N/A'}
-                            </TableCell>
-                            <TableCell>{getStatusBadge(doc.status)}</TableCell>
-                            <TableCell>
-                              <div className="flex space-x-2">
-                                <Button variant="outline" size="sm" onClick={() => window.open(doc.fileUrl, '_blank')}>
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                                <Button variant="outline" size="sm">
-                                  <Download className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <div className="text-center py-10">
-                    <p className="text-muted-foreground">Nenhum documento verificado encontrado.</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-          
-          <TabsContent value="pending" className="mt-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Documentos Pendentes</CardTitle>
-                <CardDescription>
-                  Documentos aguardando verificação
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {documents && documents.filter((doc: any) => doc.status === 'uploaded' || doc.status === 'needs_review').length > 0 ? (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Documento</TableHead>
-                        <TableHead>Curso</TableHead>
-                        <TableHead>Data de Envio</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Ações</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {documents
-                        .filter((doc: any) => doc.status === 'uploaded' || doc.status === 'needs_review')
-                        .map((doc: any) => (
-                          <TableRow key={doc.id}>
-                            <TableCell className="font-medium">
-                              <div className="flex items-center">
-                                {getFileIcon(doc.fileType)}
-                                <span className="ml-2">{formatDocumentType(doc.documentType)}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell>{doc.courseName || 'N/A'}</TableCell>
-                            <TableCell>
-                              {doc.uploadedAt ? format(new Date(doc.uploadedAt), 'dd/MM/yyyy') : 'N/A'}
-                            </TableCell>
-                            <TableCell>{getStatusBadge(doc.status)}</TableCell>
-                            <TableCell>
-                              <div className="flex space-x-2">
-                                <Button variant="outline" size="sm" onClick={() => window.open(doc.fileUrl, '_blank')}>
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                                <Button 
-                                  variant="outline" 
-                                  size="sm"
-                                  onClick={() => openAnalysis(doc.enrollmentId)}
-                                >
-                                  <HelpCircle className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <div className="text-center py-10">
-                    <p className="text-muted-foreground">Nenhum documento pendente encontrado.</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-          
-          <TabsContent value="rejected" className="mt-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Documentos Rejeitados</CardTitle>
-                <CardDescription>
-                  Documentos que precisam ser reenviados
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {documents && documents.filter((doc: any) => doc.status === 'rejected').length > 0 ? (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Documento</TableHead>
-                        <TableHead>Curso</TableHead>
-                        <TableHead>Data de Envio</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Ações</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {documents
-                        .filter((doc: any) => doc.status === 'rejected')
-                        .map((doc: any) => (
-                          <TableRow key={doc.id}>
-                            <TableCell className="font-medium">
-                              <div className="flex items-center">
-                                {getFileIcon(doc.fileType)}
-                                <span className="ml-2">{formatDocumentType(doc.documentType)}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell>{doc.courseName || 'N/A'}</TableCell>
-                            <TableCell>
-                              {doc.uploadedAt ? format(new Date(doc.uploadedAt), 'dd/MM/yyyy') : 'N/A'}
-                            </TableCell>
-                            <TableCell>{getStatusBadge(doc.status)}</TableCell>
-                            <TableCell>
-                              <div className="flex space-x-2">
-                                <Button variant="outline" size="sm" onClick={() => window.open(doc.fileUrl, '_blank')}>
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                                <Button 
-                                  variant="outline" 
-                                  size="sm"
-                                  onClick={() => openAnalysis(doc.enrollmentId)}
-                                >
-                                  <HelpCircle className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <div className="text-center py-10">
-                    <p className="text-muted-foreground">Nenhum documento rejeitado encontrado.</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      ) : (
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-semibold tracking-tight">Análise de Documento</h2>
-            <Button variant="outline" onClick={() => setShowAnalysis(false)}>
-              Voltar para Documentos
-            </Button>
-          </div>
-          
-          {selectedEnrollmentId && (
-            <DocumentsView 
-              enrollmentId={selectedEnrollmentId} 
-              userData={userData}
-              onAnalysisComplete={handleAnalysisComplete}
-            />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDownloadDocument(doc)}
+                      className="flex-1"
+                    >
+                      <Download className="h-4 w-4 mr-1" /> Baixar
+                    </Button>
+                  </CardFooter>
+                </Card>
+              ))}
+            </div>
           )}
+        </TabsContent>
+      </Tabs>
+
+      {selectedDoc && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+            <div className="p-4 border-b flex justify-between items-center">
+              <h3 className="text-xl font-bold">{selectedDoc.fileName}</h3>
+              <Button variant="ghost" size="sm" onClick={() => setSelectedDoc(null)}>
+                <XCircle className="h-5 w-5" />
+              </Button>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              {selectedDoc.fileType.includes('image') ? (
+                <img 
+                  src={selectedDoc.fileUrl} 
+                  alt={selectedDoc.fileName}
+                  className="max-w-full mx-auto"
+                />
+              ) : selectedDoc.fileType.includes('pdf') ? (
+                <iframe 
+                  src={`${selectedDoc.fileUrl}#toolbar=0`} 
+                  className="w-full h-[60vh]"
+                  title={selectedDoc.fileName}
+                ></iframe>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <FileText className="h-16 w-16 text-gray-400 mb-4" />
+                  <h3 className="text-xl font-medium text-gray-700">Visualização não disponível</h3>
+                  <p className="text-gray-500 mt-2 text-center">
+                    Este tipo de arquivo não pode ser visualizado diretamente no navegador.
+                  </p>
+                  <Button
+                    variant="outline"
+                    className="mt-4"
+                    onClick={() => handleDownloadDocument(selectedDoc)}
+                  >
+                    <Download className="h-4 w-4 mr-2" /> Baixar Arquivo
+                  </Button>
+                </div>
+              )}
+
+              {selectedDoc.ocrData && (
+                <div className="mt-6 border-t pt-4">
+                  <h4 className="text-lg font-semibold mb-3">Dados Extraídos (OCR)</h4>
+                  <div className="bg-gray-50 p-4 rounded-md">
+                    <pre className="whitespace-pre-wrap text-sm">{JSON.stringify(selectedDoc.ocrData, null, 2)}</pre>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setSelectedDoc(null)}>
+                Fechar
+              </Button>
+              <Button onClick={() => handleDownloadDocument(selectedDoc)}>
+                <Download className="h-4 w-4 mr-2" /> Baixar
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
-};
-
-export default DocumentsPage;
+}

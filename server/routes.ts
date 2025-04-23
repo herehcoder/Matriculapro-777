@@ -7,6 +7,7 @@ import { registerNotificationRoutes } from "./routes.notification";
 import { registerEnrollmentRoutes } from "./routes.enrollment";
 import { registerCourseRoutes } from "./routes.course";
 import { registerStudentRoutes } from "./routes.student";
+import { registerStudentDocumentsRoutes } from "./routes.student.documents";
 import { registerQuestionRoutes } from "./routes.question";
 import { registerDocumentRoutes } from "./routes.document";
 import { registerMessageRoutes } from "./routes.message";
@@ -122,6 +123,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerDocumentRoutes(app);
   registerMessageRoutes(app, isAuthenticated);
   registerStudentRoutes(app, isAuthenticated);
+  registerStudentDocumentsRoutes(app);
   registerUserRoutes(app, isAuthenticated);
   registerPaymentRoutes(app, isAuthenticated);
 

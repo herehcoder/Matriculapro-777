@@ -47,7 +47,7 @@ export function registerStudentDocumentsRoutes(app: Express) {
       for (const enrollment of enrollmentsList) {
         // Buscar curso relacionado à matrícula
         const course = await db.query.courses.findFirst({
-          where: eq(courses.id, enrollment.courseId),
+          where: eq(courses.id, Number(enrollment.courseId)),
         });
         
         // Buscar documentos desta matrícula
