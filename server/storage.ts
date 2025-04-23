@@ -1285,6 +1285,14 @@ export class DatabaseStorage implements IStorage {
       .returning();
     return updatedEnrollment;
   }
+  
+  async listEnrollments(limit = 100, offset = 0): Promise<Enrollment[]> {
+    return await db.select()
+      .from(enrollments)
+      .limit(limit)
+      .offset(offset)
+      .orderBy(desc(enrollments.createdAt));
+  }
 
   // WhatsApp messages management
   async getWhatsappMessage(id: number): Promise<WhatsappMessage | undefined> {
