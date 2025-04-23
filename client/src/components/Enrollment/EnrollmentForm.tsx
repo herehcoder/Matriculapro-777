@@ -4,6 +4,7 @@ import { createEnrollment, getCoursesBySchool, getQuestionsBySchool } from '@/li
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import PersonalInfoStep from './steps/PersonalInfoStep';
 import DocumentsStep from './steps/DocumentsStep';
+import PaymentStep from './steps/PaymentStep';
 import ReviewStep from './steps/ReviewStep';
 import CompletedStep from './steps/CompletedStep';
 import { Button } from '@/components/ui/button';
@@ -11,7 +12,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
 import { Loader2, ArrowLeft, ArrowRight, Check } from 'lucide-react';
 
-const STEPS = ['personal', 'documents', 'review', 'completed'];
+const STEPS = ['personal', 'documents', 'payment', 'review', 'completed'];
 
 interface EnrollmentFormProps {
   schoolId: number;
@@ -158,7 +159,7 @@ const EnrollmentForm: React.FC<EnrollmentFormProps> = ({
     <Card className="w-full shadow-lg border-neutral-200 dark:border-neutral-800">
       <div className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 rounded-t-lg">
         <Tabs value={STEPS[activeStep]} className="w-full">
-          <TabsList className="grid grid-cols-4 h-auto p-0 rounded-none bg-transparent">
+          <TabsList className="grid grid-cols-5 h-auto p-0 rounded-none bg-transparent">
             {STEPS.map((step, index) => (
               <TabsTrigger
                 key={step}
@@ -189,6 +190,8 @@ const EnrollmentForm: React.FC<EnrollmentFormProps> = ({
                       ? 'Dados Pessoais'
                       : step === 'documents'
                       ? 'Documentos'
+                      : step === 'payment'
+                      ? 'Pagamento'
                       : step === 'review'
                       ? 'Revisão'
                       : 'Finalizado'}
