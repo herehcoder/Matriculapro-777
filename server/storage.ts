@@ -1095,6 +1095,62 @@ export class MemStorage implements IStorage {
     // Convert from cents to whole units (e.g., 4532000 -> 45320)
     return Math.round(totalRevenue / 100);
   }
+  
+  // User Settings Management
+  getUserSettings(userId: number): Promise<UserSettings | undefined> {
+    const userSettings = Array.from(this.userSettingsMap.values()).find(
+      (settings) => settings.userId === userId
+    );
+    return Promise.resolve(userSettings);
+  }
+
+  createUserSettings(settings: InsertUserSettings): Promise<UserSettings> {
+    const id = this.userSettingsIdCounter++;
+    const newSettings: UserSettings = {
+      id,
+      userId: settings.userId,
+      notifications: settings.notifications || {
+        email: true,
+        push: false,
+        sms: true,
+        whatsapp: true
+      },
+      appearance: settings.appearance || {
+        darkMode: false,
+        compactMode: false
+      },
+      security: settings.security || {
+        twoFactorEnabled: false
+      },
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    this.userSettingsMap.set(id, newSettings);
+    return Promise.resolve(newSettings);
+  }
+
+  updateUserSettings(userId: number, settings: Partial<UserSettings>): Promise<UserSettings | undefined> {
+    let found = false;
+    let updatedSettings: UserSettings | undefined;
+    
+    for (const [id, existingSettings] of this.userSettingsMap.entries()) {
+      if (existingSettings.userId === userId) {
+        found = true;
+        
+        const updated: UserSettings = {
+          ...existingSettings,
+          ...settings,
+          updatedAt: new Date()
+        };
+        
+        this.userSettingsMap.set(id, updated);
+        updatedSettings = updated;
+        break;
+      }
+    }
+    
+    return Promise.resolve(found ? updatedSettings : undefined);
+  }
 }
 
 // Create a DatabaseStorage implementation
