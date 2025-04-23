@@ -116,8 +116,9 @@ export function registerPaymentRoutes(app: Express, isAuthenticated: any) {
           if (paymentIntent.metadata.enrollmentId) {
             await db.update(enrollments)
               .set({ 
-                status: 'active',
+                status: 'completed',
                 paymentStatus: 'paid',
+                paymentCompleted: true,
                 updatedAt: new Date()
               })
               .where(eq(enrollments.id, parseInt(paymentIntent.metadata.enrollmentId)));

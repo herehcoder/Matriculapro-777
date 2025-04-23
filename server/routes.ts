@@ -11,6 +11,7 @@ import { registerQuestionRoutes } from "./routes.question";
 import { registerDocumentRoutes } from "./routes.document";
 import { registerMessageRoutes } from "./routes.message";
 import { registerUserRoutes } from "./routes.user";
+import { registerPaymentRoutes } from "./routes.payment";
 import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
@@ -58,6 +59,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     '/api/auth/register',
     '/api/enrollments',
     '/api/answers',
+    '/api/payments/webhook',
   ];
   
   // Middleware to check if user is authenticated
@@ -113,7 +115,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Register notification routes
   registerNotificationRoutes(app, isAuthenticated);
   
-  // Register enrollment, course, document, message, and question routes
+  // Register enrollment, course, document, message, payment, and question routes
   registerEnrollmentRoutes(app, isAuthenticated);
   registerCourseRoutes(app, isAuthenticated);
   registerQuestionRoutes(app, isAuthenticated);
@@ -121,6 +123,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerMessageRoutes(app, isAuthenticated);
   registerStudentRoutes(app, isAuthenticated);
   registerUserRoutes(app, isAuthenticated);
+  registerPaymentRoutes(app, isAuthenticated);
 
   // Middleware for error handling
   const handleZodError = (
