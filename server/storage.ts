@@ -1,16 +1,16 @@
 import {
   users, schools, attendants, students, leads, courses, questions, answers,
-  chatHistory, enrollments, whatsappMessages, metrics, notifications, messages,
+  chatHistory, enrollments, whatsappMessages, metrics, notifications, messages, passwordResetTokens,
   type User, type InsertUser, type School, type InsertSchool,
   type Attendant, type Student, type InsertStudent, type Lead, type InsertLead,
   type Course, type InsertCourse, type Question, type InsertQuestion,
   type Answer, type InsertAnswer, type ChatMessage, type InsertChatMessage,
   type Enrollment, type InsertEnrollment, type WhatsappMessage, type InsertWhatsappMessage,
   type Metric, type InsertMetric, type Notification, type InsertNotification,
-  type Message, type InsertMessage
+  type Message, type InsertMessage, type PasswordResetToken, type InsertPasswordResetToken
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte, lte, desc, asc, sql } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql, or, lt } from "drizzle-orm";
 
 // Interface for the storage
 export interface IStorage {
@@ -122,6 +122,13 @@ export interface IStorage {
   getConversation(user1Id: number, user2Id: number): Promise<Message[]>;
   createMessage(message: InsertMessage): Promise<Message>;
   updateMessageStatus(id: number, status: 'sent' | 'delivered' | 'read'): Promise<Message | undefined>;
+  
+  // Password reset token management
+  createPasswordResetToken(token: InsertPasswordResetToken): Promise<PasswordResetToken>;
+  getPasswordResetTokenByToken(token: string): Promise<PasswordResetToken | undefined>;
+  getPasswordResetTokensByUser(userId: number): Promise<PasswordResetToken[]>;
+  markPasswordResetTokenAsUsed(token: string): Promise<PasswordResetToken | undefined>;
+  deleteExpiredPasswordResetTokens(): Promise<void>;
 }
 
 // In-memory storage implementation
@@ -1548,6 +1555,48 @@ export class DatabaseStorage implements IStorage {
 import { addNotificationMethodsToDatabaseStorage } from './storage.notification';
 
 // Storage instance
+// Implementação dos métodos de gerenciamento de tokens de redefinição de senha
+DatabaseStorage.prototype.createPasswordResetToken = async function(token: InsertPasswordResetToken): Promise<PasswordResetToken> {
+  const [newToken] = await db.insert(passwordResetTokens).values(token).returning();
+  return newToken;
+};
+
+DatabaseStorage.prototype.getPasswordResetTokenByToken = async function(token: string): Promise<PasswordResetToken | undefined> {
+  const [resetToken] = await db
+    .select()
+    .from(passwordResetTokens)
+    .where(eq(passwordResetTokens.token, token));
+  return resetToken || undefined;
+};
+
+DatabaseStorage.prototype.getPasswordResetTokensByUser = async function(userId: number): Promise<PasswordResetToken[]> {
+  return await db
+    .select()
+    .from(passwordResetTokens)
+    .where(eq(passwordResetTokens.userId, userId))
+    .orderBy(desc(passwordResetTokens.createdAt));
+};
+
+DatabaseStorage.prototype.markPasswordResetTokenAsUsed = async function(token: string): Promise<PasswordResetToken | undefined> {
+  const [updatedToken] = await db
+    .update(passwordResetTokens)
+    .set({ used: true })
+    .where(eq(passwordResetTokens.token, token))
+    .returning();
+  return updatedToken || undefined;
+};
+
+DatabaseStorage.prototype.deleteExpiredPasswordResetTokens = async function(): Promise<void> {
+  await db
+    .delete(passwordResetTokens)
+    .where(
+      or(
+        lt(passwordResetTokens.expiresAt, new Date()),
+        eq(passwordResetTokens.used, true)
+      )
+    );
+};
+
 export const storage = new DatabaseStorage();
 
 // Add notification methods

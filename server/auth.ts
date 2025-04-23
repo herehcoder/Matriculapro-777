@@ -32,13 +32,13 @@ declare global {
 
 const scryptAsync = promisify(scrypt);
 
-async function hashPassword(password: string) {
+export async function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
   const buf = (await scryptAsync(password, salt, 64)) as Buffer;
   return `${buf.toString("hex")}.${salt}`;
 }
 
-async function comparePasswords(supplied: string, stored: string) {
+export async function comparePasswords(supplied: string, stored: string) {
   const [hashed, salt] = stored.split(".");
   const hashedBuf = Buffer.from(hashed, "hex");
   const suppliedBuf = (await scryptAsync(supplied, salt, 64)) as Buffer;
@@ -210,5 +210,119 @@ export async function setupAuth(app: Express) {
     // Don't send password back to client
     const { password, ...userWithoutPassword } = req.user as User;
     res.json(userWithoutPassword);
+  });
+
+  // Rota para solicitar redefinição de senha
+  app.post("/api/auth/forgot-password", async (req, res) => {
+    try {
+      const { email } = req.body;
+      
+      if (!email) {
+        return res.status(400).json({ message: "Email é obrigatório" });
+      }
+
+      // Verificar se o usuário existe
+      const user = await storage.getUserByEmail(email);
+      if (!user) {
+        // Por segurança, não informamos ao usuário que o email não existe
+        return res.status(200).json({ 
+          message: "Se o email estiver cadastrado, você receberá instruções para redefinir sua senha."
+        });
+      }
+
+      // Gerar token aleatório
+      const token = randomBytes(40).toString('hex');
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 1); // Expira em 1 hora
+
+      // Deletar tokens expirados e já utilizados
+      await storage.deleteExpiredPasswordResetTokens();
+
+      // Salvar token no banco de dados
+      await storage.createPasswordResetToken({
+        userId: user.id,
+        token,
+        expiresAt,
+        used: false
+      });
+
+      // Enviar email com link para redefinição
+      const { emailService } = await import('./email');
+      const emailResult = await emailService.sendPasswordResetEmail(
+        user.email,
+        token,
+        user.fullName
+      );
+
+      if (!emailResult.success) {
+        console.error('Erro ao enviar email de redefinição de senha:', emailResult.error);
+        return res.status(500).json({ message: "Erro ao enviar email de redefinição de senha" });
+      }
+
+      res.status(200).json({ 
+        message: "Se o email estiver cadastrado, você receberá instruções para redefinir sua senha."
+      });
+    } catch (err) {
+      console.error("Forgot password error:", err);
+      res.status(500).json({ message: "Erro ao processar solicitação de redefinição de senha" });
+    }
+  });
+
+  // Rota para validar token de redefinição de senha
+  app.get("/api/auth/reset-password/:token", async (req, res) => {
+    try {
+      const { token } = req.params;
+      
+      // Verificar se o token existe e não expirou
+      const resetToken = await storage.getPasswordResetTokenByToken(token);
+      
+      if (!resetToken || resetToken.used || resetToken.expiresAt < new Date()) {
+        return res.status(400).json({ message: "Token inválido ou expirado" });
+      }
+
+      res.status(200).json({ message: "Token válido", userId: resetToken.userId });
+    } catch (err) {
+      console.error("Validate reset token error:", err);
+      res.status(500).json({ message: "Erro ao validar token de redefinição de senha" });
+    }
+  });
+
+  // Rota para redefinir a senha
+  app.post("/api/auth/reset-password", async (req, res) => {
+    try {
+      const { token, password } = req.body;
+      
+      if (!token || !password) {
+        return res.status(400).json({ message: "Token e nova senha são obrigatórios" });
+      }
+
+      // Verificar se o token existe e não expirou
+      const resetToken = await storage.getPasswordResetTokenByToken(token);
+      
+      if (!resetToken || resetToken.used || resetToken.expiresAt < new Date()) {
+        return res.status(400).json({ message: "Token inválido ou expirado" });
+      }
+
+      // Hash da nova senha
+      const hashedPassword = await hashPassword(password);
+
+      // Atualizar a senha do usuário
+      const user = await storage.getUser(resetToken.userId);
+      if (!user) {
+        return res.status(404).json({ message: "Usuário não encontrado" });
+      }
+
+      await storage.updateUser(user.id, {
+        password: hashedPassword
+      });
+
+      // Marcar token como usado
+      await storage.markPasswordResetTokenAsUsed(token);
+
+      res.status(200).json({ message: "Senha redefinida com sucesso" });
+    } catch (err) {
+      console.error("Reset password error:", err);
+      res.status(500).json({ message: "Erro ao redefinir senha" });
+    }
   });
 }
