@@ -23,6 +23,12 @@ export interface IStorage {
   updateUser(id: number, user: Partial<User>): Promise<User | undefined>;
   deleteUser(id: number): Promise<boolean>;
   listUsers(limit?: number, offset?: number): Promise<User[]>;
+  getAllUsers(): Promise<User[]>;
+  getUsersBySchool(schoolId: number): Promise<User[]>;
+  searchUsers(term: string): Promise<User[]>;
+  searchUsersBySchool(term: string, schoolId: number): Promise<User[]>;
+  countUsers(): Promise<number>;
+  countUsersByRole(role: string): Promise<number>;
   
   // School management
   getSchool(id: number): Promise<School | undefined>;
