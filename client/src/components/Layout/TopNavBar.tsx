@@ -20,7 +20,7 @@ interface TopNavBarProps {
 }
 
 export function TopNavBar({ onSidebarToggle }: TopNavBarProps) {
-  const { user, logout } = useAuth();
+  const { user, logoutMutation } = useAuth();
   
   const getInitials = (name: string) => {
     return name
@@ -128,7 +128,7 @@ export function TopNavBar({ onSidebarToggle }: TopNavBarProps) {
               <DropdownMenuSeparator />
               <DropdownMenuItem 
                 className="text-red-500 dark:text-red-400 focus:text-red-500 dark:focus:text-red-400"
-                onClick={() => logout()}
+                onClick={() => logoutMutation.mutate()}
               >
                 <LogOut className="mr-2 h-4 w-4" />
                 <span>Sair</span>

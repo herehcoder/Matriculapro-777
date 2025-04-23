@@ -54,14 +54,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading,
     refetch
   } = useQuery<User | null, Error>({
-    queryKey: ["/api/user"],
+    queryKey: ["/api/auth/me"],
     queryFn: getQueryFn({ on401: "returnNull" }),
     retry: false
   });
 
   const loginMutation = useMutation<User, Error, LoginData>({
     mutationFn: async (credentials: LoginData) => {
-      const res = await apiRequest("POST", "/api/login", credentials);
+      const res = await apiRequest("POST", "/api/auth/login", credentials);
       
       if (!res.ok) {
         let errorMessage = "Erro ao fazer login";
@@ -106,7 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const registerMutation = useMutation<User, Error, RegisterData>({
     mutationFn: async (userData: RegisterData) => {
-      const res = await apiRequest("POST", "/api/register", userData);
+      const res = await apiRequest("POST", "/api/auth/register", userData);
       
       if (!res.ok) {
         let errorMessage = "Erro ao registrar usuário";
@@ -145,7 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logoutMutation = useMutation<void, Error, void>({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/logout");
+      const res = await apiRequest("POST", "/api/auth/logout");
       
       if (!res.ok) {
         throw new Error("Erro ao fazer logout");
