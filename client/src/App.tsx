@@ -31,7 +31,9 @@ import WhatsAppPage from "@/pages/whatsapp/index";
 import AnalyticsPage from "@/pages/analytics/index";
 import AccountPage from "@/pages/account";
 import SettingsPage from "@/pages/settings";
-import UsersRoutes from "@/pages/users/index";
+import UsersList from "./pages/users/list";
+import NewUser from "./pages/users/new";
+import EditUserWithId from "./pages/users/edit/[id]";
 import { useAuth, AuthProvider } from "./lib/auth";
 import MainLayout from "./components/Layout/MainLayout";
 import { Loader2 } from "lucide-react";
@@ -115,7 +117,9 @@ function Router() {
         <Route path="/analytics" component={AnalyticsPage} />
         <Route path="/account" component={AccountPage} />
         <Route path="/settings" component={SettingsPage} />
-        <Route path="/users/*" component={UsersRoutes} />
+        <Route path="/users" component={UsersList} />
+        <Route path="/users/new" component={NewUser} />
+        <Route path="/users/edit/:id" component={EditUserWithId} />
         
         {/* Fallback to 404 */}
         <Route component={NotFound} />
