@@ -1,13 +1,14 @@
 import {
   users, schools, attendants, students, leads, courses, questions, answers,
-  chatHistory, enrollments, whatsappMessages, metrics, notifications, messages, passwordResetTokens,
+  chatHistory, enrollments, whatsappMessages, metrics, notifications, messages, passwordResetTokens, userSettings,
   type User, type InsertUser, type School, type InsertSchool,
   type Attendant, type Student, type InsertStudent, type Lead, type InsertLead,
   type Course, type InsertCourse, type Question, type InsertQuestion,
   type Answer, type InsertAnswer, type ChatMessage, type InsertChatMessage,
   type Enrollment, type InsertEnrollment, type WhatsappMessage, type InsertWhatsappMessage,
   type Metric, type InsertMetric, type Notification, type InsertNotification,
-  type Message, type InsertMessage, type PasswordResetToken, type InsertPasswordResetToken
+  type Message, type InsertMessage, type PasswordResetToken, type InsertPasswordResetToken,
+  type UserSettings, type InsertUserSettings
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql, or, lt } from "drizzle-orm";
@@ -129,6 +130,11 @@ export interface IStorage {
   getPasswordResetTokensByUser(userId: number): Promise<PasswordResetToken[]>;
   markPasswordResetTokenAsUsed(token: string): Promise<PasswordResetToken | undefined>;
   deleteExpiredPasswordResetTokens(): Promise<void>;
+  
+  // User settings management
+  getUserSettings(userId: number): Promise<UserSettings | undefined>;
+  createUserSettings(settings: InsertUserSettings): Promise<UserSettings>;
+  updateUserSettings(userId: number, settings: Partial<UserSettings>): Promise<UserSettings | undefined>;
 }
 
 // In-memory storage implementation
@@ -147,6 +153,7 @@ export class MemStorage implements IStorage {
   private metricsMap: Map<number, Metric>;
   private notificationsMap: Map<number, Notification>;
   private messagesMap: Map<number, Message>;
+  private userSettingsMap: Map<number, UserSettings>;
   
   private userIdCounter: number;
   private schoolIdCounter: number;
@@ -162,6 +169,7 @@ export class MemStorage implements IStorage {
   private metricIdCounter: number;
   private notificationIdCounter: number;
   private messageIdCounter: number;
+  private userSettingsIdCounter: number;
   
   // Notification and message methods will be added dynamically
 
@@ -180,6 +188,7 @@ export class MemStorage implements IStorage {
     this.metricsMap = new Map();
     this.notificationsMap = new Map();
     this.messagesMap = new Map();
+    this.userSettingsMap = new Map();
     
     this.userIdCounter = 1;
     this.schoolIdCounter = 1;
@@ -195,6 +204,7 @@ export class MemStorage implements IStorage {
     this.metricIdCounter = 1;
     this.notificationIdCounter = 1;
     this.messageIdCounter = 1;
+    this.userSettingsIdCounter = 1;
     
     // Initialize with some test data
     this.initializeTestData();
@@ -1595,6 +1605,66 @@ DatabaseStorage.prototype.deleteExpiredPasswordResetTokens = async function(): P
         eq(passwordResetTokens.used, true)
       )
     );
+};
+
+// Add user settings methods to MemStorage
+MemStorage.prototype.getUserSettings = async function(userId: number): Promise<UserSettings | undefined> {
+  return Array.from(this.userSettingsMap.values()).find(setting => setting.userId === userId);
+};
+
+MemStorage.prototype.createUserSettings = async function(settings: InsertUserSettings): Promise<UserSettings> {
+  const id = this.userSettingsIdCounter++;
+  const now = new Date();
+  const newSettings: UserSettings = {
+    ...settings,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  };
+  this.userSettingsMap.set(id, newSettings);
+  return newSettings;
+};
+
+MemStorage.prototype.updateUserSettings = async function(userId: number, settings: Partial<UserSettings>): Promise<UserSettings | undefined> {
+  const userSettings = Array.from(this.userSettingsMap.values()).find(setting => setting.userId === userId);
+  if (!userSettings) return undefined;
+  
+  const updatedSettings = {
+    ...userSettings,
+    ...settings,
+    updatedAt: new Date(),
+  };
+  this.userSettingsMap.set(userSettings.id, updatedSettings);
+  return updatedSettings;
+};
+
+// Add user settings methods to DatabaseStorage
+DatabaseStorage.prototype.getUserSettings = async function(userId: number): Promise<UserSettings | undefined> {
+  const [settings] = await db
+    .select()
+    .from(userSettings)
+    .where(eq(userSettings.userId, userId));
+  return settings || undefined;
+};
+
+DatabaseStorage.prototype.createUserSettings = async function(settings: InsertUserSettings): Promise<UserSettings> {
+  const [newSettings] = await db
+    .insert(userSettings)
+    .values(settings)
+    .returning();
+  return newSettings;
+};
+
+DatabaseStorage.prototype.updateUserSettings = async function(userId: number, settings: Partial<UserSettings>): Promise<UserSettings | undefined> {
+  const [updatedSettings] = await db
+    .update(userSettings)
+    .set({
+      ...settings,
+      updatedAt: new Date(),
+    })
+    .where(eq(userSettings.userId, userId))
+    .returning();
+  return updatedSettings || undefined;
 };
 
 export const storage = new DatabaseStorage();
