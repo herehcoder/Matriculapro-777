@@ -1,4 +1,4 @@
-import { Route, Switch } from "wouter";
+import { Route, Switch, useRoute } from "wouter";
 import UsersList from "./list";
 import NewUser from "./new";
 import EditUser from "./edit";
@@ -9,6 +9,8 @@ import { Loader2 } from "lucide-react";
 
 export default function UsersRoutes() {
   const { user, isLoading } = useAuth();
+  const [match] = useRoute("/users");
+  const [matchWildcard] = useRoute("/users/*");
 
   if (isLoading) {
     return (
@@ -24,9 +26,12 @@ export default function UsersRoutes() {
     return <NotFound />;
   }
 
+  if (match) {
+    return <UsersList />;
+  }
+
   return (
     <Switch>
-      <Route path="/users" component={UsersList} />
       <Route path="/users/new" component={NewUser} />
       <Route path="/users/edit" component={EditUser} />
       <Route path="/users/edit/:id" component={EditUserWithId} />

@@ -1,14 +1,13 @@
-import { useEffect } from "react";
 import { useLocation } from "wouter";
+import { useEffect } from "react";
 
 export default function EditUser() {
   const [, navigate] = useLocation();
 
-  // Redirecionar para a lista de usuários se acessar esta rota diretamente
+  // Página de redirecionamento para a edição de um usuário específico
   useEffect(() => {
     navigate("/users");
   }, [navigate]);
 
-  // Este componente não renderiza nada, apenas redireciona
   return null;
 }
