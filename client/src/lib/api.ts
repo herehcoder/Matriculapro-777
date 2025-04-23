@@ -48,6 +48,40 @@ export const uploadDocument = async (formData: FormData) => {
   }
 };
 
+// Análise OCR de documentos
+export const analyzeDocument = async (documentId: number, documentType?: string) => {
+  try {
+    return await fetch('/api/documents/analyze', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ documentId, documentType }),
+      credentials: 'include'
+    });
+  } catch (error) {
+    console.error('Error analyzing document:', error);
+    throw new Error('Erro ao analisar o documento');
+  }
+};
+
+// Verificação de documentos com dados do usuário
+export const verifyDocumentData = async (documentId: number, userData: Record<string, any>) => {
+  try {
+    return await fetch('/api/documents/verify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ documentId, userData }),
+      credentials: 'include'
+    });
+  } catch (error) {
+    console.error('Error verifying document:', error);
+    throw new Error('Erro ao verificar os dados do documento');
+  }
+};
+
 // Schools
 export const getSchools = () => {
   return fetch("/api/schools", { credentials: "include" }).then(res => {
@@ -229,14 +263,7 @@ export const sendWhatsAppMessage = (data: any) => {
   return apiRequest("POST", "/api/whatsapp/webhook", data);
 };
 
-// OCR e Análise de Documentos
-export const analyzeDocument = (documentId: number, documentType: string) => {
-  return apiRequest("POST", "/api/documents/analyze", { documentId, documentType });
-};
-
-export const verifyDocumentData = (documentId: number, userData: any) => {
-  return apiRequest("POST", "/api/documents/verify", { documentId, userData });
-};
+// As funções de análise de documento já foram definidas anteriormente
 
 // Dashboard Metrics
 export const getDashboardMetrics = (schoolId?: number) => {
