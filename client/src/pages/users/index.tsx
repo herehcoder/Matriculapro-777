@@ -3,7 +3,7 @@ import UsersList from "./list";
 import NewUser from "./new";
 import EditUser from "./edit";
 import EditUserWithId from "./edit/[id]";
-import { useAuth } from "../../lib/auth";
+import { useAuth } from "@/hooks/use-auth";
 import NotFound from "../not-found";
 import { Loader2 } from "lucide-react";
 
