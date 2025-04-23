@@ -1,5 +1,5 @@
 import { useLocation, useRoute } from "wouter";
-import { useAuth } from "../../../lib/auth";
+import { useAuth } from "@/hooks/use-auth";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { queryClient } from "@/lib/queryClient";
