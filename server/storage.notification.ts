@@ -3,7 +3,7 @@ import {
   type Notification, type InsertNotification,
   type Message, type InsertMessage
 } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, or } from "drizzle-orm";
 import { db } from "./db";
 
 // Implementations for MemStorage
