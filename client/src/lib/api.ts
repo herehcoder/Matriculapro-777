@@ -1,4 +1,5 @@
 import { apiRequest } from "./queryClient";
+import { Document } from '../../shared/schema';
 
 // Authentication
 export const loginUser = (email: string, password: string, role: string) => {
@@ -228,7 +229,14 @@ export const sendWhatsAppMessage = (data: any) => {
   return apiRequest("POST", "/api/whatsapp/webhook", data);
 };
 
-// Essa segunda função de upload de documento está duplicada e pode ser removida
+// OCR e Análise de Documentos
+export const analyzeDocument = (documentId: number, documentType: string) => {
+  return apiRequest("POST", "/api/documents/analyze", { documentId, documentType });
+};
+
+export const verifyDocumentData = (documentId: number, userData: any) => {
+  return apiRequest("POST", "/api/documents/verify", { documentId, userData });
+};
 
 // Dashboard Metrics
 export const getDashboardMetrics = (schoolId?: number) => {

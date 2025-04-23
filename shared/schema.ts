@@ -192,8 +192,11 @@ export const documents = pgTable('documents', {
   fileUrl: text('file_url').notNull(),
   fileSize: integer('file_size').notNull(),
   uploadedAt: timestamp('uploaded_at').notNull(),
-  status: text('status').notNull().default('uploaded'), // uploaded, verified, rejected
+  status: text('status').notNull().default('uploaded'), // uploaded, verified, needs_review, partial_match, mismatch, rejected
   notes: text('notes'),
+  ocrData: json('ocr_data'), // JSON data containing all OCR extracted content
+  ocrQuality: integer('ocr_quality'), // 0-100 numeric value of OCR quality
+  verificationResult: json('verification_result'), // Results of comparing OCR data with user data
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
