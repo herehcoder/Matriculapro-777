@@ -32,11 +32,91 @@ export function registerCourseRoutes(app: Express, isAuthenticated: any) {
     }
   });
 
+  // Get courses for exploration page (IMPORTANTE: Esta rota deve vir ANTES de /api/courses/:id)
+  app.get("/api/courses/explore", async (req: Request, res: Response) => {
+    try {
+      // Buscar todas as escolas ativas
+      const schools = await storage.listSchools();
+      
+      // Parâmetros de filtro
+      const { category, search, schoolId } = req.query;
+      
+      let allCourses = [];
+      
+      // Buscar todos os cursos ou filtrados por escola
+      if (schoolId) {
+        const schoolIdNum = Number(schoolId);
+        if (!isNaN(schoolIdNum)) {
+          const courses = await storage.getCoursesBySchool(schoolIdNum);
+          allCourses = courses;
+        } else {
+          return res.status(400).json({ message: "ID da escola inválido" });
+        }
+      } else {
+        // Buscar cursos de todas as escolas
+        for (const school of schools) {
+          const courses = await storage.getCoursesBySchool(school.id);
+          // Adicionar informações da escola em cada curso
+          const coursesWithSchool = courses.map(course => ({
+            ...course,
+            schoolName: school.name,
+            schoolLogo: school.logo
+          }));
+          
+          allCourses.push(...coursesWithSchool);
+        }
+      }
+      
+      // Aplicar filtro de categoria se fornecido
+      let filteredCourses = allCourses;
+      if (category && category !== 'all') {
+        filteredCourses = filteredCourses.filter(course => 
+          course.category && course.category.toLowerCase() === (category as string).toLowerCase()
+        );
+      }
+      
+      // Aplicar busca por texto se fornecida
+      if (search) {
+        const searchLower = (search as string).toLowerCase();
+        filteredCourses = filteredCourses.filter(course => 
+          course.name.toLowerCase().includes(searchLower) || 
+          (course.description && course.description.toLowerCase().includes(searchLower))
+        );
+      }
+      
+      // Extrair categorias únicas para uso nos filtros
+      const categories = [...new Set(allCourses
+        .filter(course => course.category)
+        .map(course => course.category)
+      )];
+      
+      res.json({
+        courses: filteredCourses,
+        categories: categories,
+        schools: schools.map(school => ({
+          id: school.id,
+          name: school.name,
+          logo: school.logo
+        }))
+      });
+    } catch (error) {
+      console.error("Error fetching courses for exploration:", error);
+      res.status(500).json({ message: "Error fetching courses for exploration" });
+    }
+  });
+
   // Get course by ID
   app.get("/api/courses/:id", async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const course = await storage.getCourse(parseInt(id));
+      const courseId = parseInt(id);
+      
+      // Verifica se é um número válido
+      if (isNaN(courseId)) {
+        return res.status(400).json({ message: "Invalid course ID" });
+      }
+      
+      const course = await storage.getCourse(courseId);
       
       if (!course) {
         return res.status(404).json({ message: "Course not found" });
@@ -150,76 +230,5 @@ export function registerCourseRoutes(app: Express, isAuthenticated: any) {
     }
   });
   
-  // Get courses for exploration page
-  app.get("/api/courses/explore", async (req: Request, res: Response) => {
-    try {
-      // Buscar todas as escolas ativas
-      const schools = await storage.listSchools();
-      
-      // Parâmetros de filtro
-      const { category, search, schoolId } = req.query;
-      
-      let allCourses = [];
-      
-      // Buscar todos os cursos ou filtrados por escola
-      if (schoolId) {
-        const schoolIdNum = Number(schoolId);
-        if (!isNaN(schoolIdNum)) {
-          const courses = await storage.getCoursesBySchool(schoolIdNum);
-          allCourses = courses;
-        } else {
-          return res.status(400).json({ message: "ID da escola inválido" });
-        }
-      } else {
-        // Buscar cursos de todas as escolas
-        for (const school of schools) {
-          const courses = await storage.getCoursesBySchool(school.id);
-          // Adicionar informações da escola em cada curso
-          const coursesWithSchool = courses.map(course => ({
-            ...course,
-            schoolName: school.name,
-            schoolLogo: school.logo
-          }));
-          
-          allCourses.push(...coursesWithSchool);
-        }
-      }
-      
-      // Aplicar filtro de categoria se fornecido
-      let filteredCourses = allCourses;
-      if (category && category !== 'all') {
-        filteredCourses = filteredCourses.filter(course => 
-          course.category && course.category.toLowerCase() === (category as string).toLowerCase()
-        );
-      }
-      
-      // Aplicar busca por texto se fornecida
-      if (search) {
-        const searchLower = (search as string).toLowerCase();
-        filteredCourses = filteredCourses.filter(course => 
-          course.name.toLowerCase().includes(searchLower) || 
-          (course.description && course.description.toLowerCase().includes(searchLower))
-        );
-      }
-      
-      // Extrair categorias únicas para uso nos filtros
-      const categories = [...new Set(allCourses
-        .filter(course => course.category)
-        .map(course => course.category)
-      )];
-      
-      res.json({
-        courses: filteredCourses,
-        categories: categories,
-        schools: schools.map(school => ({
-          id: school.id,
-          name: school.name,
-          logo: school.logo
-        }))
-      });
-    } catch (error) {
-      console.error("Error fetching courses for exploration:", error);
-      res.status(500).json({ message: "Error fetching courses for exploration" });
-    }
-  });
+
 }
