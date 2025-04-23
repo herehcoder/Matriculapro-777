@@ -30,11 +30,22 @@ const registerSchema = z.object({
   password: z.string().min(6, "Senha deve ter no mínimo 6 caracteres"),
   fullName: z.string().min(3, "Nome completo é obrigatório"),
   role: z.string().min(1, "Selecione um tipo de usuário"),
+  schoolId: z.number().optional().refine(
+    (val) => {
+      // Se for um estudante, o schoolId é obrigatório
+      const role = document.querySelector('select[name="role"]')?.value;
+      return role !== 'student' || (val != null && val > 0);
+    },
+    {
+      message: "Selecionar uma escola é obrigatório para estudantes",
+    }
+  ),
 });
 
 export default function Register() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSchoolField, setShowSchoolField] = useState(false);
   const [, navigate] = useLocation();
   const { toast } = useToast();
   
@@ -46,8 +57,37 @@ export default function Register() {
       password: "",
       fullName: "",
       role: "school",
+      schoolId: undefined,
     },
   });
+
+  // Buscar escolas para o dropdown
+  const { data: schools, isLoading: isLoadingSchools } = useQuery({
+    queryKey: ["/api/schools"],
+    queryFn: async () => {
+      try {
+        const response = await fetch("/api/schools");
+        if (!response.ok) throw new Error("Falha ao buscar escolas");
+        return await response.json();
+      } catch (error) {
+        console.error("Erro ao buscar escolas:", error);
+        return [];
+      }
+    },
+  });
+
+  // Observar mudanças no tipo de usuário
+  const watchRole = form.watch("role");
+  
+  // Atualizar a visibilidade do campo escola com base no role
+  useEffect(() => {
+    setShowSchoolField(watchRole === "student");
+    
+    // Se não for estudante, limpar o campo schoolId
+    if (watchRole !== "student") {
+      form.setValue("schoolId", undefined);
+    }
+  }, [watchRole, form]);
 
   const { register } = useAuth();
   
