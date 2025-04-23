@@ -8,6 +8,7 @@ import { registerEnrollmentRoutes } from "./routes.enrollment";
 import { registerCourseRoutes } from "./routes.course";
 import { registerQuestionRoutes } from "./routes.question";
 import { registerDocumentRoutes } from "./routes.document";
+import { registerMessageRoutes } from "./routes.message";
 import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";

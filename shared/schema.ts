@@ -178,6 +178,23 @@ export const whatsappMessages = pgTable('whatsapp_messages', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// Documents table
+export const documents = pgTable('documents', {
+  id: serial('id').primaryKey(),
+  enrollmentId: integer('enrollment_id').notNull().references(() => enrollments.id),
+  documentType: text('document_type').notNull(), // identityDocument, proofOfAddress, photo, schoolRecords
+  fileName: text('file_name').notNull(),
+  fileType: text('file_type').notNull(), // MIME type
+  filePath: text('file_path').notNull(),
+  fileUrl: text('file_url').notNull(),
+  fileSize: integer('file_size').notNull(),
+  uploadedAt: timestamp('uploaded_at').notNull(),
+  status: text('status').notNull().default('uploaded'), // uploaded, verified, rejected
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // Metrics table for statistics
 export const metrics = pgTable('metrics', {
   id: serial('id').primaryKey(),
@@ -301,6 +318,13 @@ export const insertMessageSchema = createInsertSchema(messages).omit({
   createdAt: true
 });
 
+// Schema for inserting a new document
+export const insertDocumentSchema = createInsertSchema(documents).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -341,3 +365,6 @@ export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 
 export type Message = typeof messages.$inferSelect;
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
+
+export type Document = typeof documents.$inferSelect;
+export type InsertDocument = z.infer<typeof insertDocumentSchema>;
