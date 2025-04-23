@@ -67,6 +67,7 @@ const WhatsAppConnection: React.FC<WhatsAppConnectionProps> = ({ schoolId }) => 
     instanceToken: '',
     schoolId: schoolId,
     webhookUrl: '',
+    webhookSecret: '',
   });
   const [isEditMode, setIsEditMode] = useState(false);
 
@@ -99,6 +100,7 @@ const WhatsAppConnection: React.FC<WhatsAppConnectionProps> = ({ schoolId }) => 
         instanceToken: '',
         schoolId: instance.schoolId,
         webhookUrl: instance.webhookUrl || '',
+        webhookSecret: instance.webhookSecret || '',
       });
     }
   }, [instance]);
@@ -317,78 +319,147 @@ const WhatsAppConnection: React.FC<WhatsAppConnectionProps> = ({ schoolId }) => 
   const renderInstanceDetails = () => {
     if (!instance) return null;
 
-    const getStatusBadge = () => {
+    const getStatusDetails = () => {
+      const statusInfo: {
+        badge: React.ReactNode;
+        color: string;
+        progressValue: number;
+        statusText: string;
+        description: string;
+        icon: React.ReactNode;
+      } = {
+        badge: null,
+        color: '',
+        progressValue: 0,
+        statusText: '',
+        description: '',
+        icon: null
+      };
+
       switch (instance.status) {
         case 'connected':
-          return (
+          statusInfo.badge = (
             <Badge variant="success" className="bg-green-500">
               <Check className="h-3 w-3 mr-1" /> Conectado
             </Badge>
           );
+          statusInfo.color = 'bg-green-500';
+          statusInfo.progressValue = 100;
+          statusInfo.statusText = 'Conectado';
+          statusInfo.description = 'Seu WhatsApp está conectado e operacional. Você pode receber e enviar mensagens.';
+          statusInfo.icon = <Check className="h-5 w-5 text-green-500" />;
+          break;
         case 'connecting':
-          return (
+          statusInfo.badge = (
             <Badge variant="outline" className="bg-yellow-500 text-primary-foreground">
               <Loader2 className="h-3 w-3 mr-1 animate-spin" /> Conectando
             </Badge>
           );
+          statusInfo.color = 'bg-yellow-500';
+          statusInfo.progressValue = 50;
+          statusInfo.statusText = 'Aguardando conexão';
+          statusInfo.description = 'Escaneie o QR Code abaixo para conectar seu WhatsApp. O código expira em poucos minutos.';
+          statusInfo.icon = <QrCode className="h-5 w-5 text-yellow-500" />;
+          break;
         case 'disconnected':
         default:
-          return (
+          statusInfo.badge = (
             <Badge variant="outline" className="bg-slate-500 text-primary-foreground">
               <X className="h-3 w-3 mr-1" /> Desconectado
             </Badge>
           );
+          statusInfo.color = 'bg-slate-500';
+          statusInfo.progressValue = 0;
+          statusInfo.statusText = 'Desconectado';
+          statusInfo.description = 'Seu WhatsApp não está conectado. Clique no botão "Conectar" para iniciar o processo de conexão.';
+          statusInfo.icon = <Smartphone className="h-5 w-5 text-slate-500" />;
+          break;
       }
+
+      return statusInfo;
     };
+
+    const statusInfo = getStatusDetails();
 
     return (
       <>
         <CardContent className="space-y-4">
           <div className="flex flex-col space-y-4">
             <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">Status:</p>
-                <div className="mt-1">{getStatusBadge()}</div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setIsEditMode(true)}
-                disabled={connectInstanceMutation.isPending || disconnectInstanceMutation.isPending}
-              >
-                <Pencil className="h-4 w-4 mr-1" /> Editar
-              </Button>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium">ID da Instância:</p>
-              <p className="text-sm">{instance.instanceId}</p>
-            </div>
-
-            {instance.phoneNumber && (
-              <div>
-                <p className="text-sm font-medium">Número de Telefone:</p>
-                <p className="text-sm">{instance.phoneNumber}</p>
-              </div>
-            )}
-
-            {instance.lastConnection && (
-              <div>
-                <p className="text-sm font-medium">Última Conexão:</p>
-                <p className="text-sm">
-                  {new Date(instance.lastConnection).toLocaleString()}
+              <div className="w-full">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center">
+                    {statusInfo.icon}
+                    <p className="text-base font-medium ml-2">{statusInfo.statusText}</p>
+                  </div>
+                  <div className="mt-1">{statusInfo.badge}</div>
+                </div>
+                
+                <div className="w-full bg-gray-200 h-2 rounded-full mb-2">
+                  <div 
+                    className={`h-2 rounded-full ${statusInfo.color}`} 
+                    style={{ width: `${statusInfo.progressValue}%` }}
+                  ></div>
+                </div>
+                
+                <p className="text-sm text-muted-foreground mb-4">
+                  {statusInfo.description}
                 </p>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsEditMode(true)}
+                  disabled={connectInstanceMutation.isPending || disconnectInstanceMutation.isPending}
+                  className="ml-auto"
+                >
+                  <Pencil className="h-4 w-4 mr-1" /> Editar configurações
+                </Button>
               </div>
-            )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 p-4 bg-slate-50 rounded-md">
+              <div>
+                <p className="text-sm font-medium text-slate-500">ID da Instância:</p>
+                <p className="text-sm font-semibold">{instance.instanceId}</p>
+              </div>
+
+              {instance.phoneNumber && (
+                <div>
+                  <p className="text-sm font-medium text-slate-500">Número de Telefone:</p>
+                  <p className="text-sm font-semibold">{instance.phoneNumber}</p>
+                </div>
+              )}
+
+              {instance.lastConnection && (
+                <div>
+                  <p className="text-sm font-medium text-slate-500">Última Conexão:</p>
+                  <p className="text-sm font-semibold">
+                    {new Date(instance.lastConnection).toLocaleString()}
+                  </p>
+                </div>
+              )}
+
+              {instance.webhookUrl && (
+                <div>
+                  <p className="text-sm font-medium text-slate-500">URL do Webhook:</p>
+                  <p className="text-sm font-semibold truncate" title={instance.webhookUrl}>
+                    {instance.webhookUrl}
+                  </p>
+                </div>
+              )}
+            </div>
 
             {instance.status === 'connecting' && instance.qrCode && (
-              <div className="flex flex-col items-center justify-center p-4 border rounded-lg">
+              <div className="flex flex-col items-center justify-center p-6 border rounded-lg bg-white shadow-sm">
                 <p className="text-sm font-medium mb-2">Escaneie o QR Code para conectar</p>
-                <img
-                  src={`data:image/png;base64,${instance.qrCode}`}
-                  alt="QR Code para conexão"
-                  className="max-w-[200px] max-h-[200px]"
-                />
+                <div className="p-3 border rounded-lg bg-white mb-2">
+                  <img
+                    src={`data:image/png;base64,${instance.qrCode}`}
+                    alt="QR Code para conexão"
+                    className="max-w-[220px] max-h-[220px]"
+                  />
+                </div>
                 <p className="text-xs text-muted-foreground mt-2">
                   Abra o WhatsApp no seu celular e escaneie este código
                 </p>
