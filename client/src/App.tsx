@@ -30,6 +30,8 @@ import MyEnrollmentsPage from "@/pages/my-enrollments/index";
 import DocumentsPage from "@/pages/documents/index";
 import SupportPage from "@/pages/support/index";
 import WhatsAppPage from "@/pages/whatsapp/index";
+import SchoolWhatsAppPage from "@/pages/school/whatsapp";
+import WhatsAppConfigPage from "@/pages/admin/whatsapp-config";
 import AnalyticsPage from "@/pages/analytics/index";
 import AccountPage from "@/pages/account";
 import SettingsPage from "@/pages/settings";
