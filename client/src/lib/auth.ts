@@ -1,3 +1,7 @@
+/**
+ * @deprecated Este módulo está obsoleto. Utilize o novo hook de autenticação em @/hooks/use-auth
+ */
+
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { getCurrentUser, loginUser, logoutUser, registerUser } from "./api";
@@ -22,6 +26,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// @deprecated - Use AuthProvider from @/hooks/use-auth instead
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -143,7 +148,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 };
 
+/**
+ * @deprecated Use o useAuth de @/hooks/use-auth em vez disso
+ */
 export const useAuth = () => {
+  console.warn("ATENÇÃO: Você está usando uma versão obsoleta do useAuth. Importe de @/hooks/use-auth em vez disso.");
   const context = useContext(AuthContext);
   if (!context) {
     throw new Error("useAuth must be used within an AuthProvider");

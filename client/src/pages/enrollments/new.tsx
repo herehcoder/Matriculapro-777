@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, School, Users, Plus } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/hooks/use-auth";
 import { getSchools, getCoursesBySchool, createEnrollment } from "@/lib/api";
 import { Enrollment } from "@shared/schema";
 
