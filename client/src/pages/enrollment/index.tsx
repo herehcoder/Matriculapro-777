@@ -6,7 +6,7 @@ import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Loader2, ArrowLeft, School } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/hooks/use-auth";
 import { getSchool, getEnrollment, createEnrollment } from "@/lib/api";
 
 interface EnrollmentParams {

@@ -10,7 +10,7 @@ import { Send, Users, MessageSquare } from 'lucide-react';
 import UserList from './UserList';
 import ConversationList from './ConversationList';
 import MessageList from './MessageList';
-import { useAuth } from '@/lib/auth';
+import { useAuth } from '@/hooks/use-auth';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { queryClient } from '@/lib/queryClient';
