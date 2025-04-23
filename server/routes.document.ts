@@ -6,7 +6,7 @@ import fs from "fs";
 import { db } from "./db";
 import { documents, enrollments } from "../shared/schema";
 import { eq } from "drizzle-orm";
-import { analyzeDocument, verifyDocument } from "./utils/ocr";
+import { analyzeDocument, verifyDocument, validateDocumentAgainstForm } from "./utils/ocr";
 
 // Set up multer for handling file uploads
 const storage = multer.diskStorage({
@@ -100,8 +100,43 @@ export function registerDocumentRoutes(app: Express) {
         });
       }
       
-      // Executa OCR no documento usando Tesseract.js
-      const ocrResult = await analyzeDocument(document.filePath);
+      // Buscar dados da matrícula para validação cruzada
+      const enrollment = await db.query.enrollments.findFirst({
+        where: eq(enrollments.id, document.enrollmentId)
+      });
+      
+      // Preparar dados do formulário para validação cruzada se disponíveis
+      let formFields: Record<string, string> = {};
+      
+      if (enrollment) {
+        // Extrair dados do formulário com base no tipo de documento
+        if (document.documentType === 'rg' || document.documentType === 'identity') {
+          formFields = {
+            name: enrollment.studentName || '',
+            rg: enrollment.studentDocumentId || '',
+            birthDate: enrollment.studentBirthdate ? new Date(enrollment.studentBirthdate).toLocaleDateString('pt-BR') : ''
+          };
+        } else if (document.documentType === 'cpf') {
+          formFields = {
+            name: enrollment.studentName || '',
+            cpf: enrollment.studentCpf || '',
+            birthDate: enrollment.studentBirthdate ? new Date(enrollment.studentBirthdate).toLocaleDateString('pt-BR') : ''
+          };
+        } else if (document.documentType === 'address_proof' || document.documentType === 'comprovante_residencia') {
+          formFields = {
+            name: enrollment.studentName || '',
+            address: [
+              enrollment.studentAddress || '',
+              enrollment.studentAddressNumber || '',
+              enrollment.studentAddressComplement || ''
+            ].filter(Boolean).join(', '),
+            zipCode: enrollment.studentZipCode || ''
+          };
+        }
+      }
+      
+      // Executa OCR no documento usando Tesseract.js com dados do formulário para validação
+      const ocrResult = await analyzeDocument(document.filePath, formFields);
       
       if (!ocrResult.success) {
         return res.status(500).json({
@@ -172,21 +207,77 @@ export function registerDocumentRoutes(app: Express) {
       // Extrai os dados do OCR
       const ocrData = JSON.parse(document.ocrData);
       
-      // Verifica os dados extraídos usando nossa função de verificação
+      // Buscar a matrícula associada ao documento para obter dados de formulário
+      const enrollment = await db.query.enrollments.findFirst({
+        where: eq(enrollments.id, document.enrollmentId)
+      });
+      
+      // Preparar dados do formulário para validação cruzada com dados do OCR
+      let formFields: Record<string, string> = {};
+      
+      // Utilizar os dados informados pelo usuário na matrícula ou os enviados na requisição
+      if (userData && typeof userData === 'object') {
+        formFields = userData;
+      } else if (enrollment) {
+        // Selecionar dados do formulário de acordo com o tipo de documento
+        if (ocrData.documentType === 'rg' || ocrData.documentType === 'identity') {
+          formFields = {
+            name: enrollment.studentName || '',
+            rg: enrollment.studentDocumentId || '',
+            birthDate: enrollment.studentBirthdate ? new Date(enrollment.studentBirthdate).toLocaleDateString('pt-BR') : ''
+          };
+        } else if (ocrData.documentType === 'cpf') {
+          formFields = {
+            name: enrollment.studentName || '',
+            cpf: enrollment.studentCpf || '',
+            birthDate: enrollment.studentBirthdate ? new Date(enrollment.studentBirthdate).toLocaleDateString('pt-BR') : ''
+          };
+        } else if (ocrData.documentType === 'address_proof' || ocrData.documentType === 'comprovante_residencia') {
+          formFields = {
+            name: enrollment.studentName || '',
+            address: [
+              enrollment.studentAddress || '',
+              enrollment.studentAddressNumber || '',
+              enrollment.studentAddressComplement || ''
+            ].filter(Boolean).join(', '),
+            zipCode: enrollment.studentZipCode || ''
+          };
+        }
+      }
+      
+      // Verificação básica dos dados extraídos
       const isValid = verifyDocument(
         ocrData.documentType || "unknown",
         ocrData.fields || {}
       );
       
-      // Determinar o status baseado na verificação
-      const newStatus = isValid ? 'verified' : 'needs_review';
+      // Validação mais avançada usando comparação com dados do formulário
+      let validationResults = null;
       
-      // Criar um objeto simples de resultado de verificação
+      if (Object.keys(formFields).length > 0) {
+        validationResults = validateDocumentAgainstForm(
+          ocrData.documentType || "unknown",
+          ocrData.fields || {},
+          formFields
+        );
+      }
+      
+      // Determinar o status baseado na verificação
+      // Dar preferência à validação avançada, se disponível
+      const newStatus = validationResults 
+        ? (validationResults.isValid ? 'verified' : 'needs_review')
+        : (isValid ? 'verified' : 'needs_review');
+      
+      // Criar um objeto detalhado de resultado de verificação
       const verificationResult = {
-        isValid,
+        isValid: validationResults ? validationResults.isValid : isValid,
         documentType: ocrData.documentType || "unknown",
         fieldsFound: Object.keys(ocrData.fields || {}).length,
-        fieldsVerified: isValid ? Object.keys(ocrData.fields || {}).length : 0,
+        fieldsVerified: validationResults 
+          ? Object.keys(validationResults.fieldValidations).filter(key => validationResults.fieldValidations[key].isValid).length
+          : (isValid ? Object.keys(ocrData.fields || {}).length : 0),
+        score: validationResults ? validationResults.score : (isValid ? 80 : 30),
+        fieldValidations: validationResults?.fieldValidations || {},
         verifiedAt: new Date().toISOString()
       };
       
