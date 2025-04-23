@@ -18,6 +18,8 @@ import { registerAdminWhatsAppRoutes } from "./routes.admin.whatsapp";
 import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
+import { db } from "./db";
+import { and, desc, eq, gte, lt, lte, sql } from "drizzle-orm";
 import {
   insertUserSchema,
   insertSchoolSchema,
@@ -28,7 +30,13 @@ import {
   insertChatHistorySchema,
   insertQuestionSchema,
   insertNotificationSchema,
-  insertMessageSchema
+  insertMessageSchema,
+  // Adicionar tabelas para consultas SQL
+  schools,
+  students,
+  leads,
+  users,
+  enrollments
 } from "@shared/schema";
 import pusher, { 
   sendUserNotification, 
@@ -1028,53 +1036,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // API para métricas globais da plataforma (painel do administrador)
   app.get("/api/metrics/platform", isAuthenticated, hasRole(["admin"]), async (req, res) => {
     try {
-      // 1. Obter contagens gerais usando métodos otimizados do banco de dados
-      const totalSchools = await storage.countSchools();
-      const totalStudents = await storage.countStudents();
-      const totalLeads = await storage.countLeads();
-      const usersByRole = await storage.countUsersByRole();
+      // Obter métricas diretamente do banco de dados
+      // 1. Contagens básicas de registros
+      const countSchoolsResult = await db.select({ count: sql`count(*)` }).from(schools);
+      const totalSchools = Number(countSchoolsResult[0].count);
       
-      // Obter matrículas para cálculos adicionais
-      const enrollments = await storage.listEnrollments(1000, 0);
+      const countStudentsResult = await db.select({ count: sql`count(*)` }).from(students);
+      const totalStudents = Number(countStudentsResult[0].count);
       
-      // 2. Calcular estatísticas gerais
+      const countLeadsResult = await db.select({ count: sql`count(*)` }).from(leads);
+      const totalLeads = Number(countLeadsResult[0].count);
+      
+      // 2. Contagem de usuários por papel
+      const usersRolesResult = await db
+        .select({
+          role: users.role,
+          count: sql`count(*)`,
+        })
+        .from(users)
+        .groupBy(users.role);
+      
+      const usersByRole: Record<string, number> = {};
+      for (const row of usersRolesResult) {
+        usersByRole[row.role] = Number(row.count);
+      }
+      
       const totalUsers = Object.values(usersByRole).reduce((sum, count) => sum + count, 0);
       
-      // Calcular receita total (todos os pagamentos de matrículas)
-      const totalRevenue = enrollments.reduce((sum, e) => sum + (e.paymentAmount || 0), 0) / 100; // Converter centavos para reais
-      
-      // Calcular matrículas do último mês
+      // 3. Buscar matrículas (com filtro de data seguro)
       const now = new Date();
       const oneMonthAgo = new Date();
       oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
       
-      const enrollmentsLastMonth = enrollments.filter(e => {
-        const enrollmentDate = new Date(e.createdAt);
-        return enrollmentDate >= oneMonthAgo && enrollmentDate <= now;
-      });
+      const twoMonthsAgo = new Date(oneMonthAgo);
+      twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 1);
       
-      const enrollmentsTwoMonthsAgo = enrollments.filter(e => {
-        const enrollmentDate = new Date(e.createdAt);
-        const twoMonthsAgo = new Date(oneMonthAgo);
-        twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 1);
-        return enrollmentDate >= twoMonthsAgo && enrollmentDate < oneMonthAgo;
-      });
+      // Obter todas as matrículas
+      const allEnrollmentsResult = await db
+        .select({
+          id: enrollments.id,
+          createdAt: enrollments.createdAt,
+          status: enrollments.status,
+          paymentAmount: enrollments.paymentAmount,
+          paymentCompleted: enrollments.paymentCompleted
+        })
+        .from(enrollments);
+        
+      // Obter matrículas do último mês
+      const lastMonthEnrollmentsResult = await db
+        .select({
+          id: enrollments.id,
+          paymentAmount: enrollments.paymentAmount
+        })
+        .from(enrollments)
+        .where(
+          and(
+            gte(enrollments.createdAt, oneMonthAgo),
+            lte(enrollments.createdAt, now)
+          )
+        );
+        
+      // Obter matrículas de dois meses atrás
+      const twoMonthsAgoEnrollmentsResult = await db
+        .select({
+          id: enrollments.id,
+          paymentAmount: enrollments.paymentAmount
+        })
+        .from(enrollments)
+        .where(
+          and(
+            gte(enrollments.createdAt, twoMonthsAgo),
+            lt(enrollments.createdAt, oneMonthAgo)
+          )
+        );
       
-      // Calcular taxas de crescimento
-      const revenueLastMonth = enrollmentsLastMonth.reduce((sum, e) => sum + (e.paymentAmount || 0), 0) / 100;
-      const revenueTwoMonthsAgo = enrollmentsTwoMonthsAgo.reduce((sum, e) => sum + (e.paymentAmount || 0), 0) / 100;
+      // 4. Calcular estatísticas financeiras
+      const totalRevenue = allEnrollmentsResult.reduce((sum, e) => sum + (e.paymentAmount || 0), 0) / 100;
+      const revenueLastMonth = lastMonthEnrollmentsResult.reduce((sum, e) => sum + (e.paymentAmount || 0), 0) / 100;
+      const revenueTwoMonthsAgo = twoMonthsAgoEnrollmentsResult.reduce((sum, e) => sum + (e.paymentAmount || 0), 0) / 100;
       
       const revenueChange = revenueTwoMonthsAgo > 0 
         ? Math.round(((revenueLastMonth - revenueTwoMonthsAgo) / revenueTwoMonthsAgo) * 100) 
         : 0;
       
-      const enrollmentsChange = enrollmentsTwoMonthsAgo.length > 0 
-        ? Math.round(((enrollmentsLastMonth.length - enrollmentsTwoMonthsAgo.length) / enrollmentsTwoMonthsAgo.length) * 100) 
+      const enrollmentsChange = twoMonthsAgoEnrollmentsResult.length > 0 
+        ? Math.round(((lastMonthEnrollmentsResult.length - twoMonthsAgoEnrollmentsResult.length) / twoMonthsAgoEnrollmentsResult.length) * 100) 
         : 0;
       
       // Calcular taxa de conversão média
       const averageLeadConversion = totalLeads > 0 
-        ? Math.round((enrollments.length / totalLeads) * 100) 
+        ? Math.round((allEnrollmentsResult.length / totalLeads) * 100) 
         : 0;
       
       // 3. Montar resposta com dados reais do banco
@@ -1105,12 +1156,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         // Dados para gráficos e relatórios
         enrollmentStatus: {
-          started: enrollments.filter(e => e.status === 'started').length,
-          personalInfo: enrollments.filter(e => e.status === 'personal_info').length,
-          courseInfo: enrollments.filter(e => e.status === 'course_info').length,
-          payment: enrollments.filter(e => e.status === 'payment').length,
-          completed: enrollments.filter(e => e.status === 'completed').length,
-          abandoned: enrollments.filter(e => e.status === 'abandoned').length
+          started: allEnrollmentsResult.filter(e => e.status === 'started').length,
+          personalInfo: allEnrollmentsResult.filter(e => e.status === 'personal_info').length,
+          courseInfo: allEnrollmentsResult.filter(e => e.status === 'course_info').length,
+          payment: allEnrollmentsResult.filter(e => e.status === 'payment').length,
+          completed: allEnrollmentsResult.filter(e => e.status === 'completed').length,
+          abandoned: allEnrollmentsResult.filter(e => e.status === 'abandoned').length
         }
       };
       
@@ -1141,20 +1192,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "School ID is required" });
       }
       
-      // Buscar todas as matrículas da escola
-      const enrollments = await storage.getEnrollmentsBySchool(schoolId);
+      // Buscar todas as matrículas da escola diretamente do banco de dados
+      const enrollmentStatusResult = await db.select({
+        status: enrollments.status,
+        count: sql`count(*)`,
+      })
+      .from(enrollments)
+      .where(eq(enrollments.schoolId, schoolId))
+      .groupBy(enrollments.status);
       
-      // Agrupar por status
-      const statusMap = new Map();
-      enrollments.forEach(enrollment => {
-        const status = enrollment.status;
-        const current = statusMap.get(status) || 0;
-        statusMap.set(status, current + 1);
-      });
-      
-      const result = Array.from(statusMap.entries()).map(([status, count]) => ({
-        status,
-        count
+      // Formatar os resultados para o formato esperado pelo frontend
+      const result = enrollmentStatusResult.map(item => ({
+        status: item.status,
+        count: Number(item.count)
       }));
       
       res.json(result);
