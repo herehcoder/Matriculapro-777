@@ -24,7 +24,12 @@ export const emailService = {
    */
   async sendEmail(options: EmailOptions) {
     try {
-      const { to, subject, html, from = 'noreply@edumatrikapp.com' } = options;
+      const { to, subject, html, from = 'onboarding@resend.dev' } = options;
+      
+      console.log('Enviando email com as seguintes configurações:');
+      console.log('- De:', from);
+      console.log('- Para:', to);
+      console.log('- Assunto:', subject);
       
       const data = await resend.emails.send({
         from,
@@ -32,6 +37,14 @@ export const emailService = {
         subject,
         html,
       });
+      
+      console.log('Resposta completa do Resend:', JSON.stringify(data, null, 2));
+      
+      // Verificar se houve erro na resposta do Resend
+      if (data.error) {
+        console.error('Erro retornado pelo Resend:', data.error);
+        return { success: false, error: data.error };
+      }
       
       return { success: true, data };
     } catch (error) {
