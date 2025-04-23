@@ -13,6 +13,7 @@ import {
 import { Menu, LogOut, User, Settings } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { NotificationCenter } from "./NotificationCenter";
+import { ThemeSwitch } from "@/components/theme-switch";
 
 interface TopNavBarProps {
   onSidebarToggle: () => void;
@@ -70,6 +71,8 @@ export function TopNavBar({ onSidebarToggle }: TopNavBarProps) {
       </div>
       
       <div className="flex items-center space-x-4">
+        <ThemeSwitch />
+        
         {user && (
           <NotificationCenter 
             userId={user.id}
