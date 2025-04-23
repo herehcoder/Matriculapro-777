@@ -20,6 +20,8 @@ import NewEnrollmentPage from "@/pages/enrollments/new";
 import FormQuestionsPage from "@/pages/form-questions/index";
 import CoursesPage from "@/pages/courses/index";
 import NewCoursePage from "@/pages/courses/new";
+import WhatsAppPage from "@/pages/whatsapp/index";
+import AnalyticsPage from "@/pages/analytics/index";
 import AccountPage from "@/pages/account";
 import SettingsPage from "@/pages/settings";
 import { useAuth, AuthProvider } from "./lib/auth";
@@ -92,6 +94,8 @@ function Router() {
         <Route path="/onboarding" component={OnboardingPage} />
         <Route path="/courses" component={CoursesPage} />
         <Route path="/courses/new" component={NewCoursePage} />
+        <Route path="/whatsapp" component={WhatsAppPage} />
+        <Route path="/analytics" component={AnalyticsPage} />
         <Route path="/account" component={AccountPage} />
         <Route path="/settings" component={SettingsPage} />
         
