@@ -2,7 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import { Express, Router } from 'express';
 import { z } from 'zod';
 import { db } from './db';
-import { whatsappInstances, whatsappApiConfigs } from '../shared/whatsapp-config.schema';
+import { whatsappInstances } from '../shared/whatsapp.schema';
+import { whatsappApiConfigs } from '../shared/whatsapp-config.schema';
 import { eq, and } from 'drizzle-orm';
 import { sendUserNotification, NotificationPayload } from './pusher';
 

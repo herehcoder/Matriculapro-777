@@ -1854,3 +1854,7 @@ addNotificationMethodsToDatabaseStorage(storage);
 // Importar métodos de WhatsApp
 import { addWhatsappMethodsToStorage } from './storage.whatsapp';
 addWhatsappMethodsToStorage(storage);
+
+// Importar métodos de OCR
+import { addOcrMethodsToStorage } from './storage.ocr';
+addOcrMethodsToStorage(storage);

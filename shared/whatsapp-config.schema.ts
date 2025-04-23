@@ -1,110 +1,26 @@
-import { pgTable, serial, text, timestamp, boolean, integer } from "drizzle-orm/pg-core";
+import { pgTable, serial, varchar, boolean, timestamp, json } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 /**
- * Tabela de configurações globais do WhatsApp (Evolution API)
+ * Tabela de configurações da API do WhatsApp
  */
 export const whatsappApiConfigs = pgTable('whatsapp_api_configs', {
   id: serial('id').primaryKey(),
-  apiKey: text('api_key').notNull(),
-  apiBaseUrl: text('api_base_url').notNull(),
-  webhookUrl: text('webhook_url'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
-  createdById: integer('created_by_id')
-});
-
-/**
- * Tabela de instâncias do WhatsApp (uma por escola)
- */
-export const whatsappInstances = pgTable('whatsapp_instances', {
-  id: serial('id').primaryKey(),
-  instanceId: text('instance_id').notNull().unique(),
-  instanceToken: text('instance_token').notNull(),
-  schoolId: integer('school_id').notNull(),
-  status: text('status').default('disconnected').notNull(),
-  qrCode: text('qr_code'),
-  phoneNumber: text('phone_number'),
-  lastConnection: timestamp('last_connection'),
-  webhookUrl: text('webhook_url'),
-  webhookSecret: text('webhook_secret'), // Segredo para verificação do webhook
+  baseUrl: varchar('base_url', { length: 255 }).notNull(),
+  apiKey: varchar('api_key', { length: 255 }).notNull(),
+  active: boolean('active').default(true),
+  settings: json('settings'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow()
 });
 
-/**
- * Mensagens enviadas e recebidas via WhatsApp
- */
-export const whatsappMessages = pgTable('whatsapp_messages', {
-  id: serial('id').primaryKey(),
-  instanceId: integer('instance_id').notNull(),
-  contactId: integer('contact_id').notNull(),
-  direction: text('direction').notNull(), // 'incoming' | 'outgoing'
-  status: text('status').notNull(), // 'pending', 'sent', 'delivered', 'read', 'failed'
-  content: text('content'),
-  metadata: text('metadata'),
-  externalId: text('external_id'), // ID da mensagem na Evolution API
-  type: text('type').default('text'), // 'text', 'image', 'file', 'audio', etc.
-  timestamp: timestamp('timestamp').defaultNow(),
-  readAt: timestamp('read_at'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow()
-});
+// Criar Zod schema para validação
+export const insertWhatsappApiConfigSchema = createInsertSchema(whatsappApiConfigs, {
+  baseUrl: z.string().url('A URL base deve ser uma URL válida'),
+  apiKey: z.string().min(10, 'A chave da API deve ter pelo menos 10 caracteres')
+}).omit({ id: true, createdAt: true, updatedAt: true });
 
-/**
- * Logs de webhook e outras operações do WhatsApp
- */
-export const whatsappLogs = pgTable('whatsapp_logs', {
-  id: serial('id').primaryKey(),
-  instanceId: text('instance_id'), // Pode ser o ID numérico ou string da instância
-  schoolId: integer('school_id'), // Optional, pode ser nulo para logs de sistema
-  eventType: text('event_type').notNull(), // 'webhook', 'error', 'connection', etc.
-  payload: text('payload'), // Payload completo do evento
-  error: text('error'), // Mensagem de erro, se aplicável
-  createdAt: timestamp('created_at').defaultNow()
-});
-
-// Schemas Zod para inserção de dados
-export const insertWhatsAppApiConfigSchema = createInsertSchema(whatsappApiConfigs, {
-  apiKey: z.string().min(1, 'A chave da API é obrigatória'),
-  apiBaseUrl: z.string().url('URL da API inválida'),
-  webhookUrl: z.string().url('URL de webhook inválida').optional(),
-});
-
-export const insertWhatsAppInstanceSchema = createInsertSchema(whatsappInstances, {
-  instanceId: z.string().min(3, 'ID da instância deve ter no mínimo 3 caracteres'),
-  instanceToken: z.string().min(3, 'Token da instância é obrigatório'),
-  schoolId: z.number().int().positive('ID da escola é obrigatório'),
-  webhookUrl: z.string().url('URL inválida').optional(),
-  webhookSecret: z.string().optional(),
-});
-
-export const insertWhatsAppMessageSchema = createInsertSchema(whatsappMessages, {
-  instanceId: z.number().int().positive('ID da instância é obrigatório'),
-  contactId: z.number().int().positive('ID do contato é obrigatório'),
-  direction: z.enum(['incoming', 'outgoing']),
-  status: z.enum(['pending', 'sent', 'delivered', 'read', 'failed', 'error']),
-  content: z.string().optional(),
-});
-
-export const insertWhatsAppLogSchema = createInsertSchema(whatsappLogs, {
-  instanceId: z.string().optional(),
-  schoolId: z.number().int().positive().optional(),
-  eventType: z.string().min(1, 'Tipo de evento é obrigatório'),
-  payload: z.string().optional(),
-  error: z.string().optional(),
-});
-
-// Tipos para inserção e seleção
-export type WhatsAppApiConfig = typeof whatsappApiConfigs.$inferSelect;
-export type InsertWhatsAppApiConfig = typeof whatsappApiConfigs.$inferInsert;
-
-export type WhatsAppInstance = typeof whatsappInstances.$inferSelect;
-export type InsertWhatsAppInstance = typeof whatsappInstances.$inferInsert;
-
-export type WhatsAppMessage = typeof whatsappMessages.$inferSelect;
-export type InsertWhatsAppMessage = typeof whatsappMessages.$inferInsert;
-
-export type WhatsAppLog = typeof whatsappLogs.$inferSelect;
-export type InsertWhatsAppLog = typeof whatsappLogs.$inferInsert;
+// Tipos TypeScript
+export type WhatsappApiConfig = typeof whatsappApiConfigs.$inferSelect;
+export type InsertWhatsappApiConfig = z.infer<typeof insertWhatsappApiConfigSchema>;
