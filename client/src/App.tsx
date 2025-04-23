@@ -27,6 +27,7 @@ import CoursesPage from "@/pages/courses/index";
 import NewCoursePage from "@/pages/courses/new";
 import ExploreCoursesPage from "@/pages/courses/explore";
 import MyEnrollmentsPage from "@/pages/my-enrollments/index";
+import DocumentsPage from "@/pages/documents/index";
 import SupportPage from "@/pages/support/index";
 import WhatsAppPage from "@/pages/whatsapp/index";
 import AnalyticsPage from "@/pages/analytics/index";
@@ -115,6 +116,7 @@ function Router() {
         <Route path="/courses/new" component={NewCoursePage} />
         <Route path="/courses/explore" component={ExploreCoursesPage} />
         <Route path="/my-enrollments" component={MyEnrollmentsPage} />
+        <Route path="/documents" component={DocumentsPage} />
         <Route path="/support" component={SupportPage} />
         <Route path="/whatsapp" component={WhatsAppPage} />
         <Route path="/analytics" component={AnalyticsPage} />
