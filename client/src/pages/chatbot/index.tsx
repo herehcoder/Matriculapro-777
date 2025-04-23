@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/hooks/use-auth";
 import { getSchools } from "@/lib/api";
 import { ChatInterface } from "@/components/Chatbot/ChatInterface";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
