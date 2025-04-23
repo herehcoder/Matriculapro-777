@@ -289,7 +289,7 @@ export default function VendasPage() {
               Inovação em Gestão Escolar
             </Badge>
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold text-gray-900 mb-6">
-              Revolucione o processo de matrículas da sua <span className="text-primary">escola</span>
+              Revolucione o processo de matrículas da sua <span className="text-primary">escola</span> com <span className="text-primary">Matricula</span>
             </h1>
             <p className="text-xl md:text-2xl text-gray-600 max-w-3xl mx-auto mb-8">
               Reduza em até 80% o tempo gasto com processos manuais. Valide documentos automaticamente com IA e ofereça uma experiência digital moderna para pais e alunos.
@@ -343,7 +343,7 @@ export default function VendasPage() {
             className="text-center mb-16"
           >
             <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
-              Por que escolher o EduMatrik AI?
+              Por que escolher o Matricula?
             </motion.h2>
             <motion.p variants={itemVariants} className="text-xl text-gray-600 max-w-3xl mx-auto">
               Nossa plataforma foi desenvolvida para resolver os desafios mais comuns enfrentados por instituições educacionais.
@@ -406,8 +406,8 @@ export default function VendasPage() {
               viewport={{ once: true }}
               className="bg-white p-6 rounded-lg border border-gray-100 shadow-sm"
             >
-              <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center mb-4">
-                <Award className="w-6 h-6 text-yellow-600" />
+              <div className="w-12 h-12 bg-teal-100 rounded-lg flex items-center justify-center mb-4">
+                <Award className="w-6 h-6 text-teal-600" />
               </div>
               <h3 className="text-xl font-semibold mb-2">Métricas em Tempo Real</h3>
               <p className="text-gray-600">
@@ -464,7 +464,7 @@ export default function VendasPage() {
               O que nossos clientes dizem
             </motion.h2>
             <motion.p variants={itemVariants} className="text-xl text-gray-600 max-w-3xl mx-auto">
-              Escolas de todo o Brasil já transformaram seu processo de matrículas com o EduMatrik AI.
+              Escolas de todo o Brasil já transformaram seu processo de matrículas com o Matricula.
             </motion.p>
           </motion.div>
 
@@ -548,7 +548,7 @@ export default function VendasPage() {
                 Garantia incondicional de 30 dias
               </h2>
               <p className="text-lg text-gray-700 mb-6">
-                Estamos tão confiantes que o EduMatrik AI vai transformar sua instituição que oferecemos garantia total de reembolso nos primeiros 30 dias.
+                Estamos tão confiantes que o Matricula vai transformar sua instituição que oferecemos garantia total de reembolso nos primeiros 30 dias.
               </p>
               <ul className="space-y-4">
                 <li className="flex items-start">
@@ -574,7 +574,7 @@ export default function VendasPage() {
           
           <div className="mt-20 text-center">
             <h3 className="text-2xl font-semibold text-gray-900 mb-8">
-              Instituições que confiam no EduMatrik AI
+              Instituições que confiam no Matricula
             </h3>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-8">
               {/* Aqui você pode adicionar logos de clientes */}
@@ -602,7 +602,7 @@ export default function VendasPage() {
               Perguntas Frequentes
             </motion.h2>
             <motion.p variants={itemVariants} className="text-xl text-gray-600">
-              Tire suas dúvidas sobre o EduMatrik AI
+              Tire suas dúvidas sobre o Matricula
             </motion.p>
           </motion.div>
 
@@ -642,7 +642,7 @@ export default function VendasPage() {
             transition={{ duration: 0.6 }}
           >
             <h2 className="text-3xl md:text-4xl font-bold mb-6">
-              Transforme sua instituição com o EduMatrik AI
+              Transforme sua instituição com o Matricula
             </h2>
             <p className="text-xl text-blue-100 mb-8 max-w-3xl mx-auto">
               Reduza custos, elimine erros e ofereça uma experiência digital de matrícula que vai impressionar pais e alunos.
@@ -673,7 +673,7 @@ export default function VendasPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             <div>
-              <h3 className="text-white text-lg font-semibold mb-4">EduMatrik AI</h3>
+              <h3 className="text-white text-lg font-semibold mb-4">Matricula</h3>
               <p className="text-sm text-gray-400">
                 Transformando a experiência de matrículas escolares em todo o Brasil com tecnologia avançada e inteligência artificial.
               </p>
@@ -708,7 +708,7 @@ export default function VendasPage() {
           </div>
           <div className="border-t border-gray-800 mt-12 pt-6 flex flex-col md:flex-row justify-between items-center">
             <p className="text-sm text-gray-500">
-              &copy; {new Date().getFullYear()} EduMatrik AI. Todos os direitos reservados.
+              &copy; {new Date().getFullYear()} Matricula. Todos os direitos reservados.
             </p>
             <div className="flex space-x-4 mt-4 md:mt-0">
               <a href="#" className="text-gray-400 hover:text-white">
