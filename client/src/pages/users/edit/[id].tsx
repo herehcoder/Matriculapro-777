@@ -107,12 +107,20 @@ export default function EditUserWithId() {
   // Query para obter os dados do usuário a ser editado
   const { data: userData, isLoading: isLoadingUser } = useQuery({
     queryKey: [`/api/users/${params?.id}`],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/users/${params?.id}`);
+      return await res.json();
+    },
     enabled: !!params?.id && !!user && (user.role === "admin" || user.id === parseInt(params.id)),
   });
 
   // Query para escolas (caso seja necessário associar um usuário a uma escola)
   const { data: schools } = useQuery({
     queryKey: ["/api/schools"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/schools");
+      return await res.json();
+    },
     enabled: !!user && (user.role === "admin" || user.role === "school"),
   });
 

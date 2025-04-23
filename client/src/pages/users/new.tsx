@@ -80,6 +80,10 @@ export default function NewUser() {
   // Query para escolas (caso seja necessário associar um usuário a uma escola)
   const { data: schools } = useQuery({
     queryKey: ["/api/schools"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/schools");
+      return await res.json();
+    },
     enabled: !!user && (user.role === "admin" || user.role === "school"),
   });
 

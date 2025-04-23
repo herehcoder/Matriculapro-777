@@ -89,6 +89,10 @@ export default function UsersList() {
   // Query para buscar todos os usuários
   const { data: users, isLoading: isLoadingUsers, error } = useQuery({
     queryKey: ["/api/users"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/users");
+      return await res.json();
+    },
     enabled: !!user && (user.role === "admin" || user.role === "school"),
   });
 
