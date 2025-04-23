@@ -293,6 +293,22 @@ const WhatsAppConnection: React.FC<WhatsAppConnectionProps> = ({ schoolId }) => 
               URL para receber notificações de mensagens
             </p>
           </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="webhookSecret">Segredo do Webhook (opcional)</Label>
+            <Input
+              id="webhookSecret"
+              name="webhookSecret"
+              type="password"
+              placeholder={isCreating ? "Chave secreta para verificação" : "••••••••••••••••"}
+              value={instanceForm.webhookSecret}
+              onChange={handleInputChange}
+              disabled={isSubmitting}
+            />
+            <p className="text-xs text-muted-foreground">
+              Chave secreta para validar autenticidade dos webhooks recebidos
+            </p>
+          </div>
         </CardContent>
 
         <CardFooter className="flex justify-end space-x-2">
@@ -445,6 +461,18 @@ const WhatsAppConnection: React.FC<WhatsAppConnectionProps> = ({ schoolId }) => 
                   <p className="text-sm font-medium text-slate-500">URL do Webhook:</p>
                   <p className="text-sm font-semibold truncate" title={instance.webhookUrl}>
                     {instance.webhookUrl}
+                  </p>
+                </div>
+              )}
+
+              {instance.webhookSecret && (
+                <div>
+                  <p className="text-sm font-medium text-slate-500">Segredo do Webhook:</p>
+                  <p className="text-sm font-semibold">
+                    <span className="flex items-center">
+                      <Check className="h-3 w-3 mr-1 text-green-500" /> Configurado
+                      <Badge variant="outline" className="ml-2 text-xs">Seguro</Badge>
+                    </span>
                   </p>
                 </div>
               )}
