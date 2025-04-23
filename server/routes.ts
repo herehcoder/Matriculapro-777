@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { WebSocketServer } from "ws";
 import { storage } from "./storage";
 import { setupAuth } from "./auth";
+import { registerNotificationRoutes } from "./routes.notification";
 import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
@@ -39,6 +40,17 @@ declare module "express-session" {
 export async function registerRoutes(app: Express): Promise<Server> {
   // Setup authentication
   await setupAuth(app);
+  
+  // Middleware to check if user is authenticated
+  const isAuthenticated = (req: Request, res: Response, next: NextFunction) => {
+    if (req.isAuthenticated()) {
+      return next();
+    }
+    res.status(401).json({ message: "Unauthorized - Please log in" });
+  };
+  
+  // Register notification routes
+  registerNotificationRoutes(app, isAuthenticated);
 
   // Middleware for error handling
   const handleZodError = (
@@ -56,14 +68,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } else {
       next(err);
     }
-  };
-
-  // Middleware to check if user is authenticated
-  const isAuthenticated = (req: Request, res: Response, next: NextFunction) => {
-    if (req.isAuthenticated()) {
-      return next();
-    }
-    res.status(401).json({ message: "Unauthorized - Please log in" });
   };
 
   // Middleware to check specific roles
