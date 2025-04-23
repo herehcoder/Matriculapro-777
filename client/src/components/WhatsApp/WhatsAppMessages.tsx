@@ -1,59 +1,63 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
-import { useAuth } from '@/hooks/use-auth';
-import { apiRequest, queryClient } from '@/lib/queryClient';
+import React, { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiRequest } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import {
-  Search,
-  Send,
-  Loader2,
-  Phone,
-  RefreshCw,
-  Paperclip,
-  MoreVertical,
-  AlignJustify,
-  MessageSquare,
-  UserRound,
-  Smartphone
-} from 'lucide-react';
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
+import { Separator } from '@/components/ui/separator';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Label } from '@/components/ui/label';
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue
+} from '@/components/ui/select';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  MessageSquare,
+  User,
+  Send,
+  AlertTriangle,
+  Loader2,
+  Users,
+  RefreshCw,
+  UserCheck,
+} from 'lucide-react';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 interface Contact {
   id: number;
   name: string;
   phone: string;
-  avatar?: string;
-  status: 'online' | 'offline';
-  lastMessage?: string;
-  lastMessageTime?: string;
-  unreadCount?: number;
   type: 'student' | 'lead';
+  lastMessage?: string;
+  lastMessageDate?: Date;
+  unreadCount?: number;
 }
 
-interface Message {
+interface WhatsAppMessage {
   id: number;
   content: string;
-  timestamp: string;
   direction: 'incoming' | 'outgoing';
-  status: 'sent' | 'delivered' | 'read' | 'failed';
-  type?: 'text' | 'image' | 'file';
-  metadata?: any;
+  status: string;
+  timestamp: string;
+  contactId: number;
+  instanceId: number;
 }
 
 interface WhatsAppMessagesProps {
@@ -63,107 +67,98 @@ interface WhatsAppMessagesProps {
 const WhatsAppMessages: React.FC<WhatsAppMessagesProps> = ({ schoolId }) => {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [activeContact, setActiveContact] = useState<Contact | null>(null);
-  const [message, setMessage] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'students' | 'leads'>('students');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  
-  // Verificar se o usuário tem instância configurada
-  const { 
-    data: hasInstance,
+  const queryClient = useQueryClient();
+  const [selectedContactId, setSelectedContactId] = useState<number | null>(null);
+  const [contactType, setContactType] = useState<'students' | 'leads'>('students');
+  const [messageText, setMessageText] = useState('');
+
+  // Obter instância do WhatsApp da escola
+  const {
+    data: instance,
     isLoading: isLoadingInstance,
+    error: instanceError,
   } = useQuery({
     queryKey: ['/api/whatsapp/instance/status', schoolId],
     queryFn: async () => {
       const response = await apiRequest('GET', `/api/whatsapp/instance/status/${schoolId}`);
-      return response.ok && (await response.json()).connected;
-    },
-  });
-  
-  // Buscar contatos (alunos e leads)
-  const { 
-    data: contacts,
-    isLoading: isLoadingContacts,
-    error: contactsError, 
-    refetch: refetchContacts
-  } = useQuery<Contact[]>({
-    queryKey: ['/api/whatsapp/contacts', schoolId, activeTab],
-    queryFn: async () => {
-      if (!hasInstance) return [];
-      
-      const response = await apiRequest('GET', `/api/whatsapp/contacts/${schoolId}?type=${activeTab}`);
       if (!response.ok) {
-        throw new Error('Falha ao carregar contatos');
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Erro ao verificar status da instância');
       }
       return await response.json();
     },
-    enabled: !!hasInstance,
   });
-  
-  // Filtrar contatos pelo termo de busca
-  const filteredContacts = contacts?.filter(contact => 
-    contact.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    contact.phone.includes(searchQuery)
-  );
-  
-  // Buscar mensagens para o contato selecionado
-  const { 
+
+  // Obter contatos (alunos/leads)
+  const {
+    data: contacts,
+    isLoading: isLoadingContacts,
+    error: contactsError,
+    refetch: refetchContacts,
+  } = useQuery({
+    queryKey: ['/api/whatsapp/contacts', schoolId, contactType],
+    queryFn: async () => {
+      const response = await apiRequest('GET', `/api/whatsapp/contacts/${schoolId}?type=${contactType}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Erro ao carregar contatos');
+      }
+      return await response.json();
+    },
+    enabled: !!instance?.connected,
+  });
+
+  // Obter mensagens para o contato selecionado
+  const {
     data: messages,
     isLoading: isLoadingMessages,
     error: messagesError,
-    refetch: refetchMessages
-  } = useQuery<Message[]>({
-    queryKey: ['/api/whatsapp/messages', schoolId, activeContact?.id],
+    refetch: refetchMessages,
+  } = useQuery({
+    queryKey: ['/api/whatsapp/messages', schoolId, selectedContactId],
     queryFn: async () => {
-      if (!activeContact) return [];
+      if (!selectedContactId) return [];
       
-      const response = await apiRequest(
-        'GET', 
-        `/api/whatsapp/messages/${schoolId}/${activeContact.id}?type=${activeContact.type}`
-      );
-      
+      const response = await apiRequest('GET', `/api/whatsapp/messages/${schoolId}/${selectedContactId}`);
       if (!response.ok) {
-        throw new Error('Falha ao carregar mensagens');
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Erro ao carregar mensagens');
       }
-      
       return await response.json();
     },
-    enabled: !!activeContact,
+    enabled: !!selectedContactId && !!instance?.connected,
   });
-  
-  // Mutation para enviar mensagem
+
+  // Enviar mensagem
   const sendMessageMutation = useMutation({
     mutationFn: async () => {
-      if (!activeContact || !message.trim()) {
-        throw new Error('Selecione um contato e digite uma mensagem');
+      if (!selectedContactId || !messageText.trim()) {
+        throw new Error('Contato ou mensagem inválida');
       }
       
       const response = await apiRequest('POST', '/api/whatsapp/message', {
         schoolId,
-        contactId: activeContact.id,
-        contactType: activeContact.type,
-        content: message.trim(),
+        contactId: selectedContactId,
+        content: messageText.trim(),
+        contactType,
       });
       
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Falha ao enviar mensagem');
+        throw new Error(errorData.message || 'Erro ao enviar mensagem');
       }
       
       return await response.json();
     },
     onSuccess: () => {
-      // Limpar campo de mensagem
-      setMessage('');
-      
-      // Atualizar lista de mensagens
+      setMessageText('');
       refetchMessages();
-      
-      // Atualizar lista de contatos para refletir última mensagem
-      setTimeout(() => {
-        refetchContacts();
-      }, 1000);
+      queryClient.invalidateQueries({ queryKey: ['/api/whatsapp/contacts', schoolId, contactType] });
+      toast({
+        title: 'Mensagem enviada',
+        description: 'Sua mensagem foi enviada com sucesso',
+        variant: 'default',
+      });
     },
     onError: (error) => {
       toast({
@@ -173,377 +168,380 @@ const WhatsAppMessages: React.FC<WhatsAppMessagesProps> = ({ schoolId }) => {
       });
     },
   });
-  
-  // Rolar para a última mensagem quando uma nova mensagem é adicionada
+
+  // Limpar o contato selecionado quando mudar o tipo
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    setSelectedContactId(null);
+  }, [contactType]);
+
+  // Rolar para o final das mensagens quando elas carregarem
+  useEffect(() => {
+    if (messages && messages.length > 0) {
+      const chatContainer = document.getElementById('chat-container');
+      if (chatContainer) {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }
     }
   }, [messages]);
-  
-  // Lidar com envio da mensagem
-  const handleSendMessage = () => {
-    if (message.trim()) {
-      sendMessageMutation.mutate();
-    }
-  };
-  
-  // Lidar com tecla Enter para enviar mensagem
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+
+  // Enviar mensagem ao pressionar Enter (sem Shift)
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      if (messageText.trim() && !sendMessageMutation.isPending) {
+        sendMessageMutation.mutate();
+      }
     }
   };
-  
-  // Atualizar listas
-  const handleRefresh = () => {
-    refetchContacts();
-    if (activeContact) {
-      refetchMessages();
+
+  // Formatador de data/hora
+  const formatDateTime = (dateString: string) => {
+    try {
+      const date = new Date(dateString);
+      const now = new Date();
+      const isToday = date.toDateString() === now.toDateString();
+      
+      if (isToday) {
+        return format(date, 'HH:mm', { locale: ptBR });
+      } else {
+        return format(date, 'dd/MM/yy HH:mm', { locale: ptBR });
+      }
+    } catch (e) {
+      return dateString;
     }
   };
-  
-  // Selecionar contato
-  const handleSelectContact = (contact: Contact) => {
-    setActiveContact(contact);
-  };
-  
-  // Formatar horário da mensagem
-  const formatTime = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-  
-  // Formatar nome para avatar
-  const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map(n => n[0])
-      .slice(0, 2)
-      .join('')
-      .toUpperCase();
-  };
-  
-  // Se não houver instância conectada
-  if (!isLoadingInstance && !hasInstance) {
+
+  // Verificar se a instância está conectada
+  if (!isLoadingInstance && instance && !instance.connected) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>WhatsApp Messenger</CardTitle>
+          <CardTitle className="flex items-center">
+            <MessageSquare className="h-5 w-5 mr-2" />
+            Mensagens WhatsApp
+          </CardTitle>
+          <CardDescription>
+            Envie e receba mensagens pelo WhatsApp
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <Alert className="mb-4">
-            <Smartphone className="h-4 w-4" />
-            <AlertTitle>Instância não configurada</AlertTitle>
+          <Alert variant="warning" className="mb-4">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>WhatsApp não conectado</AlertTitle>
             <AlertDescription>
-              Para enviar e receber mensagens, configure sua instância do WhatsApp na aba "Conexão e Configuração".
+              Você precisa conectar uma instância do WhatsApp antes de enviar mensagens.
+              Acesse a aba "Conexão e Configuração" para conectar.
             </AlertDescription>
           </Alert>
-          
-          <div className="flex justify-end">
-            <Button variant="default" onClick={() => setActiveTab('connection')}>
-              Configurar WhatsApp
-            </Button>
-          </div>
+          <Button 
+            variant="outline" 
+            onClick={() => window.location.hash = 'connection'}
+            className="mt-2"
+          >
+            Ir para Configurações de Conexão
+          </Button>
         </CardContent>
       </Card>
     );
   }
-  
+
   return (
-    <div className="flex flex-col">
-      <Card className="h-[calc(100vh-220px)] flex flex-col overflow-hidden">
-        <CardHeader className="px-4 py-3 border-b">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-xl flex items-center">
-              <MessageSquare className="h-5 w-5 mr-2" />
-              WhatsApp Messenger
-            </CardTitle>
-            
-            <Button variant="ghost" size="icon" onClick={handleRefresh}>
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </div>
-        </CardHeader>
-        
-        <div className="flex-1 flex overflow-hidden">
-          {/* Lista de contatos */}
-          <div className="w-1/3 border-r flex flex-col">
-            <div className="px-3 py-2 border-b">
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar contato..."
-                  className="pl-8"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
-            </div>
-            
-            <Tabs defaultValue="students" className="flex-1 flex flex-col">
-              <TabsList className="grid grid-cols-2 mx-2 my-2">
-                <TabsTrigger 
-                  value="students" 
-                  onClick={() => setActiveTab('students')}
-                >
-                  Alunos
-                </TabsTrigger>
-                <TabsTrigger 
-                  value="leads" 
-                  onClick={() => setActiveTab('leads')}
-                >
-                  Leads
-                </TabsTrigger>
-              </TabsList>
-              
-              <div className="flex-1 overflow-hidden">
-                <ScrollArea className="h-full">
-                  {isLoadingContacts ? (
-                    // Placeholders de carregamento
-                    Array(5).fill(0).map((_, i) => (
-                      <div key={i} className="flex items-center p-3 border-b">
-                        <Skeleton className="h-10 w-10 rounded-full" />
-                        <div className="ml-3 space-y-2 flex-1">
-                          <Skeleton className="h-4 w-24" />
-                          <Skeleton className="h-3 w-full" />
-                        </div>
-                      </div>
-                    ))
-                  ) : contactsError ? (
-                    <div className="p-3 text-center text-muted-foreground">
-                      <p>Erro ao carregar contatos</p>
-                      <Button variant="ghost" size="sm" onClick={() => refetchContacts()}>
-                        Tentar novamente
-                      </Button>
-                    </div>
-                  ) : filteredContacts?.length === 0 ? (
-                    <div className="p-6 text-center text-muted-foreground">
-                      <UserRound className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p>Nenhum contato encontrado</p>
-                      {searchQuery && (
-                        <p className="text-sm mt-1">
-                          Tente outro termo de busca
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    filteredContacts?.map((contact) => (
-                      <div
-                        key={contact.id}
-                        className={`flex items-center p-3 border-b cursor-pointer hover:bg-muted/50 transition-colors ${
-                          activeContact?.id === contact.id ? 'bg-muted' : ''
-                        }`}
-                        onClick={() => handleSelectContact(contact)}
-                      >
-                        <Avatar>
-                          <AvatarImage src={contact.avatar} />
-                          <AvatarFallback>{getInitials(contact.name)}</AvatarFallback>
-                        </Avatar>
-                        
-                        <div className="ml-3 flex-1 overflow-hidden">
-                          <div className="flex justify-between items-start">
-                            <div className="font-medium truncate">{contact.name}</div>
-                            {contact.lastMessageTime && (
-                              <span className="text-xs text-muted-foreground">
-                                {contact.lastMessageTime}
-                              </span>
-                            )}
-                          </div>
-                          
-                          <div className="flex justify-between items-center">
-                            <div className="text-sm text-muted-foreground truncate">
-                              {contact.lastMessage || `${contact.phone}`}
-                            </div>
-                            
-                            {contact.unreadCount ? (
-                              <Badge variant="default" className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center">
-                                {contact.unreadCount}
-                              </Badge>
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </ScrollArea>
-              </div>
-            </Tabs>
-          </div>
-          
-          {/* Área de mensagens */}
-          <div className="flex-1 flex flex-col">
-            {activeContact ? (
-              <>
-                <div className="px-4 py-2 border-b flex items-center justify-between">
+    <Card className="h-[calc(100vh-250px)] flex flex-col">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center">
+          <MessageSquare className="h-5 w-5 mr-2" />
+          Mensagens WhatsApp
+        </CardTitle>
+        <CardDescription>
+          Envie e receba mensagens pelo WhatsApp
+        </CardDescription>
+      </CardHeader>
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* Lista de contatos */}
+        <div className="w-1/3 border-r border-border overflow-hidden flex flex-col">
+          <div className="px-4 py-2 border-b">
+            <Select
+              value={contactType}
+              onValueChange={(value: 'students' | 'leads') => setContactType(value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione o tipo de contato" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="students">
                   <div className="flex items-center">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={activeContact.avatar} />
-                      <AvatarFallback>{getInitials(activeContact.name)}</AvatarFallback>
-                    </Avatar>
-                    
-                    <div className="ml-3">
-                      <div className="font-medium">{activeContact.name}</div>
-                      <div className="text-xs flex items-center text-muted-foreground">
-                        <Phone className="h-3 w-3 mr-1" />
-                        {activeContact.phone}
-                        
-                        <Badge
-                          variant={activeContact.status === 'online' ? 'default' : 'secondary'}
-                          className="ml-2 h-5 text-xs"
-                        >
-                          {activeContact.status === 'online' ? 'Online' : 'Offline'}
-                        </Badge>
-                      </div>
+                    <UserCheck className="h-4 w-4 mr-2" />
+                    <span>Alunos</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="leads">
+                  <div className="flex items-center">
+                    <Users className="h-4 w-4 mr-2" />
+                    <span>Leads</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            {isLoadingContacts && (
+              <div className="p-4 space-y-3">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <div key={i} className="flex items-center space-x-4">
+                    <Skeleton className="h-10 w-10 rounded-full" />
+                    <div className="space-y-2">
+                      <Skeleton className="h-4 w-36" />
+                      <Skeleton className="h-4 w-24" />
                     </div>
                   </div>
-                  
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon">
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuLabel>Opções</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => refetchMessages()}>
-                        <RefreshCw className="h-4 w-4 mr-2" />
-                        Atualizar mensagens
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-                
-                <div className="flex-1 overflow-hidden">
-                  <ScrollArea className="h-full p-4">
-                    {isLoadingMessages ? (
-                      // Placeholders de carregamento para mensagens
-                      <div className="space-y-4">
-                        {Array(5).fill(0).map((_, i) => (
-                          <div 
-                            key={i} 
-                            className={`flex ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}
-                          >
-                            <Skeleton className={`h-12 ${i % 2 === 0 ? 'w-2/3' : 'w-1/2'} rounded-md`} />
-                          </div>
-                        ))}
-                      </div>
-                    ) : messagesError ? (
-                      <div className="p-4 text-center text-muted-foreground">
-                        <p>Erro ao carregar mensagens</p>
-                        <Button variant="ghost" size="sm" onClick={() => refetchMessages()}>
-                          Tentar novamente
-                        </Button>
-                      </div>
-                    ) : messages?.length === 0 ? (
-                      <div className="h-full flex items-center justify-center">
-                        <div className="text-center text-muted-foreground">
-                          <MessageSquare className="h-10 w-10 mx-auto mb-2 opacity-50" />
-                          <p>Nenhuma mensagem encontrada</p>
-                          <p className="text-sm mt-1">Envie uma mensagem para iniciar a conversa</p>
+                ))}
+              </div>
+            )}
+
+            {!isLoadingContacts && contactsError && (
+              <div className="p-4">
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Erro</AlertTitle>
+                  <AlertDescription>
+                    {contactsError instanceof Error 
+                      ? contactsError.message 
+                      : 'Erro ao carregar contatos'}
+                    <Button
+                      variant="link"
+                      className="p-0 h-auto"
+                      onClick={() => refetchContacts()}
+                    >
+                      Tentar novamente
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              </div>
+            )}
+
+            {!isLoadingContacts && contacts && contacts.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-full p-4 text-center">
+                <Users className="h-12 w-12 text-muted-foreground mb-2" />
+                <p className="text-muted-foreground text-sm">
+                  {contactType === 'students' 
+                    ? 'Nenhum aluno encontrado' 
+                    : 'Nenhum lead encontrado'}
+                </p>
+                <Button 
+                  variant="link" 
+                  onClick={() => refetchContacts()}
+                  className="mt-2"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Atualizar
+                </Button>
+              </div>
+            )}
+
+            {!isLoadingContacts && contacts && contacts.length > 0 && (
+              <div className="divide-y">
+                {contacts.map((contact) => (
+                  <div
+                    key={contact.id}
+                    className={`p-3 cursor-pointer hover:bg-muted transition-colors ${
+                      selectedContactId === contact.id ? 'bg-muted' : ''
+                    }`}
+                    onClick={() => setSelectedContactId(contact.id)}
+                  >
+                    <div className="flex items-center">
+                      <Avatar className="h-10 w-10">
+                        <AvatarFallback>
+                          {contact.name.substring(0, 2).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="ml-3 overflow-hidden">
+                        <div className="flex items-center">
+                          <p className="font-medium text-sm truncate flex-1">
+                            {contact.name}
+                          </p>
+                          {contact.unreadCount ? (
+                            <div className="ml-2 bg-primary text-primary-foreground text-xs rounded-full h-5 min-w-5 flex items-center justify-center px-1">
+                              {contact.unreadCount}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="flex items-center text-xs text-muted-foreground mt-1">
+                          <p className="truncate flex-1">
+                            {contact.lastMessage || 'Nenhuma mensagem'}
+                          </p>
+                          {contact.lastMessageDate && (
+                            <span className="ml-2 whitespace-nowrap">
+                              {formatDateTime(contact.lastMessageDate.toString())}
+                            </span>
+                          )}
                         </div>
                       </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {messages?.map((msg) => (
-                          <div
-                            key={msg.id}
-                            className={`flex ${
-                              msg.direction === 'outgoing' ? 'justify-end' : 'justify-start'
-                            }`}
-                          >
-                            <div
-                              className={`max-w-[70%] px-3 py-2 rounded-md ${
-                                msg.direction === 'outgoing'
-                                  ? 'bg-primary text-primary-foreground'
-                                  : 'bg-muted'
-                              }`}
-                            >
-                              <div className="whitespace-pre-wrap break-words">
-                                {msg.content}
-                              </div>
-                              <div
-                                className={`text-xs mt-1 flex justify-end ${
-                                  msg.direction === 'outgoing'
-                                    ? 'text-primary-foreground/70'
-                                    : 'text-muted-foreground'
-                                }`}
-                              >
-                                {formatTime(msg.timestamp)}
-                                
-                                {msg.direction === 'outgoing' && (
-                                  <span className="ml-1">
-                                    {msg.status === 'read' ? '✓✓' : 
-                                     msg.status === 'delivered' ? '✓✓' : 
-                                     msg.status === 'sent' ? '✓' : '!'}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                        <div ref={messagesEndRef} />
-                      </div>
-                    )}
-                  </ScrollArea>
-                </div>
-                
-                <div className="p-3 border-t">
-                  <div className="flex items-center space-x-2">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      disabled={sendMessageMutation.isPending}
-                    >
-                      <Paperclip className="h-5 w-5" />
-                    </Button>
-                    
-                    <div className="flex-1 relative">
-                      <textarea
-                        rows={1}
-                        className="w-full px-3 py-2 min-h-[2.5rem] rounded-md border border-input bg-background ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none"
-                        placeholder="Digite uma mensagem..."
-                        value={message}
-                        onChange={(e) => setMessage(e.target.value)}
-                        onKeyDown={handleKeyPress}
-                      />
-                    </div>
-                    
-                    <div className="flex-shrink-0">
-                      <Button 
-                        size="icon" 
-                        disabled={!message.trim() || sendMessageMutation.isPending}
-                        onClick={handleSendMessage}
-                      >
-                        {sendMessageMutation.isPending ? (
-                          <Loader2 className="h-5 w-5 animate-spin" />
-                        ) : (
-                          <Send className="h-5 w-5" />
-                        )}
-                      </Button>
                     </div>
                   </div>
-                </div>
-              </>
-            ) : (
-              <div className="h-full flex items-center justify-center text-center p-6">
-                <div>
-                  <div className="bg-muted rounded-full p-6 w-24 h-24 mx-auto mb-4 flex items-center justify-center">
-                    <MessageSquare className="h-12 w-12 text-muted-foreground" />
-                  </div>
-                  <h3 className="text-xl font-medium mb-2">WhatsApp Messenger</h3>
-                  <p className="text-muted-foreground max-w-md">
-                    Selecione um contato à esquerda para ver o histórico de mensagens e começar a conversar.
-                  </p>
-                </div>
+                ))}
               </div>
             )}
           </div>
         </div>
-      </Card>
-    </div>
+
+        {/* Área de chat */}
+        <div className="flex-1 flex flex-col">
+          {!selectedContactId && (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center">
+                <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground" />
+                <p className="mt-4 text-muted-foreground">
+                  Selecione um contato para iniciar uma conversa
+                </p>
+              </div>
+            </div>
+          )}
+
+          {selectedContactId && (
+            <>
+              {/* Cabeçalho do contato */}
+              <div className="p-3 border-b flex items-center">
+                {contacts && selectedContactId && (
+                  <>
+                    <Avatar className="h-8 w-8">
+                      <AvatarFallback>
+                        {contacts.find(c => c.id === selectedContactId)?.name.substring(0, 2).toUpperCase() || 'U'}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="ml-3">
+                      <p className="font-medium text-sm">
+                        {contacts.find(c => c.id === selectedContactId)?.name || 'Contato'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {contacts.find(c => c.id === selectedContactId)?.phone || ''}
+                      </p>
+                    </div>
+                    <div className="ml-auto">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => refetchMessages()}
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Mensagens */}
+              <div
+                id="chat-container"
+                className="flex-1 overflow-y-auto p-4 space-y-4"
+              >
+                {isLoadingMessages && (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+
+                {!isLoadingMessages && messagesError && (
+                  <Alert variant="destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTitle>Erro</AlertTitle>
+                    <AlertDescription>
+                      {messagesError instanceof Error 
+                        ? messagesError.message 
+                        : 'Erro ao carregar mensagens'}
+                      <Button
+                        variant="link"
+                        className="p-0 h-auto"
+                        onClick={() => refetchMessages()}
+                      >
+                        Tentar novamente
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {!isLoadingMessages && messages && messages.length === 0 && (
+                  <div className="flex flex-col items-center justify-center h-48 text-center">
+                    <MessageSquare className="h-12 w-12 text-muted-foreground mb-2" />
+                    <p className="text-muted-foreground">Nenhuma mensagem encontrada</p>
+                    <p className="text-muted-foreground text-sm mt-1">
+                      Envie uma mensagem para iniciar a conversa
+                    </p>
+                  </div>
+                )}
+
+                {!isLoadingMessages && messages && messages.length > 0 && (
+                  <>
+                    {messages.map((message: WhatsAppMessage) => (
+                      <div
+                        key={message.id}
+                        className={`flex ${
+                          message.direction === 'outgoing' ? 'justify-end' : 'justify-start'
+                        }`}
+                      >
+                        <div
+                          className={`max-w-[75%] rounded-lg p-3 ${
+                            message.direction === 'outgoing'
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-muted'
+                          }`}
+                        >
+                          <p className="text-sm whitespace-pre-wrap break-words">
+                            {message.content}
+                          </p>
+                          <div
+                            className={`text-xs mt-1 flex justify-end ${
+                              message.direction === 'outgoing'
+                                ? 'text-primary-foreground/80'
+                                : 'text-muted-foreground'
+                            }`}
+                          >
+                            {formatDateTime(message.timestamp)}
+                            {message.direction === 'outgoing' && (
+                              <span className="ml-1">
+                                {message.status === 'delivered' && '✓✓'}
+                                {message.status === 'sent' && '✓'}
+                                {message.status === 'read' && '✓✓'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+
+              {/* Área de digitação */}
+              <div className="p-3 border-t">
+                <div className="flex">
+                  <Textarea
+                    placeholder="Digite sua mensagem..."
+                    value={messageText}
+                    onChange={(e) => setMessageText(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    className="min-h-[60px] resize-none flex-1"
+                    disabled={sendMessageMutation.isPending}
+                  />
+                  <Button
+                    className="ml-2 self-end"
+                    onClick={() => sendMessageMutation.mutate()}
+                    disabled={!messageText.trim() || sendMessageMutation.isPending}
+                  >
+                    {sendMessageMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </Card>
   );
 };
 
