@@ -164,7 +164,7 @@ const TestimonialCard: React.FC<{ testimonial: Testimonial }> = ({ testimonial }
       </div>
       <div className="flex mt-2">
         {Array(testimonial.rating).fill(0).map((_, i) => (
-          <Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+          <Star key={i} className="w-4 h-4 fill-accent text-accent" />
         ))}
       </div>
     </CardHeader>
@@ -287,9 +287,14 @@ const FaqItem: React.FC<FaqItemProps> = ({ faq, isOpen, toggleFaq }) => (
 // Página principal de vendas
 export default function VendasPage() {
   const [openFaq, setOpenFaq] = React.useState<number | null>(null);
+  const [isAnnual, setIsAnnual] = useState(false);
   
   const toggleFaq = (index: number) => {
     setOpenFaq(openFaq === index ? null : index);
+  };
+  
+  const toggleBillingCycle = () => {
+    setIsAnnual(!isAnnual);
   };
 
   const containerVariants = {

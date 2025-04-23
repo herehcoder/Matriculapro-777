@@ -24,8 +24,8 @@
   --secondary: 160 84% 39%;
   --secondary-foreground: 0 0% 100%;
   
-  --accent: 47 95% 50%;
-  --accent-foreground: 240 5.9% 10%;
+  --accent: 244 76% 52%; /* #403DCE */
+  --accent-foreground: 0 0% 100%;
   
   --destructive: 0 84.2% 60.2%;
   --destructive-foreground: 0 0% 98%;
@@ -36,7 +36,7 @@
   /* Chart colors */
   --chart-1: 211 100% 50%;
   --chart-2: 160 84% 39%;
-  --chart-3: 47 95% 50%;
+  --chart-3: 244 76% 52%; /* #403DCE */
   --chart-4: 271 91% 65%;
   --chart-5: 338 85% 56%;
   
@@ -73,8 +73,8 @@
   --secondary: 160 84% 39%;
   --secondary-foreground: 0 0% 98%;
   
-  --accent: 47 95% 50%;
-  --accent-foreground: 240 5.9% 10%;
+  --accent: 244 76% 52%; /* #403DCE */
+  --accent-foreground: 0 0% 100%;
   
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 0 0% 98%;
@@ -84,7 +84,7 @@
   /* Chart colors (dark theme) */
   --chart-1: 211 100% 50%;
   --chart-2: 160 84% 39%;
-  --chart-3: 47 95% 50%;
+  --chart-3: 244 76% 52%; /* #403DCE */
   --chart-4: 271 91% 65%;
   --chart-5: 338 85% 56%;
   
