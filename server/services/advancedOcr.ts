@@ -5,6 +5,401 @@ import { v4 as uuidv4 } from 'uuid';
 import { storage } from '../storage';
 import { db } from '../db';
 
+// Interface para dados de correção manual
+export interface ManualCorrectionData {
+  documentId: string;
+  fields: Array<{
+    fieldName: string;
+    originalValue: string | null;
+    correctedValue: string;
+  }>;
+  reviewedBy: number;
+  reviewedAt: Date;
+  comments?: string;
+}
+
+/**
+ * Processa um documento via OCR
+ * @param filePath Caminho do arquivo a processar
+ * @param userData Dados do usuário para validação cruzada (opcional)
+ * @returns Resultado do processamento
+ */
+export async function processDocument(
+  filePath: string,
+  userData?: any
+): Promise<any> {
+  try {
+    // Determinar tipo de documento baseado no nome do arquivo ou tipo MIME
+    let documentType = 'generic';
+    const fileName = path.basename(filePath).toLowerCase();
+    
+    if (fileName.includes('rg') || fileName.includes('identidade')) {
+      documentType = 'rg';
+    } else if (fileName.includes('cpf')) {
+      documentType = 'cpf';
+    } else if (fileName.includes('comprovante') && (fileName.includes('residencia') || fileName.includes('endereco'))) {
+      documentType = 'comprovante_residencia';
+    } else if (fileName.includes('historico') && fileName.includes('escolar')) {
+      documentType = 'historico_escolar';
+    } else if (fileName.includes('certidao') && fileName.includes('nascimento')) {
+      documentType = 'certidao_nascimento';
+    }
+    
+    // Processar o documento
+    await advancedOcrService.initialize();
+    const document = await advancedOcrService.processDocument(filePath, documentType);
+    
+    // Se tiver dados do usuário, realizar validação cruzada
+    let validation = null;
+    if (userData && document.extractedData) {
+      validation = validateAgainstUserData(document.extractedData, userData);
+    }
+    
+    return {
+      success: true,
+      document,
+      validation
+    };
+  } catch (error) {
+    console.error('Erro ao processar documento:', error);
+    return {
+      success: false,
+      error: error.message || 'Erro desconhecido ao processar documento'
+    };
+  }
+}
+
+/**
+ * Valida dados extraídos contra dados fornecidos pelo usuário
+ * @param extractedFields Campos extraídos do documento
+ * @param userData Dados fornecidos pelo usuário
+ * @returns Resultado da validação
+ */
+export function validateAgainstUserData(
+  extractedFields: any,
+  userData: any
+): {
+  isValid: boolean;
+  score: number;
+  fieldScores: Record<string, number>;
+  message: string;
+} {
+  const scores: Record<string, number> = {};
+  let totalScore = 0;
+  let fieldsCount = 0;
+  
+  // Comparar nome (com mais peso)
+  if (extractedFields.name && userData.name) {
+    const nameScore = calculateStringSimilarity(
+      extractedFields.name.toLowerCase(),
+      userData.name.toLowerCase()
+    );
+    scores.name = nameScore;
+    totalScore += nameScore * 2; // Peso maior para o nome
+    fieldsCount += 2;
+  }
+  
+  // Comparar data de nascimento
+  if (extractedFields.birthDate && userData.birthDate) {
+    // Normalizar formato de data para comparação
+    const extractedDate = normalizeDate(extractedFields.birthDate);
+    const userDate = normalizeDate(userData.birthDate);
+    
+    const dateScore = extractedDate === userDate ? 1.0 : 0.0;
+    scores.birthDate = dateScore;
+    totalScore += dateScore;
+    fieldsCount += 1;
+  }
+  
+  // Comparar CPF
+  if (extractedFields.cpf && userData.cpf) {
+    // Remover formatação para comparação
+    const extractedCpf = extractedFields.cpf.replace(/\D/g, '');
+    const userCpf = userData.cpf.replace(/\D/g, '');
+    
+    const cpfScore = extractedCpf === userCpf ? 1.0 : 0.0;
+    scores.cpf = cpfScore;
+    totalScore += cpfScore * 1.5; // Peso maior para CPF
+    fieldsCount += 1.5;
+  }
+  
+  // Comparar RG
+  if (extractedFields.documentNumber && userData.rg) {
+    // Remover formatação para comparação
+    const extractedRg = extractedFields.documentNumber.replace(/\D/g, '');
+    const userRg = userData.rg.replace(/\D/g, '');
+    
+    const rgScore = extractedRg === userRg ? 1.0 : 0.0;
+    scores.rg = rgScore;
+    totalScore += rgScore;
+    fieldsCount += 1;
+  }
+  
+  // Comparar endereço (se existir)
+  if (extractedFields.street && userData.address) {
+    const addressScore = calculateStringSimilarity(
+      extractedFields.street.toLowerCase(),
+      userData.address.toLowerCase()
+    );
+    scores.address = addressScore;
+    totalScore += addressScore;
+    fieldsCount += 1;
+  }
+  
+  // Calcular score final normalizado
+  const finalScore = fieldsCount > 0 ? totalScore / fieldsCount : 0;
+  const isValid = finalScore >= 0.7; // Score mínimo para validação
+  
+  // Gerar mensagem de resultado
+  const message = generateValidationMessage(isValid, finalScore, scores);
+  
+  return {
+    isValid,
+    score: Math.round(finalScore * 100) / 100,
+    fieldScores: scores,
+    message
+  };
+}
+
+/**
+ * Registra correção manual de um documento
+ * @param correctionData Dados da correção
+ * @returns Sucesso da operação
+ */
+export async function registerManualCorrection(
+  correctionData: ManualCorrectionData
+): Promise<boolean> {
+  try {
+    // Verificar se documento existe
+    const documentResult = await db.execute(
+      `SELECT * FROM ocr_documents WHERE id = $1`,
+      [correctionData.documentId]
+    );
+    
+    if (!documentResult.rows || documentResult.rows.length === 0) {
+      throw new Error('Documento não encontrado');
+    }
+    
+    // Obter dados extraídos originais
+    const extractedData = documentResult.rows[0].extracted_data;
+    
+    // Registrar cada correção
+    for (const field of correctionData.fields) {
+      // Registrar correção no banco
+      await db.execute(`
+        INSERT INTO ocr_manual_corrections (
+          document_id,
+          field_name,
+          original_value,
+          corrected_value,
+          reviewed_by,
+          reviewed_at,
+          comments,
+          created_at
+        )
+        VALUES (
+          $1, $2, $3, $4, $5, $6, $7, NOW()
+        )
+      `, [
+        correctionData.documentId,
+        field.fieldName,
+        field.originalValue,
+        field.correctedValue,
+        correctionData.reviewedBy,
+        correctionData.reviewedAt,
+        correctionData.comments || null
+      ]);
+      
+      // Atualizar dado extraído com valor corrigido
+      if (extractedData) {
+        extractedData[field.fieldName] = field.correctedValue;
+      }
+    }
+    
+    // Atualizar documento com dados corrigidos
+    await db.execute(`
+      UPDATE ocr_documents
+      SET 
+        extracted_data = $1,
+        status = 'verified',
+        updated_at = NOW()
+      WHERE id = $2
+    `, [JSON.stringify(extractedData), correctionData.documentId]);
+    
+    return true;
+  } catch (error) {
+    console.error('Erro ao registrar correção manual:', error);
+    return false;
+  }
+}
+
+/**
+ * Normaliza uma data para formato padrão
+ * @param dateStr String de data em vários formatos
+ * @returns Data normalizada (YYYY-MM-DD)
+ */
+function normalizeDate(dateStr: string): string {
+  try {
+    // Tentar vários formatos
+    const formats = [
+      /(\d{2})[-./](\d{2})[-./](\d{4})/, // DD/MM/YYYY
+      /(\d{2})[-./](\d{2})[-./](\d{2})/, // DD/MM/YY
+      /(\d{4})[-./](\d{2})[-./](\d{2})/, // YYYY/MM/DD
+    ];
+    
+    for (const format of formats) {
+      const match = dateStr.match(format);
+      if (match) {
+        if (format === formats[0]) {
+          // DD/MM/YYYY
+          return `${match[3]}-${match[2]}-${match[1]}`;
+        } else if (format === formats[1]) {
+          // DD/MM/YY
+          const year = parseInt(match[3]);
+          const fullYear = year < 50 ? 2000 + year : 1900 + year;
+          return `${fullYear}-${match[2]}-${match[1]}`;
+        } else {
+          // YYYY/MM/DD
+          return `${match[1]}-${match[2]}-${match[3]}`;
+        }
+      }
+    }
+    
+    // Se não conseguir interpretar, retornar original
+    return dateStr;
+  } catch (error) {
+    console.error('Erro ao normalizar data:', error);
+    return dateStr;
+  }
+}
+
+/**
+ * Calcula similaridade entre duas strings
+ * @param str1 Primeira string
+ * @param str2 Segunda string
+ * @returns Score de similaridade (0-1)
+ */
+function calculateStringSimilarity(str1: string, str2: string): number {
+  // Implementação simples do algoritmo de Levenshtein distance
+  const track = Array(str2.length + 1).fill(null).map(() => 
+    Array(str1.length + 1).fill(null));
+  
+  for (let i = 0; i <= str1.length; i += 1) {
+    track[0][i] = i;
+  }
+  
+  for (let j = 0; j <= str2.length; j += 1) {
+    track[j][0] = j;
+  }
+  
+  for (let j = 1; j <= str2.length; j += 1) {
+    for (let i = 1; i <= str1.length; i += 1) {
+      const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
+      track[j][i] = Math.min(
+        track[j][i - 1] + 1, // deletar
+        track[j - 1][i] + 1, // inserir
+        track[j - 1][i - 1] + indicator, // substituir
+      );
+    }
+  }
+  
+  const distance = track[str2.length][str1.length];
+  const maxLength = Math.max(str1.length, str2.length);
+  
+  // Normalizar para valor entre 0 e 1
+  return maxLength > 0 ? 1 - distance / maxLength : 1;
+}
+
+/**
+ * Gera uma mensagem descritiva para o resultado da validação
+ * @param isValid Se a validação foi bem-sucedida
+ * @param score Score global
+ * @param fieldScores Scores por campo
+ * @returns Mensagem de validação
+ */
+function generateValidationMessage(
+  isValid: boolean,
+  score: number,
+  fieldScores: Record<string, number>
+): string {
+  const percentage = Math.round(score * 100);
+  
+  if (isValid) {
+    return `Documento validado com ${percentage}% de confiança. Os dados conferem com as informações fornecidas.`;
+  } else {
+    // Identificar campos problemáticos
+    const lowScoreFields = Object.entries(fieldScores)
+      .filter(([_, score]) => score < 0.7)
+      .map(([field, _]) => {
+        switch (field) {
+          case 'name': return 'nome';
+          case 'birthDate': return 'data de nascimento';
+          case 'cpf': return 'CPF';
+          case 'rg': return 'RG';
+          case 'address': return 'endereço';
+          default: return field;
+        }
+      });
+    
+    if (lowScoreFields.length > 0) {
+      return `Documento com ${percentage}% de confiança. Divergências encontradas em: ${lowScoreFields.join(', ')}. Por favor, revise manualmente.`;
+    } else {
+      return `Documento com ${percentage}% de confiança. Confiança abaixo do limiar de validação. Por favor, revise manualmente.`;
+    }
+  }
+}
+
+/**
+ * Obtém o SQL para criar tabelas relacionadas ao OCR
+ * @returns Script SQL para criação de tabelas
+ */
+export function getOcrTablesSQL(): string {
+  return `
+    CREATE TABLE IF NOT EXISTS ocr_documents (
+      id VARCHAR(36) PRIMARY KEY,
+      enrollment_id INTEGER,
+      document_type VARCHAR(50) NOT NULL,
+      file_path VARCHAR(255) NOT NULL,
+      extracted_data JSONB NOT NULL,
+      original_text TEXT NOT NULL,
+      overall_confidence NUMERIC(5,2) NOT NULL,
+      processing_time_ms INTEGER NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS ocr_validations (
+      id SERIAL PRIMARY KEY,
+      document_id VARCHAR(36) NOT NULL REFERENCES ocr_documents(id),
+      enrollment_id INTEGER,
+      validation_result JSONB NOT NULL,
+      score NUMERIC(5,2) NOT NULL,
+      is_valid BOOLEAN NOT NULL,
+      review_required BOOLEAN NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS ocr_manual_corrections (
+      id SERIAL PRIMARY KEY,
+      document_id VARCHAR(36) NOT NULL REFERENCES ocr_documents(id),
+      field_name VARCHAR(50) NOT NULL,
+      original_value TEXT,
+      corrected_value TEXT NOT NULL,
+      reviewed_by INTEGER NOT NULL,
+      reviewed_at TIMESTAMP NOT NULL,
+      comments TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ocr_documents_enrollment_id ON ocr_documents(enrollment_id);
+    CREATE INDEX IF NOT EXISTS idx_ocr_documents_status ON ocr_documents(status);
+    CREATE INDEX IF NOT EXISTS idx_ocr_validations_document_id ON ocr_validations(document_id);
+    CREATE INDEX IF NOT EXISTS idx_ocr_validations_enrollment_id ON ocr_validations(enrollment_id);
+    CREATE INDEX IF NOT EXISTS idx_ocr_manual_corrections_document_id ON ocr_manual_corrections(document_id);
+  `;
+}
+
 /**
  * Serviço de OCR avançado para processamento de documentos
  */
@@ -14,6 +409,7 @@ export class AdvancedOcrService {
   private initialized = false;
   private workerCount = 0;
   private uploadDir = path.join(process.cwd(), 'uploads', 'documents');
+  private inactiveMode = false;
   
   /**
    * Inicializa o serviço de OCR

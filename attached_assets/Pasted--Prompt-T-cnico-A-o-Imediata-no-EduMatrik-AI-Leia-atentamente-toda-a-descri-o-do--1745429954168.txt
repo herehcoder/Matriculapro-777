@@ -1,0 +1,70 @@
+
+📋 **Prompt Técnico – Ação Imediata no EduMatrik AI**
+
+> **Leia atentamente toda a descrição do projeto abaixo** e execute as tarefas pendentes para levar o EduMatrik AI de **95% para 100% de funcionalidade real**.  
+
+
+realize os pontos pendentes em multi tarefa ou seja resolva 5 de uma vez e depois o restante
+---
+
+### 🔍 Descrição Resumida
+O EduMatrik AI é um SaaS para automatizar matrículas escolares, cobrindo desde leads até pagamento e comunicação via WhatsApp. Está ~95% pronto, com backend em Express/TypeScript, frontend em React/TypeScript, banco PostgreSQL (Drizzle ORM), OCR real (Tesseract.js), Stripe, Pusher e Evolution API para WhatsApp.
+
+---
+
+### 🛠 Pontos Pendentes (5% Restantes)
+
+1. **Dependência de Segurança**  
+   - Instalar **jsonwebtoken** (`npm install jsonwebtoken`)  
+   - Garantir uso correto em `server/auth.ts` para geração/validação de JWT
+
+2. **Ajustes no Schema do Banco**  
+   - Acrescentar estados extras no fluxo de matrícula:
+     - `document_verification`
+     - `document_pending`
+     - `document_approved`
+
+3. **Correções de Tipagem (TypeScript)**  
+   - Revisar erros de tipagem em controllers e serviços  
+   - Ajustar tipos no frontend para refletir novos campos do schema
+
+4. **Middlewares de Autenticação**  
+   - Proteger endpoints críticos com middleware JWT  
+   - Garantir que apenas usuários com a role correta acessem cada rota
+
+5. **Atualização do Frontend**  
+   - Consumir:
+     - Novo endpoint de WhatsApp (instância por escola)  
+     - Serviços OCR aprimorados  
+     - Endpoints de analytics avançado  
+   - Atualizar hooks e contextos para variáveis de ambiente (env vars)
+
+6. **Testes com Credenciais Reais**  
+   - Validar integração Stripe, Evolution API e OCR em ambiente de staging  
+   - Criar testes unitários/mocks para fluxos críticos
+
+7. **Verificação de Variáveis de Ambiente**  
+   - Conferir `.env.example` e documentar obrigatoriedade de:
+     - `JWT_SECRET`
+     - `STRIPE_KEY`
+     - `EVOLUTION_API_URL` e `EVOLUTION_API_TOKEN`
+     - `DB_CONNECTION`
+
+8. **Tratamento Robusto de Erros**  
+   - Capturar e logar todas exceções nos serviços de API  
+   - Enviar feedback de erro claro ao frontend
+
+9. **API Keys e Credenciais**  
+   - Garantir que todas as chaves (Stripe, Evolution API, etc.) estejam configuradas no CI/CD  
+   - Documentar no README como gerar/obter cada uma
+
+---
+
+### 📈 **Meta da Sprint**
+- Concluir todos os itens acima em **máximo 5 dias**.
+- Código revisado em PRs com pelo menos 1 teste passando.
+- Deploy automático em ambiente de staging ao final de cada dia.
+
+---
+
+Bora finalizar esses últimos 5% e entregar o EduMatrik AI 100% pronto para produção! 🚀

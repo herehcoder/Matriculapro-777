@@ -8,16 +8,8 @@ import { Request, Response, NextFunction, Express } from 'express';
 import { storage } from './storage';
 import { db } from './db';
 import { eq, and, sql } from 'drizzle-orm';
-import { 
-  createPaymentIntent,
-  processStripeWebhook,
-  getSchoolFinancialReport,
-  getGlobalFinancialReport,
-  reconcilePayments,
-  getPaymentDetails,
-  exportPaymentsCSV,
-  getPaymentTablesSQL
-} from './services/paymentProcessor';
+// Importar o PaymentProcessor como instância
+import paymentProcessor from './services/paymentProcessor';
 import { logAction } from './services/securityService';
 import { sendUserNotification } from './pusher';
 
@@ -169,7 +161,7 @@ export function registerEnhancedPaymentRoutes(app: Express, isAuthenticated: any
       }
       
       // Criar intent de pagamento
-      const paymentIntent = await createPaymentIntent(
+      const paymentIntent = await paymentProcessor.createPaymentIntent(
         amount,
         currency,
         enrollment.id,
@@ -245,7 +237,7 @@ export function registerEnhancedPaymentRoutes(app: Express, isAuthenticated: any
       const payload = req.body;
       
       // Processar webhook
-      const result = await processStripeWebhook(
+      const result = await paymentProcessor.processStripeWebhook(
         Buffer.from(JSON.stringify(payload)),
         signature,
         webhookSecret
@@ -295,7 +287,7 @@ export function registerEnhancedPaymentRoutes(app: Express, isAuthenticated: any
         : new Date(); // Hoje por padrão
       
       // Obter relatório financeiro
-      const report = await getSchoolFinancialReport(schoolId, startDate, endDate);
+      const report = await paymentProcessor.getSchoolFinancialReport(schoolId, startDate, endDate);
       
       res.json({
         success: true,
@@ -341,7 +333,7 @@ export function registerEnhancedPaymentRoutes(app: Express, isAuthenticated: any
         : new Date(); // Hoje por padrão
       
       // Obter relatório financeiro global
-      const report = await getGlobalFinancialReport(startDate, endDate);
+      const report = await paymentProcessor.getGlobalFinancialReport(startDate, endDate);
       
       res.json({
         success: true,
@@ -381,7 +373,7 @@ export function registerEnhancedPaymentRoutes(app: Express, isAuthenticated: any
       const startDate = req.body.startDate ? new Date(req.body.startDate) : undefined;
       
       // Executar conciliação
-      const result = await reconcilePayments(startDate);
+      const result = await paymentProcessor.reconcilePayments(startDate);
       
       res.json({
         success: true,
@@ -422,7 +414,7 @@ export function registerEnhancedPaymentRoutes(app: Express, isAuthenticated: any
       const paymentId = parseInt(req.params.id);
       
       // Buscar detalhes do pagamento
-      const details = await getPaymentDetails(paymentId);
+      const details = await paymentProcessor.getPaymentDetails(paymentId);
       
       if (!details || !details.payment) {
         return res.status(404).json({
@@ -554,7 +546,7 @@ export function registerEnhancedPaymentRoutes(app: Express, isAuthenticated: any
         : new Date();
       
       // Gerar CSV
-      const csv = await exportPaymentsCSV(effectiveSchoolId, startDate, endDate);
+      const csv = await paymentProcessor.exportPaymentsCSV(effectiveSchoolId, startDate, endDate);
       
       // Definir nome do arquivo
       const filename = `pagamentos_${effectiveSchoolId ? `escola_${effectiveSchoolId}_` : ''}${startDate.toISOString().split('T')[0]}_a_${endDate.toISOString().split('T')[0]}.csv`;

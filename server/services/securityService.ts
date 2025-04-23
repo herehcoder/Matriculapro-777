@@ -6,6 +6,53 @@ import { storage } from '../storage';
 import * as jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 
+// Instância do serviço de segurança que será exportada
+let securityServiceInstance: SecurityService | null = null;
+
+/**
+ * Registra uma ação no log de auditoria
+ * @param userId ID do usuário que realizou a ação
+ * @param action Tipo da ação
+ * @param resource Recurso afetado
+ * @param resourceId ID do recurso (opcional)
+ * @param details Detalhes adicionais
+ * @param level Nível de log (info, warning, error)
+ * @param ipAddress Endereço IP do cliente (opcional)
+ * @returns ID do log registrado
+ */
+export async function logAction(
+  userId: number,
+  action: string,
+  resource: string,
+  resourceId?: string | number,
+  details: any = {},
+  level: 'info' | 'warning' | 'error' = 'info',
+  ipAddress?: string
+): Promise<number> {
+  try {
+    // Converter resourceId para string se necessário
+    const resourceIdStr = resourceId ? resourceId.toString() : undefined;
+    
+    // Inserir log na tabela audit_logs
+    const [log] = await db.insert('audit_logs').values({
+      user_id: userId,
+      action,
+      resource,
+      resource_id: resourceIdStr,
+      details: typeof details === 'string' ? details : JSON.stringify(details),
+      level,
+      ip_address: ipAddress || null,
+      created_at: new Date()
+    }).returning();
+    
+    return log.id;
+  } catch (error) {
+    console.error('Erro ao registrar ação no log:', error);
+    // Não lançar erro para não interromper a operação principal
+    return -1;
+  }
+}
+
 const scryptAsync = promisify(scrypt);
 
 /**
@@ -622,5 +669,9 @@ export class SecurityService {
 }
 
 // Exportar instância única do serviço
-const securityService = new SecurityService();
-export default securityService;
+// Inicializa a instância do serviço de segurança somente se ainda não existir
+if (!securityServiceInstance) {
+  securityServiceInstance = new SecurityService();
+}
+
+export default securityServiceInstance;

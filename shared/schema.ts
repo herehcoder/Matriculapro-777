@@ -4,7 +4,7 @@ import { z } from "zod";
 
 // Enums
 export const userRoleEnum = pgEnum('user_role', ['admin', 'school', 'attendant', 'student']);
-export const enrollmentStatusEnum = pgEnum('enrollment_status', ['started', 'personal_info', 'course_info', 'payment', 'completed', 'abandoned']);
+export const enrollmentStatusEnum = pgEnum('enrollment_status', ['started', 'personal_info', 'course_info', 'document_verification', 'document_pending', 'document_approved', 'payment', 'completed', 'abandoned']);
 export const leadSourceEnum = pgEnum('lead_source', ['whatsapp', 'website', 'social_media', 'referral', 'other']);
 export const leadStatusEnum = pgEnum('lead_status', ['new', 'contacted', 'interested', 'converted', 'lost']);
 export const chatStatusEnum = pgEnum('chat_status', ['active', 'closed']);
@@ -12,6 +12,7 @@ export const notificationTypeEnum = pgEnum('notification_type', ['message', 'enr
 export const messageStatusEnum = pgEnum('message_status', ['sent', 'delivered', 'read']);
 export const paymentStatusEnum = pgEnum('payment_status', ['pending', 'completed', 'failed', 'refunded', 'canceled']);
 export const paymentMethodEnum = pgEnum('payment_method', ['credit-card', 'debit-card', 'pix', 'bank-transfer', 'other']);
+export const logLevelEnum = pgEnum('log_level', ['info', 'warning', 'error']);
 
 // Users table
 export const users = pgTable('users', {
@@ -245,6 +246,19 @@ export const passwordResetTokens = pgTable('password_reset_tokens', {
   token: text('token').notNull().unique(),
   expiresAt: timestamp('expires_at').notNull(),
   used: boolean('used').default(false),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Audit logs table
+export const auditLogs = pgTable('audit_logs', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id),
+  action: text('action').notNull(),
+  resource: text('resource').notNull(),
+  resourceId: text('resource_id'),
+  details: json('details'),
+  level: logLevelEnum('level').default('info'),
+  ipAddress: text('ip_address'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
