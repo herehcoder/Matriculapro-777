@@ -8,7 +8,7 @@ import { Request, Response, NextFunction, Express } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { 
+import advancedOcrService, { 
   processDocument, 
   validateAgainstUserData, 
   registerManualCorrection,
@@ -56,6 +56,32 @@ const upload = multer({
 export function registerOcrRoutes(app: Express, isAuthenticated: any) {
   console.log('Registrando rotas de OCR avançado');
   
+  // Tentar inicializar serviço de OCR
+  try {
+    // Verificar se temos as dependências necessárias para OCR
+    const hasRequiredDeps = fs.existsSync('./node_modules/tesseract.js');
+    
+    if (!hasRequiredDeps) {
+      console.warn('Tesseract.js não encontrado. O serviço OCR funcionará em modo inativo.');
+      // Definir modo inativo
+      advancedOcrService.setInactiveMode(true);
+    } else {
+      console.log('Inicializando serviço OCR...');
+      // Inicializar OCR com 2 workers em modo assíncrono
+      advancedOcrService.initialize(2)
+        .then(() => {
+          console.log('Serviço OCR inicializado com sucesso');
+        })
+        .catch(error => {
+          console.error('Erro ao inicializar OCR, usando modo inativo:', error);
+          advancedOcrService.setInactiveMode(true);
+        });
+    }
+  } catch (error) {
+    console.error('Erro ao configurar OCR, usando modo inativo:', error);
+    advancedOcrService.setInactiveMode(true);
+  }
+  
   // Middleware para verificar função de admin ou escola
   const isAdminOrSchool = (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
@@ -68,6 +94,40 @@ export function registerOcrRoutes(app: Express, isAuthenticated: any) {
     
     next();
   };
+  
+  /**
+   * @route GET /api/ocr/status
+   * @desc Verifica o status do serviço OCR
+   * @access Admin
+   */
+  app.get('/api/ocr/status', isAuthenticated, (req: Request, res: Response) => {
+    try {
+      if (req.user.role !== 'admin' && req.user.role !== 'school') {
+        return res.status(403).json({
+          success: false,
+          error: 'Acesso não autorizado'
+        });
+      }
+      
+      // Verificar status do serviço
+      const status = {
+        initialized: advancedOcrService.isInitialized(),
+        inactiveMode: advancedOcrService.isInactiveMode(),
+        workerCount: advancedOcrService.getWorkerCount()
+      };
+      
+      res.json({
+        success: true,
+        status
+      });
+    } catch (error) {
+      console.error('Erro ao verificar status do OCR:', error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
+    }
+  });
   
   /**
    * @route POST /api/ocr/initialize

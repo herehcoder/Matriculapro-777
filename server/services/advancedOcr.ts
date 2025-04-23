@@ -412,6 +412,41 @@ export class AdvancedOcrService {
   private inactiveMode = false;
   
   /**
+   * Define modo inativo para o serviço
+   * @param inactive true para ativar modo inativo/fallback
+   */
+  setInactiveMode(inactive: boolean): void {
+    this.inactiveMode = inactive;
+    if (inactive) {
+      console.log('AdvancedOcrService ativou modo inativo (fallback)');
+    }
+  }
+  
+  /**
+   * Verifica se o serviço está em modo inativo/fallback
+   * @returns true se estiver em modo inativo
+   */
+  isInactiveMode(): boolean {
+    return this.inactiveMode;
+  }
+  
+  /**
+   * Verifica se o serviço foi inicializado
+   * @returns true se o serviço foi inicializado
+   */
+  isInitialized(): boolean {
+    return this.initialized;
+  }
+  
+  /**
+   * Obtém a quantidade de workers ativos
+   * @returns número de workers disponíveis
+   */
+  getWorkerCount(): number {
+    return this.workers.length;
+  }
+  
+  /**
    * Inicializa o serviço de OCR
    * @param workerCount Número de workers para processamento paralelo
    * @returns Instância do serviço
