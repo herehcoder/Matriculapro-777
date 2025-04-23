@@ -4,6 +4,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import Register from "@/pages/register";
+import ForgotPassword from "@/pages/forgot-password";
+import ResetPassword from "@/pages/reset-password";
 import AdminDashboard from "@/pages/dashboard/admin";
 import SchoolDashboard from "@/pages/dashboard/school";
 import AttendantDashboard from "@/pages/dashboard/attendant";
@@ -52,6 +54,8 @@ function Router() {
         <Route path="/" component={Login} />
         <Route path="/login" component={Login} />
         <Route path="/register" component={Register} />
+        <Route path="/forgot-password" component={ForgotPassword} />
+        <Route path="/reset-password" component={ResetPassword} />
         <Route path="/enrollment/:schoolId/:enrollmentId?" component={EnrollmentPage} />
         <Route path="/enrollment/success/:id" component={EnrollmentSuccessPage} />
         <Route component={Login} />

@@ -98,7 +98,7 @@ export default function Login() {
                     />
                   </FormControl>
                   <div className="flex justify-end mt-1">
-                    <Link href="#" className="text-sm text-primary-600 hover:text-primary-800 dark:text-primary-400 dark:hover:text-primary-300">
+                    <Link href="/forgot-password" className="text-sm text-primary-600 hover:text-primary-800 dark:text-primary-400 dark:hover:text-primary-300">
                       Esqueceu a senha?
                     </Link>
                   </div>
