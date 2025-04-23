@@ -102,9 +102,7 @@ export default function SettingsPage() {
     queryKey: ['/api/settings/user', user?.id],
     queryFn: async () => {
       if (!user) return null;
-      return apiRequest(`/api/settings/user/${user.id}`, {
-        method: 'GET',
-      });
+      return apiRequest('GET', `/api/settings/user/${user.id}`);
     },
     enabled: !!user,
     onSuccess: (data: UserSettings | null) => {
@@ -134,10 +132,7 @@ export default function SettingsPage() {
       security?: typeof securitySettings;
     }) => {
       if (!user) throw new Error("Usuário não autenticado");
-      return apiRequest(`/api/settings/user/${user.id}`, {
-        method: 'POST',
-        body: JSON.stringify(settings),
-      });
+      return apiRequest('POST', `/api/settings/user/${user.id}`, settings);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/settings/user', user?.id] });
