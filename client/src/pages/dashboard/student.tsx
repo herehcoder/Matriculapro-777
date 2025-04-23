@@ -8,9 +8,9 @@ import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
+  CardFooter,
 } from "@/components/ui/card";
 import {
   Tabs,
@@ -20,9 +20,7 @@ import {
 } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Table,
   TableBody,
@@ -31,175 +29,186 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 import {
   Book,
   GraduationCap,
-  Calendar,
-  Clock,
   FileText,
-  CheckCircle2,
+  Calendar,
+  MoreHorizontal,
+  Clock,
+  CheckCircle,
   AlertCircle,
-  BarChart3,
-  BookOpen,
+  XCircle,
   Download,
-  ExternalLink,
-  Mail,
+  Upload,
+  Eye,
+  ChevronRight,
   MessageSquare,
-  Bookmark,
-  Award,
-  ArrowRight,
-  Bell,
+  CalendarDays,
+  User,
+  School,
+  ExternalLink,
+  FileCheck,
+  RefreshCw,
 } from "lucide-react";
 import { Link } from "wouter";
 
-// Componente para exibir um curso
-const CourseCard = ({ course, progress = 0 }: { course: any; progress: number }) => {
+// Componente para exibir um curso ativo
+const EnrollmentCard = ({ enrollment }: { enrollment: any }) => {
   return (
-    <Card className="overflow-hidden">
-      <div 
-        className="h-32 bg-gradient-to-r from-primary/20 to-primary/5 flex items-center justify-center"
-      >
-        <Book className="h-12 w-12 text-primary/70" />
-      </div>
+    <Card className="hover:border-primary transition-colors cursor-pointer">
       <CardHeader className="pb-2">
-        <CardTitle>{course.name}</CardTitle>
-        <CardDescription>{course.description}</CardDescription>
+        <div className="flex justify-between items-start">
+          <div className="flex items-center space-x-2">
+            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+              <Book className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-lg">{enrollment.course?.name || "Curso"}</CardTitle>
+              <CardDescription>{enrollment.course?.category || "Categoria"}</CardDescription>
+            </div>
+          </div>
+          <Badge
+            variant="outline"
+            className={
+              enrollment.status === "completed" 
+                ? "bg-green-100 text-green-800 hover:bg-green-100" 
+                : enrollment.status === "in_progress"
+                ? "bg-blue-100 text-blue-800 hover:bg-blue-100"
+                : "bg-yellow-100 text-yellow-800 hover:bg-yellow-100"
+            }
+          >
+            {enrollment.status === "completed" 
+              ? "Concluído" 
+              : enrollment.status === "in_progress"
+              ? "Em Andamento"
+              : "Pendente"}
+          </Badge>
+        </div>
       </CardHeader>
       <CardContent>
-        <div className="flex justify-between items-center mb-2">
-          <span className="text-sm font-medium">Progresso</span>
-          <span className="text-sm">{progress}%</span>
-        </div>
-        <Progress value={progress} className="h-2" />
-        <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
-          <div className="flex items-center">
-            <Clock className="h-4 w-4 mr-1" />
-            <span>{course.duration} {course.durationType}</span>
+        <div className="space-y-2">
+          <div className="flex justify-between items-center text-sm">
+            <span className="text-muted-foreground">Progresso</span>
+            <span className="font-medium">{enrollment.progress || 0}%</span>
           </div>
-          <div className="flex items-center">
-            <FileText className="h-4 w-4 mr-1" />
-            <span>{course.modules?.length || 0} módulos</span>
+          <Progress value={enrollment.progress || 0} className="h-2" />
+        </div>
+
+        <div className="mt-4 flex justify-between items-center text-sm">
+          <div className="flex items-center text-muted-foreground">
+            <Calendar className="h-4 w-4 mr-1" />
+            <span>Início: {new Date(enrollment.startDate).toLocaleDateString('pt-BR')}</span>
+          </div>
+          <div className="flex items-center text-muted-foreground">
+            <Clock className="h-4 w-4 mr-1" />
+            <span>{enrollment.duration || "-"}</span>
           </div>
         </div>
       </CardContent>
-      <CardFooter className="border-t bg-muted/50 px-6 py-3">
-        <Button asChild className="w-full">
-          <Link href={`/courses/${course.id}/view`}>
-            Acessar Curso
+      <CardFooter className="border-t pt-4 flex justify-between">
+        <Button variant="outline" size="sm" className="text-xs" asChild>
+          <Link href={`/courses/${enrollment.courseId}`}>
+            Ver Detalhes
           </Link>
         </Button>
+        {enrollment.progress < 100 && (
+          <Button size="sm" className="text-xs">
+            Continuar
+          </Button>
+        )}
       </CardFooter>
     </Card>
   );
 };
 
-// Componente para exibir uma aula/atividade
-const ActivityItem = ({ activity }: { activity: any }) => {
+// Componente para exibir uma lista de tarefas
+const TaskItem = ({ task }: { task: any }) => {
   return (
-    <div className="flex items-center justify-between py-3 border-b last:border-b-0">
-      <div className="flex items-center">
-        <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 ${
-          activity.type === "video" 
-            ? "bg-blue-100 text-blue-600" 
-            : activity.type === "document" 
-            ? "bg-purple-100 text-purple-600"
-            : activity.type === "quiz" 
-            ? "bg-yellow-100 text-yellow-600" 
-            : "bg-green-100 text-green-600"
-        }`}>
-          {activity.type === "video" ? (
-            <BookOpen className="h-5 w-5" />
-          ) : activity.type === "document" ? (
-            <FileText className="h-5 w-5" />
-          ) : activity.type === "quiz" ? (
-            <AlertCircle className="h-5 w-5" />
-          ) : (
-            <CheckCircle2 className="h-5 w-5" />
-          )}
-        </div>
-        <div>
-          <div className="font-medium">{activity.title}</div>
-          <div className="text-xs text-muted-foreground">
-            {activity.type === "video" ? (
-              <span>Vídeo • {activity.duration} min</span>
-            ) : activity.type === "document" ? (
-              <span>Documento • {activity.pages} páginas</span>
-            ) : activity.type === "quiz" ? (
-              <span>Questionário • {activity.questions} questões</span>
-            ) : (
-              <span>Atividade Prática</span>
-            )}
-          </div>
+    <div className="flex items-center space-x-2 py-2 border-b last:border-b-0">
+      <div className={`w-6 h-6 rounded-full flex items-center justify-center 
+        ${task.completed 
+          ? "bg-green-100 text-green-600" 
+          : task.late 
+          ? "bg-red-100 text-red-600" 
+          : "bg-blue-100 text-blue-600"}`
+      }>
+        {task.completed 
+          ? <CheckCircle className="h-4 w-4" /> 
+          : task.late
+          ? <AlertCircle className="h-4 w-4" />
+          : <Clock className="h-4 w-4" />
+        }
+      </div>
+      <div className="flex-1">
+        <div className={`text-sm font-medium ${task.completed ? "line-through opacity-70" : ""}`}>{task.title}</div>
+        <div className="text-xs text-muted-foreground flex items-center">
+          <Calendar className="h-3 w-3 mr-1" />
+          {new Date(task.dueDate).toLocaleDateString('pt-BR')}
         </div>
       </div>
-      <div>
-        <Badge
-          className={`${
-            activity.completed
-              ? "bg-green-100 text-green-800 hover:bg-green-100"
-              : activity.started
-              ? "bg-yellow-100 text-yellow-800 hover:bg-yellow-100"
-              : "bg-gray-100 text-gray-800 hover:bg-gray-100"
-          }`}
-        >
-          {activity.completed
-            ? "Concluído"
-            : activity.started
-            ? "Em Andamento"
-            : "Não Iniciado"}
-        </Badge>
+      <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+        <ChevronRight className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+};
+
+// Componente para exibir um documento
+const DocumentItem = ({ document }: { document: any }) => {
+  return (
+    <div className="flex items-center justify-between py-2 border-b last:border-b-0">
+      <div className="flex items-center space-x-3">
+        <div className="w-8 h-8 rounded bg-primary/10 flex items-center justify-center">
+          <FileText className="h-4 w-4 text-primary" />
+        </div>
+        <div>
+          <div className="text-sm font-medium">{document.name}</div>
+          <div className="text-xs text-muted-foreground">{document.type} • {document.size}</div>
+        </div>
+      </div>
+      <div className="flex space-x-1">
+        <Button variant="ghost" size="icon" className="h-8 w-8">
+          <Eye className="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="icon" className="h-8 w-8">
+          <Download className="h-4 w-4" />
+        </Button>
       </div>
     </div>
   );
 };
 
-// Componente para exibir uma notificação
-const NotificationItem = ({ notification }: { notification: any }) => {
+// Componente para exibir um aviso
+const AnnouncementItem = ({ announcement }: { announcement: any }) => {
   return (
-    <Card className="mb-3">
-      <CardContent className="p-4">
-        <div className="flex">
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 ${
-            notification.type === "course" 
-              ? "bg-blue-100 text-blue-600" 
-              : notification.type === "deadline" 
-              ? "bg-red-100 text-red-600"
-              : notification.type === "grade" 
-              ? "bg-green-100 text-green-600" 
-              : "bg-purple-100 text-purple-600"
-          }`}>
-            {notification.type === "course" ? (
-              <Book className="h-5 w-5" />
-            ) : notification.type === "deadline" ? (
-              <Calendar className="h-5 w-5" />
-            ) : notification.type === "grade" ? (
-              <Award className="h-5 w-5" />
-            ) : (
-              <MessageSquare className="h-5 w-5" />
-            )}
-          </div>
-          <div className="flex-1">
-            <div className="font-medium">{notification.title}</div>
-            <div className="text-sm text-muted-foreground mb-2">
-              {notification.message}
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-muted-foreground">
-                {new Date(notification.date).toLocaleDateString('pt-BR')}
-              </span>
-              {notification.actionLink && (
-                <Button variant="link" size="sm" className="h-auto p-0" asChild>
-                  <Link href={notification.actionLink}>
-                    {notification.actionText} <ArrowRight className="h-3 w-3 ml-1" />
-                  </Link>
-                </Button>
-              )}
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    <div className="p-4 border-b last:border-b-0">
+      <div className="flex items-center justify-between mb-2">
+        <div className="font-medium">{announcement.title}</div>
+        <Badge variant="outline" className="text-xs">
+          {new Date(announcement.date).toLocaleDateString('pt-BR')}
+        </Badge>
+      </div>
+      <p className="text-sm text-muted-foreground mb-3">
+        {announcement.content}
+      </p>
+      <div className="flex items-center text-xs text-muted-foreground">
+        <School className="h-3 w-3 mr-1" />
+        <span>{announcement.school}</span>
+      </div>
+    </div>
   );
 };
 
@@ -207,110 +216,62 @@ export default function StudentDashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  // Buscar dados do estudante
-  const { data: studentData, isLoading: isLoadingStudent } = useQuery({
-    queryKey: ["/api/students", user?.id],
-    queryFn: async () => {
-      if (!user?.id) return null;
-      try {
-        const res = await apiRequest("GET", `/api/students/${user.id}`);
-        return await res.json();
-      } catch (error) {
-        console.error("Erro ao buscar dados do estudante", error);
-        return null;
-      }
-    },
-    enabled: !!user?.id,
-  });
-
-  // Buscar matrículas e cursos do estudante
+  // Buscar matrículas do aluno
   const { data: enrollmentsData, isLoading: isLoadingEnrollments } = useQuery({
-    queryKey: ["/api/enrollments", user?.id],
+    queryKey: ["/api/enrollments/student"],
     queryFn: async () => {
-      if (!user?.id) return null;
-      try {
-        const res = await apiRequest("GET", `/api/enrollments?studentId=${user.id}`);
-        return await res.json();
-      } catch (error) {
-        console.error("Erro ao buscar matrículas", error);
-        return null;
-      }
+      const res = await apiRequest("GET", "/api/enrollments/student");
+      return await res.json();
     },
-    enabled: !!user?.id,
   });
 
-  // Buscar cursos
-  const { data: coursesData, isLoading: isLoadingCourses } = useQuery({
-    queryKey: ["/api/courses", enrollmentsData],
+  // Buscar tarefas do aluno
+  const { data: tasksData, isLoading: isLoadingTasks } = useQuery({
+    queryKey: ["/api/tasks/student"],
     queryFn: async () => {
-      if (!enrollmentsData || enrollmentsData.length === 0) return [];
-      try {
-        const courseIds = enrollmentsData.map((enrollment: any) => enrollment.courseId);
-        const promises = courseIds.map(async (courseId: number) => {
-          const res = await apiRequest("GET", `/api/courses/${courseId}`);
-          return await res.json();
-        });
-        return await Promise.all(promises);
-      } catch (error) {
-        console.error("Erro ao buscar cursos", error);
-        return [];
-      }
+      const res = await apiRequest("GET", "/api/tasks/student");
+      return await res.json();
     },
-    enabled: !!enrollmentsData && enrollmentsData.length > 0,
   });
 
-  // Buscar notificações
-  const { data: notificationsData, isLoading: isLoadingNotifications } = useQuery({
-    queryKey: ["/api/notifications", user?.id],
+  // Buscar documentos do aluno
+  const { data: documentsData, isLoading: isLoadingDocuments } = useQuery({
+    queryKey: ["/api/documents/student"],
     queryFn: async () => {
-      if (!user?.id) return [];
-      try {
-        const res = await apiRequest("GET", `/api/notifications?userId=${user.id}`);
-        return await res.json();
-      } catch (error) {
-        console.error("Erro ao buscar notificações", error);
-        return [];
-      }
+      const res = await apiRequest("GET", "/api/documents/student");
+      return await res.json();
     },
-    enabled: !!user?.id,
   });
 
-  // Estado para controlar a visualização do curso atual
-  const [currentCourseIndex, setCurrentCourseIndex] = useState(0);
+  // Buscar avisos para o aluno
+  const { data: announcementsData, isLoading: isLoadingAnnouncements } = useQuery({
+    queryKey: ["/api/announcements/student"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/announcements/student");
+      return await res.json();
+    },
+  });
 
-  // Dados para o dashboard
-  const coursesWithProgress = coursesData
-    ? coursesData.map((course: any, index: number) => {
-        const enrollment = enrollmentsData.find(
-          (e: any) => e.courseId === course.id
-        );
-        return {
-          ...course,
-          progress: enrollment?.progress || 0,
-          enrollmentId: enrollment?.id,
-        };
-      })
-    : [];
+  // Processar dados para o dashboard
+  const activeEnrollments = enrollmentsData?.filter((e: any) => 
+    e.status === "in_progress" || e.status === "pending"
+  ) || [];
   
-  const currentCourse = coursesWithProgress[currentCourseIndex] || null;
+  const completedEnrollments = enrollmentsData?.filter((e: any) => 
+    e.status === "completed"
+  ) || [];
 
-  // Processa módulos e atividades do curso atual
-  const courseModules = currentCourse?.modules || [];
-  const activitiesCount = courseModules.reduce(
-    (acc: number, module: any) => acc + (module.activities?.length || 0),
-    0
-  );
-  const completedActivities = courseModules.reduce(
-    (acc: number, module: any) =>
-      acc +
-      (module.activities?.filter((activity: any) => activity.completed)?.length ||
-        0),
-    0
-  );
-  const overallProgress =
-    activitiesCount > 0 ? Math.round((completedActivities / activitiesCount) * 100) : 0;
+  const upcomingTasks = tasksData?.filter((t: any) => 
+    !t.completed && new Date(t.dueDate) > new Date()
+  ).sort((a: any, b: any) => 
+    new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
+  ).slice(0, 5) || [];
 
-  if (isLoadingStudent || isLoadingEnrollments || isLoadingCourses || isLoadingNotifications) {
+  const lateTasks = tasksData?.filter((t: any) => 
+    !t.completed && new Date(t.dueDate) < new Date()
+  ) || [];
+
+  if (isLoadingEnrollments || isLoadingTasks || isLoadingDocuments || isLoadingAnnouncements) {
     return (
       <div className="container mx-auto py-10">
         <div className="flex justify-center items-center h-64">
@@ -320,536 +281,622 @@ export default function StudentDashboard() {
     );
   }
 
-  // Se não houver matrículas, mostrar página de orientação
-  if (!enrollmentsData || enrollmentsData.length === 0) {
-    return (
-      <div className="container mx-auto py-10">
-        <Card className="max-w-3xl mx-auto">
-          <CardHeader>
-            <CardTitle>Bem-vindo à Plataforma de Cursos</CardTitle>
-            <CardDescription>
-              Você ainda não está matriculado em nenhum curso
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-center py-8">
-              <GraduationCap className="h-16 w-16 text-primary/50" />
-            </div>
-            <div className="text-center space-y-2">
-              <h3 className="text-lg font-medium">Comece sua jornada de aprendizado</h3>
-              <p className="text-muted-foreground">
-                Explore os cursos disponíveis e matricule-se para começar a aprender
-              </p>
-            </div>
-          </CardContent>
-          <CardFooter className="flex justify-center">
-            <Button asChild>
-              <Link href="/courses/explore">
-                <Book className="h-4 w-4 mr-2" />
-                Explorar Cursos
-              </Link>
-            </Button>
-          </CardFooter>
-        </Card>
-      </div>
-    );
-  }
-
   return (
     <div className="container mx-auto py-6">
       <div className="flex flex-col md:flex-row justify-between items-start mb-8">
         <div>
-          <h1 className="text-3xl font-bold mb-1">Meus Cursos</h1>
+          <h1 className="text-3xl font-bold mb-1">Portal do Aluno</h1>
           <p className="text-muted-foreground">
-            Acompanhe seu progresso e continue aprendendo
+            Bem-vindo de volta, {user?.fullName?.split(' ')[0] || 'Aluno'}! Acesse seus cursos e atividades
           </p>
         </div>
-        <div className="mt-4 md:mt-0">
+        <div className="mt-4 md:mt-0 flex space-x-2">
+          <Button asChild variant="outline">
+            <Link href="/messages">
+              <MessageSquare className="h-4 w-4 mr-2" />
+              Mensagens
+            </Link>
+          </Button>
           <Button asChild>
-            <Link href="/courses/explore">
-              <Book className="h-4 w-4 mr-2" />
-              Explorar mais cursos
+            <Link href="/profile">
+              <User className="h-4 w-4 mr-2" />
+              Meu Perfil
             </Link>
           </Button>
         </div>
       </div>
 
-      <Tabs defaultValue="courses" className="space-y-6">
+      <Tabs defaultValue="overview" className="space-y-6">
         <TabsList>
+          <TabsTrigger value="overview">Visão Geral</TabsTrigger>
           <TabsTrigger value="courses">Meus Cursos</TabsTrigger>
-          <TabsTrigger value="activities">Atividades</TabsTrigger>
-          <TabsTrigger value="materials">Materiais</TabsTrigger>
-          <TabsTrigger value="grades">Notas e Certificados</TabsTrigger>
+          <TabsTrigger value="tasks">Tarefas</TabsTrigger>
+          <TabsTrigger value="documents">Documentos</TabsTrigger>
         </TabsList>
 
-        {/* Meus Cursos */}
-        <TabsContent value="courses" className="space-y-6">
-          <div className="grid gap-6 grid-cols-1 md:grid-cols-3">
-            {coursesWithProgress.map((course: any, index: number) => (
-              <CourseCard 
-                key={course.id} 
-                course={course} 
-                progress={course.progress} 
-              />
-            ))}
+        {/* Visão Geral */}
+        <TabsContent value="overview" className="space-y-6">
+          {/* Cards de resumo */}
+          <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">Cursos Ativos</CardTitle>
+                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Book className="h-4 w-4 text-primary" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{activeEnrollments.length}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  cursos em andamento
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">Cursos Concluídos</CardTitle>
+                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                  <GraduationCap className="h-4 w-4 text-primary" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{completedEnrollments.length}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  cursos finalizados
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">Tarefas Pendentes</CardTitle>
+                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                  <FileText className="h-4 w-4 text-primary" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{upcomingTasks.length}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  tarefas a realizar
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">Tarefas Atrasadas</CardTitle>
+                <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center">
+                  <AlertCircle className="h-4 w-4 text-red-500" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{lateTasks.length}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  tarefas com prazo expirado
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Cursos ativos e próximas tarefas */}
+          <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
+            {/* Cursos em andamento */}
+            <Card className="lg:col-span-1">
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>Cursos em Andamento</CardTitle>
+                  <Button variant="ghost" size="sm" asChild>
+                    <Link href="/courses">
+                      Ver todos
+                    </Link>
+                  </Button>
+                </div>
+                <CardDescription>
+                  Continue de onde parou
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {activeEnrollments.length > 0 ? (
+                    activeEnrollments.slice(0, 2).map((enrollment: any) => (
+                      <EnrollmentCard key={enrollment.id} enrollment={enrollment} />
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <GraduationCap className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                      <p>Você não possui cursos em andamento</p>
+                      <Button variant="outline" size="sm" className="mt-4" asChild>
+                        <Link href="/courses/browse">
+                          Explorar Cursos
+                        </Link>
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Próximas tarefas */}
+            <Card className="lg:col-span-1">
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>Próximas Tarefas</CardTitle>
+                  <Button variant="ghost" size="sm" asChild>
+                    <Link href="/tasks">
+                      Ver todas
+                    </Link>
+                  </Button>
+                </div>
+                <CardDescription>
+                  Tarefas pendentes para os próximos dias
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="divide-y">
+                  {upcomingTasks.length > 0 ? (
+                    upcomingTasks.map((task: any) => (
+                      <TaskItem key={task.id} task={task} />
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <CheckCircle className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                      <p>Você não possui tarefas pendentes</p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Documentos e Avisos */}
+          <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
+            {/* Documentos recentes */}
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>Documentos Recentes</CardTitle>
+                  <Button variant="ghost" size="sm" asChild>
+                    <Link href="/documents">
+                      Ver todos
+                    </Link>
+                  </Button>
+                </div>
+                <CardDescription>
+                  Acesse seus documentos e certificados
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div>
+                  {documentsData && documentsData.length > 0 ? (
+                    documentsData.slice(0, 5).map((doc: any) => (
+                      <DocumentItem key={doc.id} document={doc} />
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <FileText className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                      <p>Nenhum documento disponível</p>
+                      <Button variant="outline" size="sm" className="mt-4">
+                        <Upload className="h-4 w-4 mr-2" />
+                        Enviar Documento
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Avisos */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Avisos Importantes</CardTitle>
+                <CardDescription>
+                  Comunicados das suas escolas
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-[280px]">
+                  <div>
+                    {announcementsData && announcementsData.length > 0 ? (
+                      announcementsData.map((announcement: any) => (
+                        <AnnouncementItem key={announcement.id} announcement={announcement} />
+                      ))
+                    ) : (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <MessageSquare className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                        <p>Nenhum aviso disponível</p>
+                        <Button variant="outline" size="sm" className="mt-4" asChild>
+                          <Link href="/messages">
+                            Ver Mensagens
+                          </Link>
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
 
-        {/* Atividades */}
-        <TabsContent value="activities" className="space-y-6">
-          {coursesWithProgress.length > 0 ? (
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Atividades do Curso</CardTitle>
-                    <CardDescription>
-                      {coursesWithProgress.length > 1 && (
-                        <select
-                          className="mt-1 bg-transparent border-none text-muted-foreground text-sm p-0 cursor-pointer focus:ring-0"
-                          value={currentCourseIndex}
-                          onChange={(e) => setCurrentCourseIndex(Number(e.target.value))}
-                        >
-                          {coursesWithProgress.map((course: any, index: number) => (
-                            <option key={course.id} value={index}>
-                              {course.name}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </CardDescription>
-                  </div>
-                  <div className="flex items-center">
-                    <div className="mr-4">
-                      <div className="text-sm font-medium">Progresso Geral</div>
-                      <div className="text-2xl font-bold">{overallProgress}%</div>
-                    </div>
-                    <Progress 
-                      value={overallProgress} 
-                      className="h-2 w-[100px]" 
-                    />
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {courseModules.length > 0 ? (
-                  courseModules.map((module: any, index: number) => (
-                    <div key={index} className="space-y-2">
-                      <h3 className="font-medium flex items-center">
-                        <span 
-                          className="w-6 h-6 flex items-center justify-center bg-primary/10 rounded-full text-primary text-xs mr-2"
-                        >
-                          {index + 1}
-                        </span>
-                        {module.title}
-                      </h3>
-                      <div className="border rounded-md">
-                        {module.activities && module.activities.length > 0 ? (
-                          module.activities.map((activity: any, actIndex: number) => (
-                            <ActivityItem 
-                              key={actIndex} 
-                              activity={activity} 
-                            />
-                          ))
-                        ) : (
-                          <div className="p-4 text-center text-muted-foreground">
-                            Nenhuma atividade encontrada para este módulo
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-center py-6 text-muted-foreground">
-                    Nenhum módulo encontrado para este curso
-                  </div>
-                )}
-              </CardContent>
-              <CardFooter className="border-t bg-muted/50 flex justify-between">
-                <Button variant="outline" asChild>
-                  <Link href={`/courses/${currentCourse?.id}/view`}>
-                    Ver todas as aulas
-                  </Link>
-                </Button>
-                <Button asChild>
-                  <Link href={`/courses/${currentCourse?.id}/next-activity`}>
-                    Continuar de onde parou
-                  </Link>
-                </Button>
-              </CardFooter>
-            </Card>
-          ) : (
-            <div className="text-center py-10 text-muted-foreground">
-              Você não está matriculado em nenhum curso
-            </div>
-          )}
-        </TabsContent>
-
-        {/* Materiais */}
-        <TabsContent value="materials" className="space-y-6">
+        {/* Meus Cursos */}
+        <TabsContent value="courses" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Materiais de Estudo</CardTitle>
-              <CardDescription>
-                Acesse os materiais complementares dos seus cursos
-              </CardDescription>
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle>Meus Cursos</CardTitle>
+                  <CardDescription>
+                    Todos os cursos em que você está matriculado
+                  </CardDescription>
+                </div>
+                <Button variant="outline" size="sm">
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Atualizar
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
-              {coursesWithProgress.length > 0 ? (
-                <div className="space-y-4">
-                  {coursesWithProgress.map((course: any) => (
-                    <div key={course.id} className="space-y-3">
-                      <h3 className="font-medium text-lg">{course.name}</h3>
-                      {course.materials && course.materials.length > 0 ? (
-                        <div className="border rounded-md divide-y">
-                          {course.materials.map((material: any, index: number) => (
-                            <div 
-                              key={index} 
-                              className="flex items-center justify-between p-3"
-                            >
-                              <div className="flex items-center">
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 ${
-                                  material.type === "pdf" 
-                                    ? "bg-red-100 text-red-600" 
-                                    : material.type === "doc" 
-                                    ? "bg-blue-100 text-blue-600"
-                                    : material.type === "video" 
-                                    ? "bg-purple-100 text-purple-600" 
-                                    : "bg-green-100 text-green-600"
-                                }`}>
-                                  <FileText className="h-5 w-5" />
-                                </div>
-                                <div>
-                                  <div className="font-medium">{material.title}</div>
-                                  <div className="text-xs text-muted-foreground">
-                                    {material.type.toUpperCase()} • {material.size}
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="flex">
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="h-8 w-8 p-0" 
-                                  title="Baixar"
-                                  asChild
-                                >
-                                  <Link href={material.downloadUrl || "#"}>
-                                    <Download className="h-4 w-4" />
-                                  </Link>
-                                </Button>
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="h-8 w-8 p-0 ml-1" 
-                                  title="Abrir"
-                                  asChild
-                                >
-                                  <Link href={material.viewUrl || "#"}>
-                                    <ExternalLink className="h-4 w-4" />
-                                  </Link>
-                                </Button>
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="h-8 w-8 p-0 ml-1" 
-                                  title="Salvar"
-                                >
-                                  <Bookmark className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-center py-4 border rounded-md text-muted-foreground">
-                          Nenhum material disponível para este curso
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-6 text-muted-foreground">
-                  Você não está matriculado em nenhum curso
-                </div>
-              )}
+              <Tabs defaultValue="active">
+                <TabsList className="mb-4">
+                  <TabsTrigger value="active">Em Andamento</TabsTrigger>
+                  <TabsTrigger value="completed">Concluídos</TabsTrigger>
+                  <TabsTrigger value="pending">Pendentes</TabsTrigger>
+                </TabsList>
+                
+                <TabsContent value="active">
+                  <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+                    {activeEnrollments.filter((e: any) => e.status === "in_progress").length > 0 ? (
+                      activeEnrollments
+                        .filter((e: any) => e.status === "in_progress")
+                        .map((enrollment: any) => (
+                          <EnrollmentCard key={enrollment.id} enrollment={enrollment} />
+                        ))
+                    ) : (
+                      <div className="col-span-full text-center py-10 text-muted-foreground">
+                        <Book className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                        <p>Você não possui cursos em andamento</p>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+                
+                <TabsContent value="completed">
+                  <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+                    {completedEnrollments.length > 0 ? (
+                      completedEnrollments.map((enrollment: any) => (
+                        <EnrollmentCard key={enrollment.id} enrollment={enrollment} />
+                      ))
+                    ) : (
+                      <div className="col-span-full text-center py-10 text-muted-foreground">
+                        <GraduationCap className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                        <p>Você ainda não concluiu nenhum curso</p>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+                
+                <TabsContent value="pending">
+                  <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+                    {activeEnrollments.filter((e: any) => e.status === "pending").length > 0 ? (
+                      activeEnrollments
+                        .filter((e: any) => e.status === "pending")
+                        .map((enrollment: any) => (
+                          <EnrollmentCard key={enrollment.id} enrollment={enrollment} />
+                        ))
+                    ) : (
+                      <div className="col-span-full text-center py-10 text-muted-foreground">
+                        <Clock className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                        <p>Você não possui cursos pendentes</p>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+              </Tabs>
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* Notas e Certificados */}
-        <TabsContent value="grades" className="space-y-6">
+        {/* Tarefas */}
+        <TabsContent value="tasks" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Desempenho e Certificados</CardTitle>
-              <CardDescription>
-                Acompanhe seu desempenho e acesse seus certificados
-              </CardDescription>
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle>Minhas Tarefas</CardTitle>
+                  <CardDescription>
+                    Acompanhe suas atividades e prazos
+                  </CardDescription>
+                </div>
+                <div className="flex space-x-2">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm">
+                        <Filter className="h-4 w-4 mr-2" />
+                        Filtrar
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuLabel>Filtrar por Status</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem>Todas as Tarefas</DropdownMenuItem>
+                      <DropdownMenuItem>Pendentes</DropdownMenuItem>
+                      <DropdownMenuItem>Concluídas</DropdownMenuItem>
+                      <DropdownMenuItem>Atrasadas</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
-              {coursesWithProgress.length > 0 ? (
-                <div className="space-y-6">
-                  <div className="border rounded-md">
-                    <div className="bg-muted px-4 py-2 font-medium">
-                      Notas e Avaliações
-                    </div>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Curso</TableHead>
-                          <TableHead>Progresso</TableHead>
-                          <TableHead>Nota Média</TableHead>
-                          <TableHead>Status</TableHead>
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[30px]"></TableHead>
+                      <TableHead>Tarefa</TableHead>
+                      <TableHead>Curso</TableHead>
+                      <TableHead>Prazo</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {tasksData && tasksData.length > 0 ? (
+                      tasksData.map((task: any) => (
+                        <TableRow key={task.id}>
+                          <TableCell>
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center 
+                              ${task.completed 
+                                ? "bg-green-100 text-green-600" 
+                                : task.late 
+                                ? "bg-red-100 text-red-600" 
+                                : "bg-blue-100 text-blue-600"}`
+                            }>
+                              {task.completed 
+                                ? <CheckCircle className="h-4 w-4" /> 
+                                : task.late
+                                ? <AlertCircle className="h-4 w-4" />
+                                : <Clock className="h-4 w-4" />
+                              }
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="font-medium">{task.title}</div>
+                            <div className="text-xs text-muted-foreground">{task.description}</div>
+                          </TableCell>
+                          <TableCell>{task.course}</TableCell>
+                          <TableCell>{new Date(task.dueDate).toLocaleDateString('pt-BR')}</TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className={
+                                task.completed 
+                                  ? "bg-green-100 text-green-800 hover:bg-green-100" 
+                                  : task.late
+                                  ? "bg-red-100 text-red-800 hover:bg-red-100"
+                                  : "bg-blue-100 text-blue-800 hover:bg-blue-100"
+                              }
+                            >
+                              {task.completed 
+                                ? "Concluída" 
+                                : task.late
+                                ? "Atrasada"
+                                : "Pendente"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="ghost" size="sm">Ver Detalhes</Button>
+                          </TableCell>
                         </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {coursesWithProgress.map((course: any) => (
-                          <TableRow key={course.id}>
-                            <TableCell className="font-medium">{course.name}</TableCell>
-                            <TableCell>
-                              <div className="flex items-center space-x-2">
-                                <Progress
-                                  value={course.progress}
-                                  className="h-2 w-[100px]"
-                                />
-                                <span className="text-sm">{course.progress}%</span>
-                              </div>
-                            </TableCell>
-                            <TableCell>{course.grade || "N/A"}</TableCell>
-                            <TableCell>
-                              <Badge
-                                className={
-                                  course.progress === 100
-                                    ? "bg-green-100 text-green-800 hover:bg-green-100"
-                                    : course.progress > 0
-                                    ? "bg-yellow-100 text-yellow-800 hover:bg-yellow-100"
-                                    : "bg-gray-100 text-gray-800 hover:bg-gray-100"
-                                }
-                              >
-                                {course.progress === 100
-                                  ? "Concluído"
-                                  : course.progress > 0
-                                  ? "Em Andamento"
-                                  : "Não Iniciado"}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
+                          <FileText className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                          <p>Nenhuma tarefa encontrada</p>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-                  <div className="border rounded-md">
-                    <div className="bg-muted px-4 py-2 font-medium">
-                      Certificados Disponíveis
-                    </div>
-                    <div className="p-4">
-                      {coursesWithProgress.some((course: any) => course.progress === 100) ? (
-                        <div className="space-y-4">
-                          {coursesWithProgress
-                            .filter((course: any) => course.progress === 100)
-                            .map((course: any) => (
-                              <div 
-                                key={course.id} 
-                                className="flex items-center justify-between border-b pb-3 last:border-b-0 last:pb-0"
-                              >
-                                <div className="flex items-center">
-                                  <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center mr-3">
-                                    <Award className="h-5 w-5 text-green-600" />
-                                  </div>
-                                  <div>
-                                    <div className="font-medium">Certificado: {course.name}</div>
-                                    <div className="text-xs text-muted-foreground">
-                                      Emitido em: {new Date().toLocaleDateString('pt-BR')}
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="flex space-x-2">
-                                  <Button variant="outline" size="sm" asChild>
-                                    <Link href={`/certificates/${course.id}/view`}>
-                                      <ExternalLink className="h-4 w-4 mr-1" />
-                                      Visualizar
-                                    </Link>
-                                  </Button>
-                                  <Button variant="outline" size="sm" asChild>
-                                    <Link href={`/certificates/${course.id}/download`}>
-                                      <Download className="h-4 w-4 mr-1" />
-                                      Baixar PDF
-                                    </Link>
-                                  </Button>
+        {/* Documentos */}
+        <TabsContent value="documents" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle>Meus Documentos</CardTitle>
+                  <CardDescription>
+                    Documentos e certificados relacionados aos seus cursos
+                  </CardDescription>
+                </div>
+                <Button>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Enviar Documento
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Tabs defaultValue="all">
+                <TabsList className="mb-4">
+                  <TabsTrigger value="all">Todos</TabsTrigger>
+                  <TabsTrigger value="certificates">Certificados</TabsTrigger>
+                  <TabsTrigger value="submissions">Entregas</TabsTrigger>
+                  <TabsTrigger value="personal">Documentos Pessoais</TabsTrigger>
+                </TabsList>
+                
+                <TabsContent value="all">
+                  <div className="rounded-md border">
+                    {documentsData && documentsData.length > 0 ? (
+                      documentsData.map((doc: any) => (
+                        <div key={doc.id} className="p-4 border-b last:border-b-0 flex justify-between items-center">
+                          <div className="flex items-center space-x-3">
+                            <div className="w-10 h-10 rounded bg-primary/10 flex items-center justify-center">
+                              <FileText className="h-5 w-5 text-primary" />
+                            </div>
+                            <div>
+                              <div className="font-medium">{doc.name}</div>
+                              <div className="text-xs text-muted-foreground flex items-center">
+                                <Badge variant="outline" className="mr-2 text-xs">
+                                  {doc.type}
+                                </Badge>
+                                <Calendar className="h-3 w-3 mr-1" />
+                                {new Date(doc.date).toLocaleDateString('pt-BR')}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex space-x-2">
+                            <Button variant="outline" size="sm">
+                              <Eye className="h-4 w-4 mr-2" />
+                              Visualizar
+                            </Button>
+                            <Button variant="outline" size="sm">
+                              <Download className="h-4 w-4 mr-2" />
+                              Baixar
+                            </Button>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-12 text-muted-foreground">
+                        <FileText className="h-12 w-12 mx-auto mb-3 opacity-20" />
+                        <p className="mb-2">Você não possui documentos disponíveis</p>
+                        <Button variant="outline" size="sm">
+                          <Upload className="h-4 w-4 mr-2" />
+                          Enviar Documento
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+                
+                <TabsContent value="certificates">
+                  <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+                    {documentsData?.filter((d: any) => d.type === "Certificado").length > 0 ? (
+                      documentsData
+                        .filter((d: any) => d.type === "Certificado")
+                        .map((cert: any) => (
+                          <Card key={cert.id} className="overflow-hidden">
+                            <div className="h-40 bg-primary/10 flex items-center justify-center">
+                              <GraduationCap className="h-16 w-16 text-primary/40" />
+                            </div>
+                            <CardHeader>
+                              <CardTitle className="text-lg">{cert.name}</CardTitle>
+                              <CardDescription>
+                                Emitido em {new Date(cert.date).toLocaleDateString('pt-BR')}
+                              </CardDescription>
+                            </CardHeader>
+                            <CardFooter className="flex justify-between">
+                              <Button variant="outline" size="sm">
+                                <Eye className="h-4 w-4 mr-2" />
+                                Visualizar
+                              </Button>
+                              <Button variant="outline" size="sm">
+                                <Download className="h-4 w-4 mr-2" />
+                                Baixar
+                              </Button>
+                            </CardFooter>
+                          </Card>
+                        ))
+                    ) : (
+                      <div className="col-span-full text-center py-12 text-muted-foreground">
+                        <GraduationCap className="h-12 w-12 mx-auto mb-3 opacity-20" />
+                        <p>Você ainda não possui certificados disponíveis</p>
+                        <p className="text-sm mt-1">Complete seus cursos para receber certificados</p>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+                
+                <TabsContent value="submissions">
+                  <div className="rounded-md border">
+                    {documentsData?.filter((d: any) => d.type === "Entrega").length > 0 ? (
+                      documentsData
+                        .filter((d: any) => d.type === "Entrega")
+                        .map((doc: any) => (
+                          <div key={doc.id} className="p-4 border-b last:border-b-0 flex justify-between items-center">
+                            <div className="flex items-center space-x-3">
+                              <div className="w-10 h-10 rounded bg-blue-100 flex items-center justify-center">
+                                <FileCheck className="h-5 w-5 text-blue-600" />
+                              </div>
+                              <div>
+                                <div className="font-medium">{doc.name}</div>
+                                <div className="text-xs text-muted-foreground flex items-center">
+                                  <Badge variant="outline" className="mr-2 text-xs bg-blue-50">
+                                    Entrega
+                                  </Badge>
+                                  <span>{doc.course || "Curso"}</span>
                                 </div>
                               </div>
-                            ))}
-                        </div>
-                      ) : (
-                        <div className="text-center py-4 text-muted-foreground">
-                          Complete um curso para receber seu certificado
-                        </div>
-                      )}
-                    </div>
+                            </div>
+                            <div className="flex space-x-2">
+                              <Button variant="outline" size="sm">
+                                <ExternalLink className="h-4 w-4 mr-2" />
+                                Ver Feedback
+                              </Button>
+                            </div>
+                          </div>
+                        ))
+                    ) : (
+                      <div className="text-center py-12 text-muted-foreground">
+                        <FileCheck className="h-12 w-12 mx-auto mb-3 opacity-20" />
+                        <p>Você não possui entregas de atividades</p>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ) : (
-                <div className="text-center py-6 text-muted-foreground">
-                  Você não está matriculado em nenhum curso
-                </div>
-              )}
+                </TabsContent>
+                
+                <TabsContent value="personal">
+                  <div className="rounded-md border">
+                    {documentsData?.filter((d: any) => d.type === "Pessoal").length > 0 ? (
+                      documentsData
+                        .filter((d: any) => d.type === "Pessoal")
+                        .map((doc: any) => (
+                          <div key={doc.id} className="p-4 border-b last:border-b-0 flex justify-between items-center">
+                            <div className="flex items-center space-x-3">
+                              <div className="w-10 h-10 rounded bg-primary/10 flex items-center justify-center">
+                                <FileText className="h-5 w-5 text-primary" />
+                              </div>
+                              <div>
+                                <div className="font-medium">{doc.name}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  <Badge variant="outline" className="mr-2 text-xs">
+                                    Documento Pessoal
+                                  </Badge>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex space-x-2">
+                              <Button variant="outline" size="sm">
+                                <Eye className="h-4 w-4 mr-2" />
+                                Visualizar
+                              </Button>
+                            </div>
+                          </div>
+                        ))
+                    ) : (
+                      <div className="text-center py-12 text-muted-foreground">
+                        <User className="h-12 w-12 mx-auto mb-3 opacity-20" />
+                        <p className="mb-2">Você não possui documentos pessoais cadastrados</p>
+                        <Button variant="outline" size="sm">
+                          <Upload className="h-4 w-4 mr-2" />
+                          Enviar Documento
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+              </Tabs>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
-
-      {/* Notificações */}
-      <div className="mt-8">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold">Notificações</h2>
-          <Button variant="link" size="sm" className="text-primary">
-            Ver todas
-          </Button>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-4">
-            {notificationsData && notificationsData.length > 0 ? (
-              <ScrollArea className="h-[300px] rounded-md">
-                <div className="p-4">
-                  {notificationsData.map((notification: any) => (
-                    <NotificationItem 
-                      key={notification.id} 
-                      notification={notification} 
-                    />
-                  ))}
-                </div>
-              </ScrollArea>
-            ) : (
-              <Card>
-                <CardContent className="p-6 text-center">
-                  <Bell className="h-10 w-10 text-muted-foreground/50 mx-auto mb-3" />
-                  <h3 className="font-medium mb-1">Nenhuma notificação</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Você não tem notificações no momento.
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-          <Card>
-            <CardHeader>
-              <CardTitle>Próximas Atividades</CardTitle>
-              <CardDescription>
-                Atividades pendentes para conclusão
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {coursesWithProgress.length > 0 ? (
-                <div className="space-y-4">
-                  {coursesWithProgress.flatMap((course: any) =>
-                    course.modules
-                      ? course.modules
-                          .flatMap((module: any) =>
-                            module.activities
-                              ? module.activities
-                                  .filter((activity: any) => !activity.completed)
-                                  .map((activity: any) => ({
-                                    ...activity,
-                                    moduleName: module.title,
-                                    courseName: course.name,
-                                    courseId: course.id,
-                                  }))
-                              : []
-                          )
-                          .slice(0, 3)
-                      : []
-                  ).length > 0 ? (
-                    <div className="space-y-2">
-                      {coursesWithProgress
-                        .flatMap((course: any) =>
-                          course.modules
-                            ? course.modules
-                                .flatMap((module: any) =>
-                                  module.activities
-                                    ? module.activities
-                                        .filter((activity: any) => !activity.completed)
-                                        .map((activity: any) => ({
-                                          ...activity,
-                                          moduleName: module.title,
-                                          courseName: course.name,
-                                          courseId: course.id,
-                                        }))
-                                    : []
-                                )
-                                .slice(0, 3)
-                            : []
-                        )
-                        .map((activity: any, index: number) => (
-                          <div
-                            key={index}
-                            className="flex items-center justify-between p-3 border rounded-md"
-                          >
-                            <div className="flex items-center">
-                              <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 ${
-                                activity.type === "video" 
-                                  ? "bg-blue-100 text-blue-600" 
-                                  : activity.type === "document" 
-                                  ? "bg-purple-100 text-purple-600"
-                                  : activity.type === "quiz" 
-                                  ? "bg-yellow-100 text-yellow-600" 
-                                  : "bg-green-100 text-green-600"
-                              }`}>
-                                {activity.type === "video" ? (
-                                  <BookOpen className="h-5 w-5" />
-                                ) : activity.type === "document" ? (
-                                  <FileText className="h-5 w-5" />
-                                ) : activity.type === "quiz" ? (
-                                  <AlertCircle className="h-5 w-5" />
-                                ) : (
-                                  <CheckCircle2 className="h-5 w-5" />
-                                )}
-                              </div>
-                              <div>
-                                <div className="font-medium">{activity.title}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  {activity.courseName} • {activity.moduleName}
-                                </div>
-                              </div>
-                            </div>
-                            <Button 
-                              size="sm" 
-                              asChild
-                            >
-                              <Link href={`/courses/${activity.courseId}/activity/${activity.id}`}>
-                                Continuar
-                              </Link>
-                            </Button>
-                          </div>
-                        ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-6 text-muted-foreground">
-                      Nenhuma atividade pendente
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="text-center py-6 text-muted-foreground">
-                  Você não está matriculado em nenhum curso
-                </div>
-              )}
-            </CardContent>
-            <CardFooter>
-              <Button 
-                variant="outline" 
-                className="w-full" 
-                asChild
-              >
-                <Link href="/tasks">
-                  Ver todas as atividades
-                </Link>
-              </Button>
-            </CardFooter>
-          </Card>
-        </div>
-      </div>
     </div>
   );
 }

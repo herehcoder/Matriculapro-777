@@ -10,6 +10,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  CardFooter,
 } from "@/components/ui/card";
 import {
   Tabs,
@@ -20,25 +21,53 @@ import {
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 
 import {
+  School,
   Users,
-  GraduationCap,
   Book,
-  FileText,
-  User,
+  Building,
+  BarChart,
   BarChart3,
-  CalendarDays,
-  Clock,
   DollarSign,
   ArrowUpRight,
   ArrowDownRight,
   PlusCircle,
-  Phone,
+  MoreHorizontal,
+  GraduationCap,
+  UserPlus,
+  CalendarDays,
+  Activity,
+  Filter,
+  RefreshCw,
+  Search,
+  CheckCircle,
+  XCircle,
+  Edit,
+  Trash2,
+  Eye,
 } from "lucide-react";
 import { Link } from "wouter";
 
-// Componente para exibir um caixa de métrica
+// Componente de cartão de métrica
 const MetricCard = ({
   title,
   value,
@@ -94,72 +123,144 @@ const MetricCard = ({
   );
 };
 
-// Componente para exibir um lead
-const LeadItem = ({ lead }: { lead: any }) => {
+// Componente para exibir um aluno na tabela
+const StudentRow = ({ student }: { student: any }) => {
   return (
-    <div className="flex items-center justify-between py-3">
-      <div className="flex items-center">
-        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mr-3">
-          <User className="h-5 w-5 text-primary" />
+    <TableRow key={student.id}>
+      <TableCell>
+        <div className="flex items-center">
+          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mr-3">
+            {student.profileImage ? (
+              <img 
+                src={student.profileImage} 
+                alt={student.name} 
+                className="w-10 h-10 rounded-full object-cover" 
+              />
+            ) : (
+              <Users className="h-5 w-5 text-primary" />
+            )}
+          </div>
+          <div>
+            <div className="font-medium">{student.fullName}</div>
+            <div className="text-xs text-muted-foreground">{student.email}</div>
+          </div>
         </div>
-        <div>
-          <div className="font-medium">{lead.name}</div>
-          <div className="text-sm text-muted-foreground">{lead.course}</div>
-        </div>
-      </div>
-      <div className="flex items-center">
-        <Button size="sm" variant="outline" className="mr-2">
-          <Phone className="h-4 w-4 mr-1" />
-          Contato
-        </Button>
-        <div className={`px-2 py-1 rounded-full text-xs ${
-          lead.status === "novo" 
-            ? "bg-blue-100 text-blue-800" 
-            : lead.status === "contato" 
-            ? "bg-yellow-100 text-yellow-800"
-            : lead.status === "negociação" 
-            ? "bg-purple-100 text-purple-800" 
-            : "bg-green-100 text-green-800"
-        }`}>
-          {lead.status}
-        </div>
-      </div>
-    </div>
+      </TableCell>
+      <TableCell>{student.enrollmentCount} matrículas</TableCell>
+      <TableCell>
+        <Badge
+          variant={student.status === "ativo" ? "default" : "secondary"}
+          className={student.status === "ativo" ? "bg-green-100 text-green-800 hover:bg-green-100" : ""}
+        >
+          {student.status === "ativo" ? "Ativo" : "Inativo"}
+        </Badge>
+      </TableCell>
+      <TableCell>{new Date(student.createdAt).toLocaleDateString('pt-BR')}</TableCell>
+      <TableCell>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" className="h-8 w-8 p-0">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Ações</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem>
+              <Eye className="mr-2 h-4 w-4" />
+              <span>Visualizar Perfil</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem>
+              <Edit className="mr-2 h-4 w-4" />
+              <span>Editar Dados</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem>
+              {student.status === "ativo" ? (
+                <>
+                  <XCircle className="mr-2 h-4 w-4" />
+                  <span>Desativar</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="mr-2 h-4 w-4" />
+                  <span>Ativar</span>
+                </>
+              )}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </TableCell>
+    </TableRow>
   );
 };
 
-// Componente para exibir um aluno matriculado
-const StudentItem = ({ student }: { student: any }) => {
+// Componente para exibir um curso na tabela
+const CourseRow = ({ course }: { course: any }) => {
   return (
-    <div className="flex items-center justify-between py-3">
-      <div className="flex items-center">
-        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mr-3">
-          <User className="h-5 w-5 text-primary" />
+    <TableRow key={course.id}>
+      <TableCell>
+        <div className="flex items-center">
+          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mr-3">
+            <Book className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <div className="font-medium">{course.name}</div>
+            <div className="text-xs text-muted-foreground">{course.category}</div>
+          </div>
         </div>
-        <div>
-          <div className="font-medium">{student.name}</div>
-          <div className="text-sm text-muted-foreground">{student.course}</div>
-        </div>
-      </div>
-      <div className="flex items-center">
-        <div className={`px-2 py-1 rounded-full text-xs ${
-          student.status === "ativo" 
-            ? "bg-green-100 text-green-800" 
-            : student.status === "pendente" 
-            ? "bg-yellow-100 text-yellow-800"
-            : "bg-red-100 text-red-800"
-        }`}>
-          {student.status}
-        </div>
-      </div>
-    </div>
+      </TableCell>
+      <TableCell>{course.enrollmentsCount} alunos</TableCell>
+      <TableCell>R$ {course.price.toLocaleString('pt-BR')}</TableCell>
+      <TableCell>
+        <Badge
+          variant={course.active ? "default" : "secondary"}
+          className={course.active ? "bg-green-100 text-green-800 hover:bg-green-100" : ""}
+        >
+          {course.active ? "Ativo" : "Inativo"}
+        </Badge>
+      </TableCell>
+      <TableCell>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" className="h-8 w-8 p-0">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Ações</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem>
+              <Eye className="mr-2 h-4 w-4" />
+              <span>Visualizar Detalhes</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem>
+              <Edit className="mr-2 h-4 w-4" />
+              <span>Editar Curso</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem>
+              {course.active ? (
+                <>
+                  <XCircle className="mr-2 h-4 w-4" />
+                  <span>Desativar</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="mr-2 h-4 w-4" />
+                  <span>Ativar</span>
+                </>
+              )}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </TableCell>
+    </TableRow>
   );
 };
 
 export default function SchoolDashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState("overview");
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Buscar dados da escola
   const { data: schoolData, isLoading: isLoadingSchool } = useQuery({
@@ -172,49 +273,76 @@ export default function SchoolDashboard() {
     enabled: !!user?.schoolId,
   });
 
-  // Buscar dados de métricas
+  // Buscar métricas do dashboard
   const { data: metricsData, isLoading: isLoadingMetrics } = useQuery({
-    queryKey: ["/api/metrics", user?.schoolId],
+    queryKey: ["/api/metrics/dashboard", user?.schoolId],
     queryFn: async () => {
       if (!user?.schoolId) return null;
-      const res = await apiRequest("GET", `/api/metrics?schoolId=${user.schoolId}`);
+      const res = await apiRequest("GET", `/api/metrics/dashboard?schoolId=${user.schoolId}`);
       return await res.json();
     },
     enabled: !!user?.schoolId,
   });
 
-  // Buscar leads
-  const { data: leadsData, isLoading: isLoadingLeads } = useQuery({
-    queryKey: ["/api/leads", user?.schoolId],
-    queryFn: async () => {
-      if (!user?.schoolId) return null;
-      const res = await apiRequest("GET", `/api/leads?schoolId=${user.schoolId}`);
-      return await res.json();
-    },
-    enabled: !!user?.schoolId,
-  });
-
-  // Buscar alunos
+  // Buscar alunos da escola
   const { data: studentsData, isLoading: isLoadingStudents } = useQuery({
     queryKey: ["/api/students", user?.schoolId],
     queryFn: async () => {
-      if (!user?.schoolId) return null;
+      if (!user?.schoolId) return [];
       const res = await apiRequest("GET", `/api/students?schoolId=${user.schoolId}`);
       return await res.json();
     },
     enabled: !!user?.schoolId,
   });
 
-  // Buscar cursos
+  // Buscar cursos da escola
   const { data: coursesData, isLoading: isLoadingCourses } = useQuery({
     queryKey: ["/api/courses", user?.schoolId],
     queryFn: async () => {
-      if (!user?.schoolId) return null;
+      if (!user?.schoolId) return [];
       const res = await apiRequest("GET", `/api/courses?schoolId=${user.schoolId}`);
       return await res.json();
     },
     enabled: !!user?.schoolId,
   });
+
+  // Buscar leads da escola
+  const { data: leadsData, isLoading: isLoadingLeads } = useQuery({
+    queryKey: ["/api/leads", user?.schoolId],
+    queryFn: async () => {
+      if (!user?.schoolId) return [];
+      const res = await apiRequest("GET", `/api/leads?schoolId=${user.schoolId}`);
+      return await res.json();
+    },
+    enabled: !!user?.schoolId,
+  });
+
+  // Buscar matrículas da escola
+  const { data: enrollmentsData, isLoading: isLoadingEnrollments } = useQuery({
+    queryKey: ["/api/enrollments", user?.schoolId],
+    queryFn: async () => {
+      if (!user?.schoolId) return [];
+      const res = await apiRequest("GET", `/api/enrollments?schoolId=${user.schoolId}`);
+      return await res.json();
+    },
+    enabled: !!user?.schoolId,
+  });
+
+  // Filtrar alunos com base na busca
+  const filteredStudents = studentsData
+    ? studentsData.filter((student: any) =>
+        student.fullName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        student.email?.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : [];
+
+  // Filtrar cursos com base na busca
+  const filteredCourses = coursesData
+    ? coursesData.filter((course: any) =>
+        course.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        course.category?.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : [];
 
   // Dados para o dashboard
   const dashboardData = {
@@ -243,10 +371,10 @@ export default function SchoolDashboard() {
       current: metricsData?.summary?.enrollments?.current || 0,
       previous: metricsData?.summary?.enrollments?.previous || 0,
       change: metricsData?.summary?.enrollments?.change || 0,
-    },
+    }
   };
 
-  if (isLoadingSchool || isLoadingMetrics || isLoadingLeads || isLoadingStudents || isLoadingCourses) {
+  if (isLoadingSchool || isLoadingMetrics || isLoadingStudents || isLoadingCourses || isLoadingLeads || isLoadingEnrollments) {
     return (
       <div className="container mx-auto py-10">
         <div className="flex justify-center items-center h-64">
@@ -256,48 +384,37 @@ export default function SchoolDashboard() {
     );
   }
 
-  if (!schoolData && user?.schoolId) {
-    return (
-      <div className="container mx-auto py-10">
-        <div className="flex justify-center items-center h-64">
-          <div className="text-center">
-            <h2 className="text-2xl font-bold mb-2">Escola não encontrada</h2>
-            <p className="text-muted-foreground">
-              Não foi possível encontrar os dados da sua escola.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="container mx-auto py-6">
       <div className="flex flex-col md:flex-row justify-between items-start mb-8">
         <div>
-          <h1 className="text-3xl font-bold mb-1">
-            {schoolData?.name || "Dashboard da Escola"}
-          </h1>
+          <h1 className="text-3xl font-bold mb-1">Dashboard da Escola</h1>
           <p className="text-muted-foreground">
-            Gerencie alunos, cursos e acompanhe o desempenho da sua instituição
+            {schoolData ? schoolData.name : "Carregando..."} - Gerencie alunos, cursos e matrículas
           </p>
         </div>
         <div className="mt-4 md:mt-0 flex space-x-2">
+          <Button asChild variant="outline">
+            <Link href="/enrollments/new">
+              <GraduationCap className="h-4 w-4 mr-2" />
+              Nova Matrícula
+            </Link>
+          </Button>
           <Button asChild>
-            <Link href="/courses/new">
-              <PlusCircle className="h-4 w-4 mr-2" />
-              Novo Curso
+            <Link href="/leads/new">
+              <UserPlus className="h-4 w-4 mr-2" />
+              Novo Lead
             </Link>
           </Button>
         </div>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-6" onValueChange={setActiveTab}>
+      <Tabs defaultValue="overview" className="space-y-6">
         <TabsList>
           <TabsTrigger value="overview">Visão Geral</TabsTrigger>
           <TabsTrigger value="students">Alunos</TabsTrigger>
-          <TabsTrigger value="leads">Leads</TabsTrigger>
           <TabsTrigger value="courses">Cursos</TabsTrigger>
+          <TabsTrigger value="leads">Leads</TabsTrigger>
           <TabsTrigger value="reports">Relatórios</TabsTrigger>
         </TabsList>
 
@@ -305,31 +422,29 @@ export default function SchoolDashboard() {
         <TabsContent value="overview" className="space-y-6">
           <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
             <MetricCard
-              title="Alunos Ativos"
-              value={dashboardData.students.active}
-              description="alunos matriculados ativos"
+              title="Total de Alunos"
+              value={dashboardData.students.total}
+              description="alunos registrados"
               icon={<Users className="h-4 w-4 text-primary" />}
+            />
+            <MetricCard
+              title="Matrículas"
+              value={dashboardData.enrollments.current}
+              description="no período atual"
+              icon={<GraduationCap className="h-4 w-4 text-primary" />}
               change={dashboardData.enrollments.change}
               trending={dashboardData.enrollments.change > 0 ? "up" : dashboardData.enrollments.change < 0 ? "down" : "neutral"}
             />
             <MetricCard
-              title="Novos Leads"
-              value={dashboardData.leads.new}
-              description="leads no último mês"
-              icon={<User className="h-4 w-4 text-primary" />}
-              change={5}
-              trending="up"
+              title="Leads Ativos"
+              value={dashboardData.leads.total - dashboardData.leads.converted}
+              description="leads em negociação"
+              icon={<UserPlus className="h-4 w-4 text-primary" />}
             />
             <MetricCard
-              title="Cursos Ativos"
-              value={dashboardData.courses.active}
-              description="cursos disponíveis"
-              icon={<Book className="h-4 w-4 text-primary" />}
-            />
-            <MetricCard
-              title="Receita Mensal"
+              title="Receita"
               value={`R$ ${dashboardData.revenue.current.toLocaleString('pt-BR')}`}
-              description="no mês atual"
+              description="no período atual"
               icon={<DollarSign className="h-4 w-4 text-primary" />}
               change={dashboardData.revenue.change}
               trending={dashboardData.revenue.change > 0 ? "up" : dashboardData.revenue.change < 0 ? "down" : "neutral"}
@@ -337,431 +452,564 @@ export default function SchoolDashboard() {
           </div>
 
           <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
-            {/* Novos Leads */}
+            {/* Matrículas Recentes */}
             <Card>
-              <CardHeader>
-                <CardTitle>Leads Recentes</CardTitle>
-                <CardDescription>
-                  Últimos contatos interessados nos cursos
-                </CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>Matrículas Recentes</CardTitle>
+                  <CardDescription>
+                    Últimas matrículas realizadas
+                  </CardDescription>
+                </div>
+                <Button variant="outline" size="sm" asChild>
+                  <Link href="/enrollments">
+                    Ver todas
+                  </Link>
+                </Button>
               </CardHeader>
               <CardContent>
-                <div className="space-y-1">
-                  {leadsData && leadsData.length > 0 ? (
-                    leadsData.slice(0, 5).map((lead: any) => (
-                      <LeadItem key={lead.id} lead={lead} />
-                    ))
+                <div className="space-y-4">
+                  {enrollmentsData && enrollmentsData.length > 0 ? (
+                    enrollmentsData
+                      .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                      .slice(0, 5)
+                      .map((enrollment: any) => (
+                        <div key={enrollment.id} className="flex items-center justify-between border-b pb-4 last:border-b-0 last:pb-0">
+                          <div className="flex items-center">
+                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mr-3">
+                              <GraduationCap className="h-5 w-5 text-primary" />
+                            </div>
+                            <div>
+                              <div className="font-medium">
+                                {enrollment.student?.fullName || enrollment.lead?.name || "Aluno"}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {enrollment.course?.name || "Curso"} • {new Date(enrollment.createdAt).toLocaleDateString('pt-BR')}
+                              </div>
+                            </div>
+                          </div>
+                          <div>
+                            <Badge
+                              variant={enrollment.status === "completed" ? "default" : "secondary"}
+                              className={
+                                enrollment.status === "completed" 
+                                  ? "bg-green-100 text-green-800 hover:bg-green-100" 
+                                  : enrollment.status === "abandoned"
+                                  ? "bg-red-100 text-red-800 hover:bg-red-100"
+                                  : ""
+                              }
+                            >
+                              {enrollment.status === "completed" 
+                                ? "Concluída" 
+                                : enrollment.status === "abandoned"
+                                ? "Abandonada"
+                                : "Em andamento"}
+                            </Badge>
+                          </div>
+                        </div>
+                      ))
                   ) : (
                     <div className="text-center py-6 text-muted-foreground">
-                      Nenhum lead encontrado
+                      Nenhuma matrícula registrada
                     </div>
                   )}
                 </div>
-                {leadsData && leadsData.length > 5 && (
-                  <div className="mt-4 text-center">
-                    <Button variant="outline" size="sm" asChild>
-                      <Link href="/leads">Ver todos os leads</Link>
-                    </Button>
-                  </div>
-                )}
               </CardContent>
             </Card>
 
-            {/* Alunos Recentes */}
+            {/* Leads Recentes */}
             <Card>
-              <CardHeader>
-                <CardTitle>Alunos Recentes</CardTitle>
-                <CardDescription>
-                  Últimos alunos matriculados nos cursos
-                </CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>Leads Recentes</CardTitle>
+                  <CardDescription>
+                    Últimos leads registrados
+                  </CardDescription>
+                </div>
+                <Button variant="outline" size="sm" asChild>
+                  <Link href="/leads">
+                    Ver todos
+                  </Link>
+                </Button>
               </CardHeader>
               <CardContent>
-                <div className="space-y-1">
-                  {studentsData && studentsData.length > 0 ? (
-                    studentsData.slice(0, 5).map((student: any) => (
-                      <StudentItem key={student.id} student={student} />
-                    ))
+                <div className="space-y-4">
+                  {leadsData && leadsData.length > 0 ? (
+                    leadsData
+                      .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                      .slice(0, 5)
+                      .map((lead: any) => (
+                        <div key={lead.id} className="flex items-center justify-between border-b pb-4 last:border-b-0 last:pb-0">
+                          <div className="flex items-center">
+                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mr-3">
+                              <UserPlus className="h-5 w-5 text-primary" />
+                            </div>
+                            <div>
+                              <div className="font-medium">{lead.name}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {lead.email} • {lead.phone}
+                              </div>
+                            </div>
+                          </div>
+                          <div>
+                            <Badge
+                              variant={lead.status === "convertido" ? "default" : "secondary"}
+                              className={
+                                lead.status === "convertido" 
+                                  ? "bg-green-100 text-green-800 hover:bg-green-100" 
+                                  : lead.status === "novo"
+                                  ? "bg-blue-100 text-blue-800 hover:bg-blue-100"
+                                  : "bg-yellow-100 text-yellow-800 hover:bg-yellow-100"
+                              }
+                            >
+                              {lead.status === "convertido" 
+                                ? "Convertido" 
+                                : lead.status === "novo"
+                                ? "Novo"
+                                : "Em negociação"}
+                            </Badge>
+                          </div>
+                        </div>
+                      ))
                   ) : (
                     <div className="text-center py-6 text-muted-foreground">
-                      Nenhum aluno encontrado
+                      Nenhum lead registrado
                     </div>
                   )}
                 </div>
-                {studentsData && studentsData.length > 5 && (
-                  <div className="mt-4 text-center">
-                    <Button variant="outline" size="sm" asChild>
-                      <Link href="/students">Ver todos os alunos</Link>
-                    </Button>
-                  </div>
-                )}
               </CardContent>
             </Card>
           </div>
 
-          {/* Metas e Progresso */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Metas Mensais</CardTitle>
-              <CardDescription>
-                Acompanhe o progresso das metas estabelecidas
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-5">
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <span className="text-sm">Novas Matrículas</span>
-                    <span className="text-sm font-medium">
-                      {Math.min(dashboardData.enrollments.current, 20)} / 20
-                    </span>
+          {/* Distribuição de alunos e métricas */}
+          <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Distribuição de Alunos</CardTitle>
+                <CardDescription>
+                  Por status e curso
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center">
+                        <div className="w-3 h-3 rounded-full bg-green-500 mr-2"></div>
+                        <span className="text-sm">Ativos</span>
+                      </div>
+                      <span className="text-sm font-medium">
+                        {dashboardData.students.active} ({dashboardData.students.total > 0 
+                          ? Math.round((dashboardData.students.active / dashboardData.students.total) * 100) 
+                          : 0}%)
+                      </span>
+                    </div>
+                    <Progress 
+                      value={dashboardData.students.total > 0 
+                        ? (dashboardData.students.active / dashboardData.students.total) * 100 
+                        : 0
+                      } 
+                      className="h-2" 
+                    />
                   </div>
-                  <Progress 
-                    value={Math.min((dashboardData.enrollments.current / 20) * 100, 100)} 
-                    className="h-2" 
-                  />
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center">
+                        <div className="w-3 h-3 rounded-full bg-yellow-500 mr-2"></div>
+                        <span className="text-sm">Pendentes</span>
+                      </div>
+                      <span className="text-sm font-medium">
+                        {dashboardData.students.pending} ({dashboardData.students.total > 0 
+                          ? Math.round((dashboardData.students.pending / dashboardData.students.total) * 100) 
+                          : 0}%)
+                      </span>
+                    </div>
+                    <Progress 
+                      value={dashboardData.students.total > 0 
+                        ? (dashboardData.students.pending / dashboardData.students.total) * 100 
+                        : 0
+                      } 
+                      className="h-2" 
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center">
+                        <div className="w-3 h-3 rounded-full bg-red-500 mr-2"></div>
+                        <span className="text-sm">Inativos</span>
+                      </div>
+                      <span className="text-sm font-medium">
+                        {dashboardData.students.inactive} ({dashboardData.students.total > 0 
+                          ? Math.round((dashboardData.students.inactive / dashboardData.students.total) * 100) 
+                          : 0}%)
+                      </span>
+                    </div>
+                    <Progress 
+                      value={dashboardData.students.total > 0 
+                        ? (dashboardData.students.inactive / dashboardData.students.total) * 100 
+                        : 0
+                      } 
+                      className="h-2" 
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <span className="text-sm">Conversão de Leads</span>
-                    <span className="text-sm font-medium">
-                      {dashboardData.leads.total > 0 
-                        ? `${Math.round((dashboardData.leads.converted / dashboardData.leads.total) * 100)}%`
-                        : '0%'
-                      }
-                    </span>
-                  </div>
-                  <Progress 
-                    value={dashboardData.leads.total > 0 
-                      ? Math.min((dashboardData.leads.converted / dashboardData.leads.total) * 100, 100)
-                      : 0
-                    } 
-                    className="h-2" 
-                  />
-                </div>
+                <Separator className="my-6" />
 
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <span className="text-sm">Meta de Receita</span>
-                    <span className="text-sm font-medium">
-                      R$ {dashboardData.revenue.current.toLocaleString('pt-BR')} / R$ 50.000
-                    </span>
-                  </div>
-                  <Progress 
-                    value={Math.min((dashboardData.revenue.current / 50000) * 100, 100)} 
-                    className="h-2" 
-                  />
+                {/* Distribuição por curso */}
+                <div className="space-y-4">
+                  <h4 className="text-sm font-medium">Distribuição por curso</h4>
+                  
+                  {coursesData && coursesData.length > 0 ? (
+                    coursesData.slice(0, 3).map((course: any, index: number) => {
+                      const colors = ["bg-blue-500", "bg-purple-500", "bg-teal-500"];
+                      const courseEnrollments = enrollmentsData?.filter((e: any) => e.courseId === course.id)?.length || 0;
+                      const percentage = dashboardData.students.total > 0 
+                        ? (courseEnrollments / dashboardData.students.total) * 100 
+                        : 0;
+                      
+                      return (
+                        <div key={course.id}>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center">
+                              <div className={`w-3 h-3 rounded-full ${colors[index % colors.length]} mr-2`}></div>
+                              <span className="text-sm">{course.name}</span>
+                            </div>
+                            <span className="text-sm font-medium">
+                              {courseEnrollments} ({Math.round(percentage)}%)
+                            </span>
+                          </div>
+                          <Progress 
+                            value={percentage} 
+                            className="h-2" 
+                          />
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      Nenhum curso disponível
+                    </div>
+                  )}
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Métricas de Desempenho</CardTitle>
+                <CardDescription>
+                  Conversão de leads e crescimento
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-8">
+                  {/* Taxa de Conversão de Leads */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-sm font-medium">Taxa de Conversão de Leads</h4>
+                      {dashboardData.leads.total > 0 && (
+                        <Badge variant="outline" className="text-xs">
+                          {Math.round((dashboardData.leads.converted / dashboardData.leads.total) * 100)}%
+                        </Badge>
+                      )}
+                    </div>
+                    
+                    <div className="grid grid-cols-3 gap-2 mb-2">
+                      <div className="flex flex-col items-center p-2 border rounded-md">
+                        <span className="text-xs text-muted-foreground mb-1">Novos</span>
+                        <span className="font-medium">{dashboardData.leads.new}</span>
+                      </div>
+                      <div className="flex flex-col items-center p-2 border rounded-md">
+                        <span className="text-xs text-muted-foreground mb-1">Em negociação</span>
+                        <span className="font-medium">{dashboardData.leads.inNegotiation}</span>
+                      </div>
+                      <div className="flex flex-col items-center p-2 border rounded-md bg-primary/5">
+                        <span className="text-xs text-muted-foreground mb-1">Convertidos</span>
+                        <span className="font-medium">{dashboardData.leads.converted}</span>
+                      </div>
+                    </div>
+                    
+                    <Progress 
+                      value={dashboardData.leads.total > 0 
+                        ? (dashboardData.leads.converted / dashboardData.leads.total) * 100 
+                        : 0
+                      } 
+                      className="h-2" 
+                    />
+                  </div>
+                  
+                  {/* Crescimento de Matrículas */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-sm font-medium">Crescimento de Matrículas</h4>
+                      <Badge 
+                        variant="outline" 
+                        className={`text-xs ${
+                          dashboardData.enrollments.change > 0 
+                            ? "text-green-600" 
+                            : dashboardData.enrollments.change < 0
+                            ? "text-red-600"
+                            : ""
+                        }`}
+                      >
+                        {dashboardData.enrollments.change > 0 ? "+" : ""}
+                        {dashboardData.enrollments.change}%
+                      </Badge>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                      <div className="flex flex-col items-center p-2 border rounded-md">
+                        <span className="text-xs text-muted-foreground mb-1">Período anterior</span>
+                        <span className="font-medium">{dashboardData.enrollments.previous}</span>
+                      </div>
+                      <div className="flex flex-col items-center p-2 border rounded-md bg-primary/5">
+                        <span className="text-xs text-muted-foreground mb-1">Período atual</span>
+                        <span className="font-medium">{dashboardData.enrollments.current}</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Crescimento de Receita */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-sm font-medium">Crescimento de Receita</h4>
+                      <Badge 
+                        variant="outline" 
+                        className={`text-xs ${
+                          dashboardData.revenue.change > 0 
+                            ? "text-green-600" 
+                            : dashboardData.revenue.change < 0
+                            ? "text-red-600"
+                            : ""
+                        }`}
+                      >
+                        {dashboardData.revenue.change > 0 ? "+" : ""}
+                        {dashboardData.revenue.change}%
+                      </Badge>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                      <div className="flex flex-col items-center p-2 border rounded-md">
+                        <span className="text-xs text-muted-foreground mb-1">Período anterior</span>
+                        <span className="font-medium">R$ {dashboardData.revenue.previous.toLocaleString('pt-BR')}</span>
+                      </div>
+                      <div className="flex flex-col items-center p-2 border rounded-md bg-primary/5">
+                        <span className="text-xs text-muted-foreground mb-1">Período atual</span>
+                        <span className="font-medium">R$ {dashboardData.revenue.current.toLocaleString('pt-BR')}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         {/* Alunos */}
-        <TabsContent value="students">
+        <TabsContent value="students" className="space-y-6">
           <Card>
-            <CardHeader>
-              <CardTitle>Gerenciamento de Alunos</CardTitle>
-              <CardDescription>
-                Alunos matriculados em sua instituição
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-md border">
-                <div className="p-4">
-                  <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-                    <div className="flex items-center gap-2">
-                      <Users className="h-5 w-5 text-muted-foreground" />
-                      <div>
-                        <div className="text-sm font-medium">Total</div>
-                        <div className="text-2xl font-bold">{dashboardData.students.total}</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Users className="h-5 w-5 text-green-500" />
-                      <div>
-                        <div className="text-sm font-medium">Ativos</div>
-                        <div className="text-2xl font-bold">{dashboardData.students.active}</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Users className="h-5 w-5 text-yellow-500" />
-                      <div>
-                        <div className="text-sm font-medium">Pendentes</div>
-                        <div className="text-2xl font-bold">{dashboardData.students.pending}</div>
-                      </div>
-                    </div>
-                  </div>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Alunos</CardTitle>
+                  <CardDescription>
+                    Gerencie os alunos da sua escola
+                  </CardDescription>
                 </div>
-                <Separator />
-                <div className="p-4">
-                  <div className="flex flex-col space-y-4">
-                    {studentsData && studentsData.length > 0 ? (
-                      studentsData.map((student: any) => (
-                        <StudentItem key={student.id} student={student} />
-                      ))
-                    ) : (
-                      <div className="text-center py-6 text-muted-foreground">
-                        Nenhum aluno encontrado
-                      </div>
-                    )}
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="search"
+                      placeholder="Buscar alunos..."
+                      className="pl-8 w-[250px]"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                    />
                   </div>
+                  <Button variant="outline" size="icon">
+                    <Filter className="h-4 w-4" />
+                  </Button>
+                  <Button>
+                    <PlusCircle className="h-4 w-4 mr-2" />
+                    Novo Aluno
+                  </Button>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Leads */}
-        <TabsContent value="leads">
-          <Card>
-            <CardHeader>
-              <CardTitle>Gerenciamento de Leads</CardTitle>
-              <CardDescription>
-                Pessoas interessadas nos cursos da sua instituição
-              </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="rounded-md border">
-                <div className="p-4">
-                  <div className="grid grid-cols-1 gap-8 md:grid-cols-4">
-                    <div className="flex items-center gap-2">
-                      <Users className="h-5 w-5 text-muted-foreground" />
-                      <div>
-                        <div className="text-sm font-medium">Total</div>
-                        <div className="text-2xl font-bold">{dashboardData.leads.total}</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Users className="h-5 w-5 text-blue-500" />
-                      <div>
-                        <div className="text-sm font-medium">Novos</div>
-                        <div className="text-2xl font-bold">{dashboardData.leads.new}</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Users className="h-5 w-5 text-purple-500" />
-                      <div>
-                        <div className="text-sm font-medium">Em Negociação</div>
-                        <div className="text-2xl font-bold">{dashboardData.leads.inNegotiation}</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Users className="h-5 w-5 text-green-500" />
-                      <div>
-                        <div className="text-sm font-medium">Convertidos</div>
-                        <div className="text-2xl font-bold">{dashboardData.leads.converted}</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <Separator />
-                <div className="p-4">
-                  <div className="flex flex-col space-y-4">
-                    {leadsData && leadsData.length > 0 ? (
-                      leadsData.map((lead: any) => (
-                        <LeadItem key={lead.id} lead={lead} />
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Nome</TableHead>
+                      <TableHead>Matrículas</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Data de Registro</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredStudents.length > 0 ? (
+                      filteredStudents.map((student: any) => (
+                        <StudentRow key={student.id} student={student} />
                       ))
                     ) : (
-                      <div className="text-center py-6 text-muted-foreground">
-                        Nenhum lead encontrado
-                      </div>
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-6 text-muted-foreground">
+                          {searchQuery
+                            ? "Nenhum aluno encontrado para esta busca"
+                            : "Nenhum aluno registrado"}
+                        </TableCell>
+                      </TableRow>
                     )}
-                  </div>
-                </div>
+                  </TableBody>
+                </Table>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
 
         {/* Cursos */}
-        <TabsContent value="courses">
+        <TabsContent value="courses" className="space-y-6">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Cursos Disponíveis</CardTitle>
-                <CardDescription>
-                  Cursos oferecidos pela sua instituição
-                </CardDescription>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Cursos</CardTitle>
+                  <CardDescription>
+                    Gerencie os cursos oferecidos pela sua escola
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="search"
+                      placeholder="Buscar cursos..."
+                      className="pl-8 w-[250px]"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                  </div>
+                  <Button variant="outline" size="icon">
+                    <Filter className="h-4 w-4" />
+                  </Button>
+                  <Button>
+                    <PlusCircle className="h-4 w-4 mr-2" />
+                    Novo Curso
+                  </Button>
+                </div>
               </div>
-              <Button asChild>
-                <Link href="/courses/new">
-                  <PlusCircle className="h-4 w-4 mr-2" />
-                  Novo Curso
-                </Link>
-              </Button>
             </CardHeader>
             <CardContent>
               <div className="rounded-md border">
-                <div className="p-4">
-                  <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-                    <div className="flex items-center gap-2">
-                      <Book className="h-5 w-5 text-muted-foreground" />
-                      <div>
-                        <div className="text-sm font-medium">Total de Cursos</div>
-                        <div className="text-2xl font-bold">{dashboardData.courses.total}</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Book className="h-5 w-5 text-green-500" />
-                      <div>
-                        <div className="text-sm font-medium">Cursos Ativos</div>
-                        <div className="text-2xl font-bold">{dashboardData.courses.active}</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <GraduationCap className="h-5 w-5 text-blue-500" />
-                      <div>
-                        <div className="text-sm font-medium">Matrículas</div>
-                        <div className="text-2xl font-bold">{dashboardData.students.total}</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <Separator />
-                <div className="p-4">
-                  <div className="space-y-4">
-                    {coursesData && coursesData.length > 0 ? (
-                      coursesData.map((course: any) => (
-                        <div
-                          key={course.id}
-                          className="flex items-center justify-between py-3"
-                        >
-                          <div className="flex items-center">
-                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mr-3">
-                              <Book className="h-5 w-5 text-primary" />
-                            </div>
-                            <div>
-                              <div className="font-medium">{course.name}</div>
-                              <div className="text-sm text-muted-foreground">
-                                {course.duration} {course.durationType} • {course.students || 0} alunos
-                              </div>
-                            </div>
-                          </div>
-                          <div>
-                            <div
-                              className={`px-2 py-1 rounded-full text-xs ${
-                                course.active
-                                  ? "bg-green-100 text-green-800"
-                                  : "bg-red-100 text-red-800"
-                              }`}
-                            >
-                              {course.active ? "Ativo" : "Inativo"}
-                            </div>
-                          </div>
-                        </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Nome</TableHead>
+                      <TableHead>Alunos</TableHead>
+                      <TableHead>Preço</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredCourses.length > 0 ? (
+                      filteredCourses.map((course: any) => (
+                        <CourseRow key={course.id} course={course} />
                       ))
                     ) : (
-                      <div className="text-center py-6 text-muted-foreground">
-                        Nenhum curso encontrado
-                      </div>
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-6 text-muted-foreground">
+                          {searchQuery
+                            ? "Nenhum curso encontrado para esta busca"
+                            : "Nenhum curso registrado"}
+                        </TableCell>
+                      </TableRow>
                     )}
-                  </div>
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Leads */}
+        <TabsContent value="leads" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Leads</CardTitle>
+                  <CardDescription>
+                    Gerencie seus potenciais alunos
+                  </CardDescription>
                 </div>
+                <Button>
+                  <PlusCircle className="h-4 w-4 mr-2" />
+                  Novo Lead
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-center py-6">
+                <Button variant="outline" asChild>
+                  <Link href="/leads">
+                    Ir para Gestão de Leads
+                  </Link>
+                </Button>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
 
         {/* Relatórios */}
-        <TabsContent value="reports">
+        <TabsContent value="reports" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Relatórios e Análises</CardTitle>
+              <CardTitle>Relatórios</CardTitle>
               <CardDescription>
-                Acompanhe os principais indicadores da sua instituição
+                Analise o desempenho da sua escola
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-8">
-                <div>
-                  <h3 className="text-lg font-medium mb-4">Desempenho Financeiro</h3>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                    <MetricCard
-                      title="Receita Total"
-                      value={`R$ ${dashboardData.revenue.current.toLocaleString('pt-BR')}`}
-                      description="no mês atual"
-                      icon={<DollarSign className="h-4 w-4 text-primary" />}
-                      change={dashboardData.revenue.change}
-                      trending={dashboardData.revenue.change > 0 ? "up" : dashboardData.revenue.change < 0 ? "down" : "neutral"}
-                    />
-                    <MetricCard
-                      title="Ticket Médio"
-                      value={`R$ ${dashboardData.students.total > 0 
-                        ? Math.round(dashboardData.revenue.current / dashboardData.students.total).toLocaleString('pt-BR')
-                        : '0'}`}
-                      description="por aluno"
-                      icon={<DollarSign className="h-4 w-4 text-primary" />}
-                    />
-                    <MetricCard
-                      title="Projeção Anual"
-                      value={`R$ ${(dashboardData.revenue.current * 12).toLocaleString('pt-BR')}`}
-                      description="receita anual estimada"
-                      icon={<BarChart3 className="h-4 w-4 text-primary" />}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="text-lg font-medium mb-4">Matrículas e Conversões</h3>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                    <MetricCard
-                      title="Novas Matrículas"
-                      value={dashboardData.enrollments.current}
-                      description="no mês atual"
-                      icon={<GraduationCap className="h-4 w-4 text-primary" />}
-                      change={dashboardData.enrollments.change}
-                      trending={dashboardData.enrollments.change > 0 ? "up" : dashboardData.enrollments.change < 0 ? "down" : "neutral"}
-                    />
-                    <MetricCard
-                      title="Taxa de Conversão"
-                      value={`${dashboardData.leads.total > 0 
-                        ? Math.round((dashboardData.leads.converted / dashboardData.leads.total) * 100)
-                        : 0}%`}
-                      description="leads convertidos em alunos"
-                      icon={<ArrowUpRight className="h-4 w-4 text-primary" />}
-                    />
-                    <MetricCard
-                      title="Tempo Médio de Conversão"
-                      value="7 dias"
-                      description="entre contato e matrícula"
-                      icon={<Clock className="h-4 w-4 text-primary" />}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="text-lg font-medium mb-4">Distribuição por Curso</h3>
-                  <div className="rounded-md border p-4">
-                    <div className="space-y-4">
-                      {coursesData && coursesData.length > 0 ? (
-                        coursesData.map((course: any) => (
-                          <div key={course.id} className="space-y-2">
-                            <div className="flex justify-between">
-                              <span className="text-sm font-medium">{course.name}</span>
-                              <span className="text-sm">
-                                {course.students || 0} alunos ({course.students > 0 
-                                  ? Math.round((course.students / dashboardData.students.total) * 100) 
-                                  : 0}%)
-                              </span>
-                            </div>
-                            <Progress 
-                              value={course.students > 0 
-                                ? (course.students / dashboardData.students.total) * 100
-                                : 0
-                              } 
-                              className="h-2" 
-                            />
-                          </div>
-                        ))
-                      ) : (
-                        <div className="text-center py-6 text-muted-foreground">
-                          Nenhum curso encontrado
-                        </div>
-                      )}
+              <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+                <Card className="border-dashed cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors">
+                  <CardHeader>
+                    <CardTitle className="text-base">Relatório de Matrículas</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex justify-center">
+                      <BarChart3 className="h-12 w-12 text-primary/60" />
                     </div>
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
+                
+                <Card className="border-dashed cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors">
+                  <CardHeader>
+                    <CardTitle className="text-base">Relatório Financeiro</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex justify-center">
+                      <DollarSign className="h-12 w-12 text-primary/60" />
+                    </div>
+                  </CardContent>
+                </Card>
+                
+                <Card className="border-dashed cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors">
+                  <CardHeader>
+                    <CardTitle className="text-base">Desempenho de Leads</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex justify-center">
+                      <Activity className="h-12 w-12 text-primary/60" />
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
             </CardContent>
           </Card>
