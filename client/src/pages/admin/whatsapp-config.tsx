@@ -5,55 +5,148 @@ import { useToast } from '@/hooks/use-toast';
 import { Redirect } from 'wouter';
 import DashboardLayout from '@/components/Layout/DashboardLayout';
 import { apiRequest, queryClient } from '@/lib/queryClient';
-import { Loader2, AlertCircle, Save, RefreshCw } from 'lucide-react';
+import { Loader2, Settings, Save, AlertCircle, KeyRound, Globe, Webhook } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-// Schema de validação para configuração da API
+// Schema de validação do formulário
 const configSchema = z.object({
-  apiBaseUrl: z.string().url({
-    message: "Insira uma URL válida para a Evolution API",
-  }),
-  apiKey: z.string().min(8, {
-    message: "A chave de API deve ter pelo menos 8 caracteres",
-  }),
-  webhookUrl: z.string().url({
-    message: "Insira uma URL válida para o webhook",
-  }).optional().or(z.literal('')),
+  apiBaseUrl: z.string().url({ message: "URL da API inválida" }),
+  apiKey: z.string().min(6, { message: "Chave de API inválida" }),
+  webhookUrl: z.string().url({ message: "URL do webhook inválida" }).optional().or(z.literal('')),
 });
 
-type WhatsAppConfigFormValues = z.infer<typeof configSchema>;
+type ConfigFormValues = z.infer<typeof configSchema>;
+
+interface WhatsAppConfig {
+  id: number;
+  apiBaseUrl: string;
+  apiKey: string;
+  webhookUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 const WhatsAppConfigPage: React.FC = () => {
   const { user, isLoading: isLoadingAuth } = useAuth();
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState('config');
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
   
-  // Verificar permissões - apenas admin pode acessar
-  if (!isLoadingAuth && user && user.role !== 'admin') {
-    toast({
-      title: "Acesso restrito",
-      description: "Apenas administradores podem acessar esta página.",
-      variant: "destructive",
-    });
-    return <Redirect to="/" />;
+  // Apenas admin pode acessar esta página
+  if (!isLoadingAuth && user) {
+    if (user.role !== 'admin') {
+      toast({
+        title: "Acesso restrito",
+        description: "Você não tem permissão para acessar esta página.",
+        variant: "destructive",
+      });
+      return <Redirect to="/" />;
+    }
   }
+  
+  // Buscar configuração global do WhatsApp
+  const { 
+    data: config, 
+    isLoading: isLoadingConfig, 
+    error: configError 
+  } = useQuery<WhatsAppConfig>({
+    queryKey: ['/api/admin/whatsapp/config'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/admin/whatsapp/config');
+      if (!response.ok) {
+        if (response.status === 404) {
+          // Se não existir, retorna um objeto vazio para criar uma nova configuração
+          return {
+            id: 0,
+            apiBaseUrl: '',
+            apiKey: '',
+            webhookUrl: '',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        throw new Error('Falha ao carregar configuração do WhatsApp');
+      }
+      return await response.json();
+    },
+  });
+  
+  // Form para edição da configuração
+  const form = useForm<ConfigFormValues>({
+    resolver: zodResolver(configSchema),
+    defaultValues: {
+      apiBaseUrl: '',
+      apiKey: '',
+      webhookUrl: '',
+    },
+    values: config ? {
+      apiBaseUrl: config.apiBaseUrl || '',
+      apiKey: config.apiKey || '',
+      webhookUrl: config.webhookUrl || '',
+    } : undefined,
+  });
+  
+  // Mutation para salvar configuração
+  const saveConfigMutation = useMutation({
+    mutationFn: async (data: ConfigFormValues) => {
+      const response = await apiRequest('POST', '/api/admin/whatsapp/config', data);
+      if (!response.ok) {
+        throw new Error('Falha ao salvar configuração');
+      }
+      return await response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Configuração salva",
+        description: "As configurações do WhatsApp foram atualizadas com sucesso.",
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/whatsapp/config'] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro ao salvar",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+  
+  // Função para testar conexão com a API
+  const testConnection = async () => {
+    setIsTestingConnection(true);
+    try {
+      const response = await apiRequest('GET', '/api/admin/whatsapp/test-connection');
+      if (!response.ok) {
+        throw new Error('Falha ao conectar com a API');
+      }
+      const data = await response.json();
+      
+      toast({
+        title: "Conexão bem-sucedida",
+        description: "A conexão com a API do WhatsApp foi estabelecida com sucesso.",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro de conexão",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+  
+  const onSubmit = (data: ConfigFormValues) => {
+    saveConfigMutation.mutate(data);
+  };
   
   if (isLoadingAuth) {
     return (
@@ -64,153 +157,9 @@ const WhatsAppConfigPage: React.FC = () => {
   }
   
   if (!user) {
-    return <Redirect to="/auth" />;
+    return <Redirect to="/login" />;
   }
   
-  // Buscar configuração atual
-  const {
-    data: config,
-    isLoading,
-    error,
-    refetch
-  } = useQuery({
-    queryKey: ['/api/admin/whatsapp/config'],
-    queryFn: async () => {
-      try {
-        const response = await apiRequest('GET', '/api/admin/whatsapp/config');
-        if (!response.ok) {
-          throw new Error('Falha ao carregar configurações');
-        }
-        return await response.json();
-      } catch (error) {
-        console.error('Erro ao buscar configuração do WhatsApp:', error);
-        throw error;
-      }
-    }
-  });
-
-  // Mutation para atualizar configuração
-  const updateMutation = useMutation({
-    mutationFn: async (data: WhatsAppConfigFormValues) => {
-      const response = await apiRequest(
-        'POST',
-        '/api/admin/whatsapp/config', 
-        data
-      );
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Falha ao atualizar configurações');
-      }
-      
-      return await response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({queryKey: ['/api/admin/whatsapp/config']});
-      toast({
-        title: "Configurações atualizadas",
-        description: "As configurações da Evolution API foram atualizadas com sucesso.",
-      });
-    },
-    onError: (error) => {
-      toast({
-        title: "Erro",
-        description: error.message || "Ocorreu um erro ao atualizar as configurações.",
-        variant: "destructive",
-      });
-    }
-  });
-
-  // Testar conexão com a Evolution API
-  const testConnectionMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest('GET', '/api/admin/whatsapp/test-connection');
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Falha ao testar conexão');
-      }
-      
-      return await response.json();
-    },
-    onSuccess: (data) => {
-      toast({
-        title: "Conexão bem-sucedida",
-        description: `Conectado com sucesso à Evolution API. ${data.message || ''}`,
-      });
-    },
-    onError: (error) => {
-      toast({
-        title: "Erro de conexão",
-        description: error.message || "Não foi possível conectar à Evolution API.",
-        variant: "destructive",
-      });
-    }
-  });
-
-  // Formulário
-  const form = useForm<WhatsAppConfigFormValues>({
-    resolver: zodResolver(configSchema),
-    defaultValues: {
-      apiBaseUrl: config?.apiBaseUrl || '',
-      apiKey: config?.apiKey || '',
-      webhookUrl: config?.webhookUrl || '',
-    },
-    values: config
-  });
-
-  const onSubmit = (values: WhatsAppConfigFormValues) => {
-    updateMutation.mutate(values);
-  };
-
-  if (isLoading) {
-    return (
-      <DashboardLayout>
-        <div className="container py-6">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold">Configuração do WhatsApp</h1>
-            <p className="text-muted-foreground">
-              Configure os parâmetros globais para integração com a Evolution API.
-            </p>
-          </div>
-          <div className="flex justify-center items-center h-64">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </div>
-        </div>
-      </DashboardLayout>
-    );
-  }
-
-  if (error) {
-    return (
-      <DashboardLayout>
-        <div className="container py-6">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold">Configuração do WhatsApp</h1>
-            <p className="text-muted-foreground">
-              Configure os parâmetros globais para integração com a Evolution API.
-            </p>
-          </div>
-          <Alert variant="destructive" className="mb-4">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Erro</AlertTitle>
-            <AlertDescription>
-              Ocorreu um erro ao carregar as configurações do WhatsApp. Por favor, tente novamente.
-            </AlertDescription>
-            <Button 
-              variant="outline" 
-              className="mt-2" 
-              onClick={() => refetch()}
-            >
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Tentar novamente
-            </Button>
-          </Alert>
-        </div>
-      </DashboardLayout>
-    );
-  }
-
   return (
     <DashboardLayout>
       <div className="container py-6">
@@ -220,37 +169,45 @@ const WhatsAppConfigPage: React.FC = () => {
             Configure os parâmetros globais para integração com a Evolution API.
           </p>
         </div>
-
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid grid-cols-2 w-[400px]">
-            <TabsTrigger value="config">Configurações</TabsTrigger>
-            <TabsTrigger value="instances">Instâncias</TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="config" className="pt-4">
+        
+        {isLoadingConfig ? (
+          <div className="flex justify-center items-center h-40">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : configError ? (
+          <Alert variant="destructive" className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Erro ao carregar configuração</AlertTitle>
+            <AlertDescription>
+              {configError.message}
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Configurações da Evolution API</CardTitle>
+                <CardTitle>Configurações da API</CardTitle>
                 <CardDescription>
-                  Defina as configurações globais para a integração com WhatsApp.
-                  Estas configurações serão usadas por todas as escolas.
+                  Configure os dados para conexão com a Evolution API do WhatsApp.
                 </CardDescription>
               </CardHeader>
-              
-              <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)}>
-                  <CardContent className="space-y-4">
+              <CardContent>
+                <Form {...form}>
+                  <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
                     <FormField
                       control={form.control}
                       name="apiBaseUrl"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>URL da Evolution API</FormLabel>
+                          <FormLabel>URL Base da API</FormLabel>
                           <FormControl>
-                            <Input {...field} placeholder="https://api.evolution.com" />
+                            <div className="flex items-center space-x-2">
+                              <Globe className="w-4 h-4 text-muted-foreground" />
+                              <Input placeholder="https://api-evolution.exemplo.com" {...field} />
+                            </div>
                           </FormControl>
                           <FormDescription>
-                            URL base da Evolution API (ex: https://api.evolution.com)
+                            URL base da Evolution API, sem a barra no final.
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -262,12 +219,15 @@ const WhatsAppConfigPage: React.FC = () => {
                       name="apiKey"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Chave de API</FormLabel>
+                          <FormLabel>Chave da API</FormLabel>
                           <FormControl>
-                            <Input {...field} placeholder="Chave de API da Evolution" type="password" />
+                            <div className="flex items-center space-x-2">
+                              <KeyRound className="w-4 h-4 text-muted-foreground" />
+                              <Input type="password" placeholder="Chave secreta da API" {...field} />
+                            </div>
                           </FormControl>
                           <FormDescription>
-                            Chave de autenticação para a Evolution API
+                            Chave de autenticação fornecida pela Evolution API.
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -279,84 +239,99 @@ const WhatsAppConfigPage: React.FC = () => {
                       name="webhookUrl"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>URL do Webhook (opcional)</FormLabel>
+                          <FormLabel>URL do Webhook</FormLabel>
                           <FormControl>
-                            <Input {...field} placeholder="https://edumatrik.com/api/webhooks/whatsapp" />
+                            <div className="flex items-center space-x-2">
+                              <Webhook className="w-4 h-4 text-muted-foreground" />
+                              <Input placeholder="https://seu-dominio.com/webhook" {...field} />
+                            </div>
                           </FormControl>
                           <FormDescription>
-                            URL pública para receber webhooks da Evolution API. Deixe em branco para usar o endpoint padrão.
+                            URL para receber notificações de mensagens (opcional). Será usado como fallback se a escola não configurar seu próprio webhook.
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                  </CardContent>
-                  
-                  <CardFooter className="flex justify-between">
-                    <Button 
-                      type="button" 
-                      variant="outline"
-                      onClick={() => testConnectionMutation.mutate()}
-                      disabled={testConnectionMutation.isPending}
-                    >
-                      {testConnectionMutation.isPending ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Testando...
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw className="mr-2 h-4 w-4" />
-                          Testar Conexão
-                        </>
-                      )}
-                    </Button>
                     
-                    <Button 
-                      type="submit" 
-                      disabled={updateMutation.isPending || !form.formState.isDirty}
-                    >
-                      {updateMutation.isPending ? (
-                        <>
+                    <div className="flex items-center justify-between pt-4">
+                      <Button 
+                        type="button" 
+                        variant="outline"
+                        onClick={testConnection}
+                        disabled={isTestingConnection || !config?.apiBaseUrl || !config?.apiKey}
+                      >
+                        {isTestingConnection ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Salvando...
-                        </>
-                      ) : (
-                        <>
+                        ) : (
+                          <Settings className="mr-2 h-4 w-4" />
+                        )}
+                        Testar Conexão
+                      </Button>
+                      
+                      <Button 
+                        type="submit"
+                        disabled={saveConfigMutation.isPending || !form.formState.isDirty}
+                      >
+                        {saveConfigMutation.isPending ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
                           <Save className="mr-2 h-4 w-4" />
-                          Salvar Configurações
-                        </>
-                      )}
-                    </Button>
-                  </CardFooter>
-                </form>
-              </Form>
-            </Card>
-          </TabsContent>
-          
-          <TabsContent value="instances" className="pt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Instâncias de WhatsApp</CardTitle>
-                <CardDescription>
-                  Visualize todas as instâncias de WhatsApp configuradas no sistema.
-                </CardDescription>
-              </CardHeader>
-              
-              <CardContent>
-                {/* Aqui será implementada a lista de instâncias */}
-                <Alert>
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertTitle>Lista de instâncias</AlertTitle>
-                  <AlertDescription>
-                    Cada escola pode configurar sua própria instância do WhatsApp.
-                    A lista de instâncias será exibida aqui.
-                  </AlertDescription>
-                </Alert>
+                        )}
+                        Salvar Configurações
+                      </Button>
+                    </div>
+                  </form>
+                </Form>
               </CardContent>
             </Card>
-          </TabsContent>
-        </Tabs>
+            
+            <Card>
+              <CardHeader>
+                <CardTitle>Informações Adicionais</CardTitle>
+                <CardDescription>
+                  Instruções importantes sobre a integração com o WhatsApp.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="font-medium mb-2">Como funciona a integração?</h3>
+                    <p className="text-sm text-muted-foreground">
+                      A integração com o WhatsApp utiliza a Evolution API, que é uma camada de abstração 
+                      sobre o WhatsApp Web. Cada escola deve configurar sua própria instância do WhatsApp,
+                      escaneando um QR Code e conectando ao seu número de telefone.
+                    </p>
+                  </div>
+                  
+                  <Separator />
+                  
+                  <div>
+                    <h3 className="font-medium mb-2">Configuração das Escolas</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Cada escola deve acessar sua página de WhatsApp no sistema e escanear o QR Code 
+                      para conectar seu dispositivo. A escola pode configurar um webhook específico para 
+                      receber as mensagens, ou usar o webhook global configurado aqui.
+                    </p>
+                  </div>
+                  
+                  <Separator />
+                  
+                  <div>
+                    <h3 className="font-medium mb-2">Recursos Disponíveis</h3>
+                    <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
+                      <li>Envio de mensagens de texto</li>
+                      <li>Envio de anexos (imagens, documentos)</li>
+                      <li>Recebimento de mensagens em tempo real</li>
+                      <li>Status de entrega e leitura</li>
+                      <li>Múltiplas instâncias (uma por escola)</li>
+                    </ul>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );

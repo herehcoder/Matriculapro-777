@@ -122,6 +122,7 @@ function AppRoutes() {
         <Route path="/documents" component={DocumentsPage} />
         <Route path="/support" component={SupportPage} />
         <Route path="/whatsapp" component={WhatsAppPage} />
+        <Route path="/admin/whatsapp-config" component={WhatsAppConfigPage} />
         <Route path="/analytics" component={AnalyticsPage} />
         <Route path="/account" component={AccountPage} />
         <Route path="/settings" component={SettingsPage} />
