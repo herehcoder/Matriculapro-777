@@ -59,9 +59,7 @@ export function NotificationCenter({ userId, schoolId }: NotificationCenterProps
   
   const markAllAsRead = async () => {
     try {
-      await apiRequest(`/api/notifications/user/${userId}/mark-all-read`, {
-        method: 'PATCH',
-      });
+      await apiRequest('/api/notifications/read-all', 'PATCH');
       
       setUnreadNotifications([]);
       clearNotifications();

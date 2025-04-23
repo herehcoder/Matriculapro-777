@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -10,9 +10,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Bell, Menu, LogOut, User, Settings } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Menu, LogOut, User, Settings } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { NotificationCenter } from "./NotificationCenter";
 
 interface TopNavBarProps {
   onSidebarToggle: () => void;
@@ -20,7 +20,6 @@ interface TopNavBarProps {
 
 export function TopNavBar({ onSidebarToggle }: TopNavBarProps) {
   const { user, logout } = useAuth();
-  const [notificationCount] = useState(3);
   
   const getInitials = (name: string) => {
     return name
@@ -71,24 +70,12 @@ export function TopNavBar({ onSidebarToggle }: TopNavBarProps) {
       </div>
       
       <div className="flex items-center space-x-4">
-        <div className="relative">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-neutral-500 hover:bg-neutral-100 rounded-full dark:text-neutral-400 dark:hover:bg-neutral-800"
-          >
-            <Bell size={20} />
-            {notificationCount > 0 && (
-              <Badge 
-                variant="destructive" 
-                className="absolute top-0 right-0 h-5 w-5 flex items-center justify-center p-0 text-xs"
-              >
-                {notificationCount}
-              </Badge>
-            )}
-            <span className="sr-only">Notifications</span>
-          </Button>
-        </div>
+        {user && (
+          <NotificationCenter 
+            userId={user.id}
+            schoolId={user.schoolId}
+          />
+        )}
         
         <div className="flex items-center">
           <div className="mr-3 text-right hidden md:block">
