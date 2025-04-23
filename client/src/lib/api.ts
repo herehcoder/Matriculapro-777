@@ -67,7 +67,7 @@ export const createSchool = (schoolData: any) => {
 };
 
 export const updateSchool = (id: number, schoolData: any) => {
-  return apiRequest("PUT", `/api/schools/${id}`, schoolData);
+  return apiRequest("PATCH", `/api/schools/${id}`, schoolData);
 };
 
 // Leads
@@ -84,7 +84,7 @@ export const createLead = (leadData: any) => {
 };
 
 export const updateLead = (id: number, leadData: any) => {
-  return apiRequest("PUT", `/api/leads/${id}`, leadData);
+  return apiRequest("PATCH", `/api/leads/${id}`, leadData);
 };
 
 // Courses
@@ -155,7 +155,7 @@ export const createEnrollment = (enrollmentData: any) => {
 };
 
 export const updateEnrollment = (id: number, enrollmentData: any) => {
-  return apiRequest("PUT", `/api/enrollments/${id}`, enrollmentData);
+  return apiRequest("PATCH", `/api/enrollments/${id}`, enrollmentData);
 };
 
 export const completeEnrollmentStep = (id: number, step: string, data: any) => {
@@ -188,7 +188,7 @@ export const createQuestion = (questionData: any) => {
 };
 
 export const updateQuestion = (id: number, questionData: any) => {
-  return apiRequest("PUT", `/api/questions/${id}`, questionData);
+  return apiRequest("PATCH", `/api/questions/${id}`, questionData);
 };
 
 export const deleteQuestion = (id: number) => {
@@ -255,9 +255,9 @@ export const getUser = (id: number) => {
 };
 
 export const updateUserProfile = (id: number, userData: any) => {
-  return apiRequest("PUT", `/api/users/${id}`, userData);
+  return apiRequest("PATCH", `/api/users/${id}`, userData);
 };
 
 export const updatePassword = (id: number, passwordData: any) => {
-  return apiRequest("PUT", `/api/users/${id}/password`, passwordData);
+  return apiRequest("PATCH", `/api/users/${id}/password`, passwordData);
 };
