@@ -50,7 +50,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/hooks/use-auth";
 import { getEnrollments, getSchools } from "@/lib/api";
 
 export default function EnrollmentsPage() {
