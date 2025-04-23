@@ -38,9 +38,13 @@ import SettingsPage from "@/pages/settings";
 import UsersList from "./pages/users/list";
 import NewUser from "./pages/users/new";
 import EditUserWithId from "./pages/users/edit/[id]";
+import VendasPage from "@/pages/vendas";
 import { useAuth, AuthProvider } from "@/hooks/use-auth";
 import MainLayout from "./components/Layout/MainLayout";
 import { Loader2 } from "lucide-react";
+
+// Importação dos estilos específicos da página de vendas
+import "./styles/vendas.css";
 
 // Componente separado para as rotas, que será renderizado após o AuthProvider estar pronto
 function AppRoutes() {
@@ -67,6 +71,7 @@ function AppRoutes() {
         <Route path="/enrollment/:schoolId/:enrollmentId?" component={EnrollmentPage} />
         <Route path="/enrollment/success/:id" component={EnrollmentSuccessPage} />
         <Route path="/payment/success" component={PaymentSuccessPage} />
+        <Route path="/vendas" component={VendasPage} />
         <Route component={Login} />
       </Switch>
     );
@@ -129,6 +134,7 @@ function AppRoutes() {
         <Route path="/users" component={UsersList} />
         <Route path="/users/new" component={NewUser} />
         <Route path="/users/edit/:id" component={EditUserWithId} />
+        <Route path="/vendas" component={VendasPage} />
         
         {/* Fallback to 404 */}
         <Route component={NotFound} />
