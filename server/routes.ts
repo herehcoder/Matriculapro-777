@@ -723,6 +723,287 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Error handling middleware
   app.use(handleZodError);
 
+  // API para Analytics
+  app.get("/api/metrics/dashboard", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as any;
+      let schoolId: number | undefined;
+      
+      if (user.role === "school" || user.role === "attendant") {
+        schoolId = user.schoolId;
+      } else if (user.role === "admin" && req.query.schoolId) {
+        schoolId = parseInt(req.query.schoolId as string);
+      }
+      
+      const metrics = await storage.getDashboardMetrics(schoolId);
+      res.json(metrics);
+    } catch (error) {
+      console.error("Dashboard metrics error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // API para métricas de série temporal (gráficos)
+  app.get("/api/metrics/time-series", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as any;
+      let schoolId: number | undefined;
+      
+      if (user.role === "school" || user.role === "attendant") {
+        schoolId = user.schoolId;
+      } else if (user.role === "admin" && req.query.schoolId) {
+        schoolId = parseInt(req.query.schoolId as string);
+      }
+      
+      if (!schoolId) {
+        return res.status(400).json({ message: "School ID is required" });
+      }
+      
+      const metricType = req.query.type as string;
+      if (!metricType) {
+        return res.status(400).json({ message: "Metric type is required" });
+      }
+
+      const period = parseInt(req.query.period as string) || 30;
+      
+      // Buscar métricas por tipo e período
+      const metrics = await storage.getMetricsBySchool(schoolId, metricType);
+      
+      // Filtrar por período (dias)
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - period);
+      
+      const filteredMetrics = metrics.filter(metric => 
+        new Date(metric.date) >= cutoffDate
+      );
+      
+      res.json(filteredMetrics);
+    } catch (error) {
+      console.error("Time series metrics error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // API para métricas de fontes de leads
+  app.get("/api/metrics/sources", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as any;
+      let schoolId: number | undefined;
+      
+      if (user.role === "school" || user.role === "attendant") {
+        schoolId = user.schoolId;
+      } else if (user.role === "admin" && req.query.schoolId) {
+        schoolId = parseInt(req.query.schoolId as string);
+      }
+      
+      if (!schoolId) {
+        return res.status(400).json({ message: "School ID is required" });
+      }
+      
+      // Buscar métricas por tipo leads_source
+      const metrics = await storage.getMetricsBySchool(schoolId, 'leads_source');
+      
+      // Agrupar por fonte
+      const sourceMap = new Map();
+      metrics.forEach(metric => {
+        const source = metric.source || 'other';
+        const current = sourceMap.get(source) || 0;
+        sourceMap.set(source, current + metric.metricValue);
+      });
+      
+      const result = Array.from(sourceMap.entries()).map(([source, count]) => ({
+        source,
+        count
+      }));
+      
+      res.json(result);
+    } catch (error) {
+      console.error("Source metrics error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // API para métricas de status de matrículas
+  app.get("/api/metrics/enrollment-status", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as any;
+      let schoolId: number | undefined;
+      
+      if (user.role === "school" || user.role === "attendant") {
+        schoolId = user.schoolId;
+      } else if (user.role === "admin" && req.query.schoolId) {
+        schoolId = parseInt(req.query.schoolId as string);
+      }
+      
+      if (!schoolId) {
+        return res.status(400).json({ message: "School ID is required" });
+      }
+      
+      // Buscar todas as matrículas da escola
+      const enrollments = await storage.getEnrollmentsBySchool(schoolId);
+      
+      // Agrupar por status
+      const statusMap = new Map();
+      enrollments.forEach(enrollment => {
+        const status = enrollment.status;
+        const current = statusMap.get(status) || 0;
+        statusMap.set(status, current + 1);
+      });
+      
+      const result = Array.from(statusMap.entries()).map(([status, count]) => ({
+        status,
+        count
+      }));
+      
+      res.json(result);
+    } catch (error) {
+      console.error("Enrollment status metrics error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // API para WhatsApp
+  app.get("/api/whatsapp/messages", isAuthenticated, hasRole(["admin", "school", "attendant"]), async (req, res) => {
+    try {
+      const user = req.user as any;
+      let schoolId: number | undefined;
+      
+      if (user.role === "school" || user.role === "attendant") {
+        schoolId = user.schoolId;
+      } else if (user.role === "admin" && req.query.schoolId) {
+        schoolId = parseInt(req.query.schoolId as string);
+      }
+      
+      if (!schoolId) {
+        return res.status(400).json({ message: "School ID is required" });
+      }
+      
+      const messages = await storage.getWhatsappMessagesBySchool(schoolId);
+      
+      // Transformar para o formato esperado pelo frontend
+      const formattedMessages = messages.map(msg => ({
+        id: msg.id,
+        direction: msg.direction,
+        message: msg.message,
+        status: msg.status,
+        timestamp: msg.createdAt.toISOString(),
+        phone: msg.studentId ? `student_${msg.studentId}` : `lead_${msg.leadId}`,
+        name: "Contato" // Idealmente buscar o nome do lead/estudante
+      }));
+      
+      res.json(formattedMessages);
+    } catch (error) {
+      console.error("WhatsApp messages error:", error);
+      res.status(500).json({ message: "Error fetching WhatsApp messages" });
+    }
+  });
+
+  app.post("/api/whatsapp/send", isAuthenticated, hasRole(["admin", "school", "attendant"]), async (req, res) => {
+    try {
+      const user = req.user as any;
+      const { phone, message } = req.body;
+      
+      if (!phone || !message) {
+        return res.status(400).json({ message: "Phone and message are required" });
+      }
+      
+      const schoolId = user.schoolId;
+      if (!schoolId && user.role !== "admin") {
+        return res.status(400).json({ message: "School ID is required" });
+      }
+      
+      // Buscar configuração da escola
+      const school = await storage.getSchool(schoolId);
+      if (!school || !school.whatsappEnabled) {
+        return res.status(400).json({ message: "WhatsApp is not enabled for this school" });
+      }
+      
+      // Aqui seria feita a integração com a Evolution API
+      // Por enquanto, apenas salvamos a mensagem no banco
+      
+      let studentId = null;
+      let leadId = null;
+      
+      if (phone.startsWith("student_")) {
+        studentId = parseInt(phone.replace("student_", ""));
+      } else if (phone.startsWith("lead_")) {
+        leadId = parseInt(phone.replace("lead_", ""));
+      }
+      
+      const newMessage = await storage.createWhatsappMessage({
+        schoolId,
+        studentId,
+        leadId,
+        message,
+        direction: "outbound",
+        status: "sent",
+      });
+      
+      res.status(201).json(newMessage);
+    } catch (error) {
+      console.error("WhatsApp send error:", error);
+      res.status(500).json({ message: "Error sending WhatsApp message" });
+    }
+  });
+
+  app.get("/api/whatsapp/status", isAuthenticated, hasRole(["admin", "school"]), async (req, res) => {
+    try {
+      const user = req.user as any;
+      const schoolId = user.schoolId;
+      
+      if (!schoolId && user.role !== "admin") {
+        return res.status(400).json({ message: "School ID is required" });
+      }
+      
+      // Buscar configuração da escola
+      const school = await storage.getSchool(schoolId);
+      if (!school || !school.whatsappEnabled) {
+        return res.status(400).json({ message: "WhatsApp is not enabled for this school" });
+      }
+      
+      // Aqui seria feita a verificação de status com a Evolution API
+      // Por enquanto, retornamos um status mockado
+      
+      res.json({
+        connected: false,
+        qrCode: null,
+        message: "WhatsApp not connected"
+      });
+    } catch (error) {
+      console.error("WhatsApp status error:", error);
+      res.status(500).json({ message: "Error checking WhatsApp status" });
+    }
+  });
+
+  app.post("/api/whatsapp/connect", isAuthenticated, hasRole(["admin", "school"]), async (req, res) => {
+    try {
+      const user = req.user as any;
+      const schoolId = user.schoolId;
+      
+      if (!schoolId && user.role !== "admin") {
+        return res.status(400).json({ message: "School ID is required" });
+      }
+      
+      // Buscar configuração da escola
+      const school = await storage.getSchool(schoolId);
+      if (!school || !school.whatsappEnabled) {
+        return res.status(400).json({ message: "WhatsApp is not enabled for this school" });
+      }
+      
+      // Aqui seria feita a solicitação de QR code com a Evolution API
+      // Por enquanto, geramos uma URL de imagem de QR code exemplo
+      
+      res.json({
+        success: true,
+        qrCode: "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=whatsapp://example",
+        message: "QR Code generated. Scan with your WhatsApp"
+      });
+    } catch (error) {
+      console.error("WhatsApp connect error:", error);
+      res.status(500).json({ message: "Error connecting WhatsApp" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
