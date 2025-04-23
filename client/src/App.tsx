@@ -12,6 +12,7 @@ import AttendantDashboard from "@/pages/dashboard/attendant";
 import StudentDashboard from "@/pages/dashboard/student";
 import EnrollmentPage from "@/pages/enrollment/index";
 import EnrollmentSuccessPage from "@/pages/enrollment/success";
+import PaymentSuccessPage from "@/pages/payment/success";
 import ChatbotPage from "@/pages/chatbot/index";
 import ChatPage from "@/pages/chat/index";
 import SchoolsPage from "@/pages/schools/index";
@@ -61,6 +62,7 @@ function Router() {
         <Route path="/reset-password" component={ResetPassword} />
         <Route path="/enrollment/:schoolId/:enrollmentId?" component={EnrollmentPage} />
         <Route path="/enrollment/success/:id" component={EnrollmentSuccessPage} />
+        <Route path="/payment/success" component={PaymentSuccessPage} />
         <Route component={Login} />
       </Switch>
     );
@@ -98,6 +100,7 @@ function Router() {
         <Route path="/enrollment/:schoolId/:enrollmentId?" component={EnrollmentPage} />
         <Route path="/enrollment/success/:id" component={EnrollmentSuccessPage} />
         <Route path="/enrollment/continue/:enrollmentId" component={EnrollmentPage} />
+        <Route path="/payment/success" component={PaymentSuccessPage} />
         <Route path="/enrollments" component={EnrollmentsPage} />
         <Route path="/enrollments/new" component={NewEnrollmentPage} />
         <Route path="/enrollments/:enrollmentId" component={EnrollmentViewPage} />

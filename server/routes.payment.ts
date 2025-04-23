@@ -188,4 +188,26 @@ export function registerPaymentRoutes(app: Express, isAuthenticated: any) {
       res.status(500).json({ message: 'Erro ao buscar pagamentos', error: error.message });
     }
   });
+
+  /**
+   * @route GET /api/payments/status
+   * @desc Verifica o status de um pagamento
+   * @access Public
+   */
+  app.get('/api/payments/status', async (req: Request, res: Response) => {
+    try {
+      const { payment_intent } = req.query;
+      
+      if (!payment_intent) {
+        return res.status(400).json({ error: 'ID do pagamento não informado' });
+      }
+      
+      const paymentIntent = await stripe.paymentIntents.retrieve(payment_intent as string);
+      
+      res.json(paymentIntent);
+    } catch (error) {
+      console.error('Erro ao verificar status do pagamento:', error);
+      res.status(500).json({ error: 'Erro ao verificar status do pagamento' });
+    }
+  });
 }

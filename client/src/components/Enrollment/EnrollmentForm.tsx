@@ -220,6 +220,19 @@ const EnrollmentForm: React.FC<EnrollmentFormProps> = ({
               />
             </TabsContent>
 
+            <TabsContent value="payment" className="mt-0">
+              <PaymentStep
+                enrollmentId={enrollmentId}
+                courseId={formData.personalInfo.courseId}
+                amount={
+                  // Encontrar o curso selecionado e obter o preço
+                  formData.personalInfo.courseId 
+                    ? (courses.find(c => c.id === formData.personalInfo.courseId)?.price || 0)
+                    : 0
+                }
+              />
+            </TabsContent>
+
             <TabsContent value="review" className="mt-0">
               <ReviewStep formData={formData} courses={courses} />
             </TabsContent>
