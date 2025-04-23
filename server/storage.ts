@@ -858,6 +858,12 @@ export class MemStorage implements IStorage {
     this.enrollmentsMap.set(id, updatedEnrollment);
     return updatedEnrollment;
   }
+  
+  async listEnrollments(limit = 100, offset = 0): Promise<Enrollment[]> {
+    return Array.from(this.enrollmentsMap.values())
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(offset, offset + limit);
+  }
 
   // WhatsApp message methods
   async getWhatsappMessage(id: number): Promise<WhatsappMessage | undefined> {

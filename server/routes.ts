@@ -755,6 +755,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         schoolId = parseInt(req.query.schoolId as string);
       }
       
+      // Para admins, se não houver schoolId, usamos 1 como padrão para demonstração
+      if (!schoolId && user.role === "admin") {
+        schoolId = 1;  // ID padrão para demonstração
+      }
+      
       if (!schoolId) {
         return res.status(400).json({ message: "School ID is required" });
       }
