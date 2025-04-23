@@ -8,6 +8,8 @@ export const enrollmentStatusEnum = pgEnum('enrollment_status', ['started', 'per
 export const leadSourceEnum = pgEnum('lead_source', ['whatsapp', 'website', 'social_media', 'referral', 'other']);
 export const leadStatusEnum = pgEnum('lead_status', ['new', 'contacted', 'interested', 'converted', 'lost']);
 export const chatStatusEnum = pgEnum('chat_status', ['active', 'closed']);
+export const notificationTypeEnum = pgEnum('notification_type', ['message', 'enrollment', 'lead', 'system', 'payment']);
+export const messageStatusEnum = pgEnum('message_status', ['sent', 'delivered', 'read']);
 
 // Users table
 export const users = pgTable('users', {
@@ -187,6 +189,32 @@ export const metrics = pgTable('metrics', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// Real-time notifications table
+export const notifications = pgTable('notifications', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id),
+  schoolId: integer('school_id').references(() => schools.id),
+  title: text('title').notNull(),
+  message: text('message').notNull(),
+  type: notificationTypeEnum('type').notNull(),
+  read: boolean('read').default(false),
+  data: json('data'), // Additional data related to notification
+  relatedId: integer('related_id'), // ID of the related resource (enrollment, lead, etc.)
+  relatedType: text('related_type'), // Type of the related resource
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Real-time messages table
+export const messages = pgTable('messages', {
+  id: serial('id').primaryKey(),
+  senderId: integer('sender_id').notNull().references(() => users.id),
+  receiverId: integer('receiver_id').notNull().references(() => users.id),
+  schoolId: integer('school_id').references(() => schools.id),
+  content: text('content').notNull(),
+  status: messageStatusEnum('status').default('sent'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // Schema for inserting a new user
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -261,6 +289,18 @@ export const insertMetricSchema = createInsertSchema(metrics).omit({
   createdAt: true
 });
 
+// Schema for inserting a new notification
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  createdAt: true
+});
+
+// Schema for inserting a new message
+export const insertMessageSchema = createInsertSchema(messages).omit({
+  id: true,
+  createdAt: true
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -295,3 +335,9 @@ export type InsertWhatsappMessage = z.infer<typeof insertWhatsappMessageSchema>;
 
 export type Metric = typeof metrics.$inferSelect;
 export type InsertMetric = z.infer<typeof insertMetricSchema>;
+
+export type Notification = typeof notifications.$inferSelect;
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+
+export type Message = typeof messages.$inferSelect;
+export type InsertMessage = z.infer<typeof insertMessageSchema>;
