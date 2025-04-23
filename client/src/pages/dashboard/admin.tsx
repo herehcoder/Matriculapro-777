@@ -277,7 +277,7 @@ export default function AdminDashboard() {
     },
   };
 
-  if (isLoadingSchools || isLoadingMetrics || isLoadingUsers) {
+  if (isLoadingSchools || isLoadingMetrics || isLoadingDashboard) {
     return (
       <div className="container mx-auto py-10">
         <div className="flex justify-center items-center h-64">

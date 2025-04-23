@@ -1,25 +1,29 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { getSchools } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { DataTable } from "@/components/ui/data-table";
-import { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Plus, 
-  Search, 
-  School as SchoolIcon, 
-  MapPin, 
-  Mail, 
-  Phone, 
-  MoreHorizontal,
-  Pencil,
-  ExternalLink,
-  Loader2
-} from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,234 +32,252 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Building,
+  PlusCircle,
+  Search,
+  MoreHorizontal,
+  Eye,
+  Edit,
+  Trash2,
+  CheckCircle,
+  XCircle,
+  Filter,
+  RefreshCw,
+} from "lucide-react";
 
 export default function SchoolsPage() {
-  // Fetch schools data
-  const { data: schools, isLoading } = useQuery({
-    queryKey: ['/api/schools'],
-    refetchOnWindowFocus: false,
+  const { toast } = useToast();
+  const [searchQuery, setSearchQuery] = useState("");
+  
+  // Buscar escolas
+  const { data: schools, isLoading, refetch } = useQuery({
+    queryKey: ["/api/schools"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/schools");
+      return await res.json();
+    },
   });
   
-  // Format school data for display
-  const formatSchools = (schools: any[]) => {
-    return schools?.map(school => ({
-      ...school,
-      initial: school.name.charAt(0).toUpperCase(),
-      locationDisplay: `${school.city}, ${school.state}`,
-      statusClass: school.active 
-        ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400" 
-        : "bg-neutral-100 text-neutral-800 dark:bg-neutral-800 dark:text-neutral-300",
-      statusText: school.active ? "Ativa" : "Inativa",
-    }));
+  // Filtrar escolas com base na busca
+  const filteredSchools = schools
+    ? schools.filter((school: any) =>
+        school.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        school.city.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        school.state.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : [];
+  
+  // Função para ativar/desativar uma escola
+  const toggleSchoolStatus = async (id: number, active: boolean) => {
+    try {
+      await apiRequest("PATCH", `/api/schools/${id}`, { active: !active });
+      refetch();
+      toast({
+        title: active ? "Escola desativada" : "Escola ativada",
+        description: `A escola foi ${active ? "desativada" : "ativada"} com sucesso.`,
+      });
+    } catch (error) {
+      console.error("Erro ao alterar status da escola:", error);
+      toast({
+        title: "Erro",
+        description: "Houve um erro ao alterar o status da escola.",
+        variant: "destructive",
+      });
+    }
   };
   
-  // Column definitions for schools table
-  const columns: ColumnDef<any>[] = [
-    {
-      accessorKey: "name",
-      header: "Nome",
-      cell: ({ row }) => (
-        <div className="flex items-center">
-          <div className="h-8 w-8 rounded-lg bg-primary-100 flex items-center justify-center text-primary-600 font-bold text-sm dark:bg-primary-900 dark:text-primary-300">
-            {row.original.initial}
-          </div>
-          <div className="ml-3">
-            <div className="font-medium">{row.getValue("name")}</div>
-            <div className="text-xs text-neutral-500 dark:text-neutral-400">
-              ID: {row.original.id}
-            </div>
-          </div>
-        </div>
-      ),
-    },
-    {
-      accessorKey: "locationDisplay",
-      header: "Localização",
-      cell: ({ row }) => (
-        <div className="flex items-center">
-          <MapPin size={14} className="mr-1 text-neutral-500" />
-          <span>{row.getValue("locationDisplay")}</span>
-        </div>
-      ),
-    },
-    {
-      accessorKey: "email",
-      header: "Contato",
-      cell: ({ row }) => (
-        <div className="space-y-1">
-          <div className="flex items-center text-sm">
-            <Mail size={14} className="mr-1 text-neutral-500" />
-            <span>{row.getValue("email")}</span>
-          </div>
-          <div className="flex items-center text-sm">
-            <Phone size={14} className="mr-1 text-neutral-500" />
-            <span>{row.original.phone}</span>
-          </div>
-        </div>
-      ),
-    },
-    {
-      accessorKey: "active",
-      header: "Status",
-      cell: ({ row }) => (
-        <Badge variant="secondary" className={row.original.statusClass}>
-          {row.original.statusText}
-        </Badge>
-      ),
-    },
-    {
-      id: "actions",
-      cell: ({ row }) => (
-        <div className="text-right">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <MoreHorizontal className="h-4 w-4" />
-                <span className="sr-only">Menu</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Ações</DropdownMenuLabel>
-              <DropdownMenuItem asChild>
-                <Link href={`/schools/${row.original.id}`}>
-                  <a className="flex items-center cursor-pointer">
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    <span>Ver detalhes</span>
-                  </a>
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href={`/schools/edit/${row.original.id}`}>
-                  <a className="flex items-center cursor-pointer">
-                    <Pencil className="mr-2 h-4 w-4" />
-                    <span>Editar</span>
-                  </a>
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <Link href={`/schools/${row.original.id}/attendants`}>
-                  <a className="flex items-center cursor-pointer">
-                    <span>Gerenciar atendentes</span>
-                  </a>
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href={`/schools/${row.original.id}/courses`}>
-                  <a className="flex items-center cursor-pointer">
-                    <span>Gerenciar cursos</span>
-                  </a>
-                </Link>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      ),
-    },
-  ];
-
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-60">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <span className="ml-2 text-lg">Carregando escolas...</span>
+      <div className="container mx-auto py-10">
+        <div className="flex justify-center items-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        </div>
       </div>
     );
   }
-
+  
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="container mx-auto py-8">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
         <div>
-          <h1 className="text-2xl font-display font-bold text-neutral-800 dark:text-neutral-100">
-            Escolas
-          </h1>
-          <p className="text-neutral-500 dark:text-neutral-400">
-            Gerencie as instituições de ensino cadastradas no sistema
+          <h1 className="text-2xl font-bold mb-1">Escolas</h1>
+          <p className="text-muted-foreground">
+            Gerencie as escolas cadastradas na plataforma
           </p>
         </div>
-        <Button asChild>
-          <Link href="/schools/new">
-            <a className="flex items-center">
-              <Plus className="mr-2 h-4 w-4" />
+        <div className="mt-4 md:mt-0">
+          <Button asChild>
+            <Link href="/schools/new">
+              <PlusCircle className="h-4 w-4 mr-2" />
               Nova Escola
-            </a>
-          </Link>
-        </Button>
+            </Link>
+          </Button>
+        </div>
       </div>
-
+      
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-md font-semibold text-neutral-800 dark:text-neutral-200">
-            Lista de Escolas
-          </CardTitle>
+          <CardTitle>Lista de Escolas</CardTitle>
+          <CardDescription>
+            {filteredSchools.length} {filteredSchools.length === 1 ? "escola encontrada" : "escolas encontradas"}
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          {schools && schools.length > 0 ? (
-            <DataTable 
-              columns={columns} 
-              data={formatSchools(schools)} 
-              searchField="name"
-              searchPlaceholder="Buscar por nome da escola..."
-            />
-          ) : (
-            <div className="text-center py-10">
-              <div className="mx-auto h-12 w-12 rounded-full bg-neutral-100 flex items-center justify-center text-neutral-500 mb-4 dark:bg-neutral-800">
-                <SchoolIcon size={24} />
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2 flex-1 max-w-sm">
+              <div className="relative flex-1">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por nome, cidade ou estado..."
+                  className="pl-8"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
               </div>
-              <h3 className="text-lg font-medium text-neutral-800 dark:text-neutral-200 mb-2">
-                Nenhuma escola encontrada
-              </h3>
-              <p className="text-neutral-500 dark:text-neutral-400 mb-4">
-                Não há escolas cadastradas no sistema.
-              </p>
-              <Button asChild>
-                <Link href="/schools/new">
-                  <a className="flex items-center justify-center">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Adicionar Escola
-                  </a>
-                </Link>
+              <Button size="icon" variant="outline">
+                <Filter className="h-4 w-4" />
+              </Button>
+              <Button size="icon" variant="outline" onClick={() => refetch()}>
+                <RefreshCw className="h-4 w-4" />
               </Button>
             </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-md font-semibold text-neutral-800 dark:text-neutral-200">
-            Estatísticas
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="p-4 bg-neutral-50 rounded-lg text-center dark:bg-neutral-800/50">
-              <p className="text-2xl font-bold text-primary-600 dark:text-primary-400">
-                {schools?.length || 0}
-              </p>
-              <p className="text-sm text-neutral-500 dark:text-neutral-400">Total de Escolas</p>
-            </div>
-            <div className="p-4 bg-neutral-50 rounded-lg text-center dark:bg-neutral-800/50">
-              <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                {schools?.filter(s => s.active).length || 0}
-              </p>
-              <p className="text-sm text-neutral-500 dark:text-neutral-400">Escolas Ativas</p>
-            </div>
-            <div className="p-4 bg-neutral-50 rounded-lg text-center dark:bg-neutral-800/50">
-              <p className="text-2xl font-bold text-accent-600 dark:text-accent-400">
-                {schools?.reduce((acc, curr) => acc + (curr.mainCourse ? 1 : 0), 0) || 0}
-              </p>
-              <p className="text-sm text-neutral-500 dark:text-neutral-400">Com Curso Principal</p>
-            </div>
-            <div className="p-4 bg-neutral-50 rounded-lg text-center dark:bg-neutral-800/50">
-              <p className="text-2xl font-bold text-secondary-600 dark:text-secondary-400">
-                {schools?.filter(s => s.whatsappEnabled).length || 0}
-              </p>
-              <p className="text-sm text-neutral-500 dark:text-neutral-400">WhatsApp Integrado</p>
-            </div>
+          </div>
+          
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Escola</TableHead>
+                  <TableHead className="hidden md:table-cell">Alunos</TableHead>
+                  <TableHead className="hidden md:table-cell">Atendentes</TableHead>
+                  <TableHead className="hidden md:table-cell">Cursos</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="hidden md:table-cell">Uso</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredSchools.length > 0 ? (
+                  filteredSchools.map((school: any) => (
+                    <TableRow key={school.id}>
+                      <TableCell>
+                        <div className="flex items-center">
+                          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mr-3">
+                            {school.logo ? (
+                              <img 
+                                src={school.logo} 
+                                alt={school.name} 
+                                className="w-10 h-10 rounded-full object-cover" 
+                              />
+                            ) : (
+                              <Building className="h-5 w-5 text-primary" />
+                            )}
+                          </div>
+                          <div>
+                            <div className="font-medium">{school.name}</div>
+                            <div className="text-xs text-muted-foreground">{school.city}, {school.state}</div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        {school.studentsCount || 0} alunos
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        {school.attendantsCount || 0} atendentes
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        {school.coursesCount || 0} cursos
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={school.active ? "default" : "secondary"}
+                          className={school.active ? "bg-green-100 text-green-800 hover:bg-green-100" : ""}
+                        >
+                          {school.active ? "Ativo" : "Inativo"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        <div className="flex items-center">
+                          <div className="mr-2">
+                            <Progress value={school.usagePercent || 0} className="h-2 w-20" />
+                          </div>
+                          <span className="text-xs">{school.usagePercent || 0}%</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="h-8 w-8 p-0">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuLabel>Ações</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem asChild>
+                              <Link href={`/schools/${school.id}`}>
+                                <div className="flex items-center w-full">
+                                  <Eye className="mr-2 h-4 w-4" />
+                                  <span>Visualizar Detalhes</span>
+                                </div>
+                              </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem asChild>
+                              <Link href={`/schools/edit/${school.id}`}>
+                                <div className="flex items-center w-full">
+                                  <Edit className="mr-2 h-4 w-4" />
+                                  <span>Editar Escola</span>
+                                </div>
+                              </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => toggleSchoolStatus(school.id, school.active)}>
+                              {school.active ? (
+                                <>
+                                  <XCircle className="mr-2 h-4 w-4" />
+                                  <span>Desativar</span>
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle className="mr-2 h-4 w-4" />
+                                  <span>Ativar</span>
+                                </>
+                              )}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-red-600"
+                              onClick={() => {
+                                toast({
+                                  title: "Ação não disponível",
+                                  description: "A exclusão de escolas não está disponível neste momento.",
+                                });
+                              }}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              <span>Excluir</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-6 text-muted-foreground">
+                      Nenhuma escola encontrada.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
           </div>
         </CardContent>
+        <CardFooter className="border-t px-6 py-4">
+          <div className="text-xs text-muted-foreground">
+            Mostrando {filteredSchools.length} de {schools?.length || 0} escolas
+          </div>
+        </CardFooter>
       </Card>
     </div>
   );
