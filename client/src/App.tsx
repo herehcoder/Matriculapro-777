@@ -40,7 +40,8 @@ import { useAuth, AuthProvider } from "@/hooks/use-auth";
 import MainLayout from "./components/Layout/MainLayout";
 import { Loader2 } from "lucide-react";
 
-function Router() {
+// Componente separado para as rotas, que será renderizado após o AuthProvider estar pronto
+function AppRoutes() {
   const { user, isLoading } = useAuth();
   
   if (isLoading) {
@@ -138,7 +139,7 @@ function App() {
     <TooltipProvider>
       <AuthProvider>
         <Toaster />
-        <Router />
+        <AppRoutes />
       </AuthProvider>
     </TooltipProvider>
   );

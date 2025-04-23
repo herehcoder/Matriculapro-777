@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { TopNavBar } from "./TopNavBar";
 import { Sidebar } from "@/components/ui/sidebar";
-import { useMobile } from "@/hooks/use-mobile";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 interface MainLayoutProps {
   children: React.ReactNode;
 }
 
 export default function MainLayout({ children }: MainLayoutProps) {
-  const isMobile = useMobile();
+  const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
   
   // Update sidebar state when screen size changes

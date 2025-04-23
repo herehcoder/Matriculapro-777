@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Menu, LogOut, User, Settings } from "lucide-react";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/hooks/use-auth";
 import { NotificationCenter } from "./NotificationCenter";
 import { ThemeSwitch } from "@/components/theme-switch";
 

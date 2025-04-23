@@ -1,7 +1,7 @@
 import React, { ReactNode } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { useLocation, Link } from 'wouter';
-import { useMediaQuery } from '@/hooks/use-mobile';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { 
   Home, 
   Users, 
@@ -54,7 +54,7 @@ interface DashboardLayoutProps {
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const { user } = useAuth();
   const [location] = useLocation();
-  const isMobile = useMediaQuery("(max-width: 768px)");
+  const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
 
   const toggleSidebar = () => {

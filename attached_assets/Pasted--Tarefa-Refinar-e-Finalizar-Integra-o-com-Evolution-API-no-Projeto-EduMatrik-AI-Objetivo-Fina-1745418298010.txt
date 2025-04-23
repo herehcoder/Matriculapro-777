@@ -1,0 +1,57 @@
+🔧 Tarefa: Refinar e Finalizar Integração com Evolution API no Projeto EduMatrik AI
+🎯 Objetivo
+Finalizar a integração de WhatsApp com base na Evolution API, utilizando uma instância individual por escola, porém com configuração global da API feita exclusivamente pelo painel do administrador.
+
+⚙️ Detalhes Técnicos
+🔐 Painel do Administrador
+Já existe uma seção “WhatsApp” — ela deverá ser refinada para conter os seguintes campos:
+
+API_BASE_URL: URL base da Evolution API (ex: https://api.evolution-api.com)
+
+API_KEY ou TOKEN_GERAL: token de autenticação geral da API
+
+WEBHOOK_URL_PADRAO: Webhook global (caso a API precise registrar um endpoint geral)
+
+⚠️ Esses dados serão salvos em uma tabela específica como whatsapp_api_config ou em settings.
+
+Essa configuração é usada por todas as escolas, apenas como base para envio de mensagens.
+
+🏫 Painel da Escola
+Cada escola poderá registrar e conectar sua própria instância do WhatsApp. Para isso:
+
+Criar tela no dashboard da escola com:
+
+Campo para ID da instância
+
+Campo para Token da instância
+
+Status da conexão (verificado via API da Evolution)
+
+Botão para testar envio e recebimento de mensagem
+
+Botão para “Desconectar WhatsApp”
+
+Esses dados podem ser armazenados diretamente na tabela schools (campos: whatsapp_instance_id, whatsapp_instance_token) ou em uma tabela separada.
+
+📤 Envio e Recebimento de Mensagens
+Toda escola usará sua própria instância conectada (ID/token próprios).
+
+O envio de mensagens, notificações e mídias será feito com:
+
+API base e token geral (vindo da config do admin)
+
+ID e Token da instância (vindo da escola)
+
+As rotas e payloads seguirão a documentação da Evolution API.
+
+📥 Webhooks de Mensagens Recebidas
+Cada instância escolar usará um webhook próprio (/webhook/school/:id) para receber mensagens específicas daquela escola.
+
+As mensagens recebidas devem ser associadas à instância e à escola correta.
+
+🔄 Observações Adicionais
+Apenas o painel administrador terá acesso e controle sobre as configurações da API em si.
+
+Os outros painéis (escolas) apenas consumirão suas instâncias individuais.
+
+Refinar a parte do painel “WhatsApp” do admin, mantendo o layout existente e adaptando os campos conforme acima.

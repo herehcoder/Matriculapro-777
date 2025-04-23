@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
 import {
   Form,
@@ -30,7 +30,8 @@ const loginSchema = z.object({
 });
 
 export default function Login() {
-  const { login, isLoading } = useAuth();
+  const { loginMutation } = useAuth();
+  const isLoading = loginMutation.isPending;
   const [error, setError] = useState<string | null>(null);
   
   const form = useForm<z.infer<typeof loginSchema>>({
@@ -45,7 +46,10 @@ export default function Login() {
   const onSubmit = async (values: z.infer<typeof loginSchema>) => {
     setError(null);
     try {
-      await login(values.email, values.password, values.role);
+      await loginMutation.mutateAsync({
+        username: values.email,
+        password: values.password
+      });
     } catch (err) {
       setError("Email ou senha incorretos. Tente novamente.");
     }
