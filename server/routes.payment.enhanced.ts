@@ -630,8 +630,46 @@ export function registerEnhancedPaymentRoutes(app: Express, isAuthenticated: any
         ? new Date(req.query.endDate as string) 
         : new Date();
       
-      // Gerar CSV
-      const csv = await paymentProcessor.exportPaymentsCSV(effectiveSchoolId, startDate, endDate);
+      // Gerar CSV diretamente da base de dados
+      // Já que não temos exportPaymentsCSV no paymentProcessor
+      
+      // Construir a query SQL para obter os pagamentos
+      let query = sql`
+        SELECT 
+          p.id, 
+          p.amount, 
+          p.currency, 
+          p.status, 
+          p.created_at, 
+          p.payment_method, 
+          p.gateway,
+          p.external_id,
+          e.id as enrollment_id,
+          c.name as course_name,
+          u.full_name as student_name,
+          u.email as student_email
+        FROM payments p
+        LEFT JOIN enrollments e ON p.enrollment_id = e.id
+        LEFT JOIN courses c ON e.course_id = c.id
+        LEFT JOIN users u ON p.student_id = u.id
+        WHERE p.created_at BETWEEN ${startDate.toISOString()} AND ${endDate.toISOString()}
+      `;
+      
+      if (effectiveSchoolId) {
+        query = sql`${query} AND p.school_id = ${effectiveSchoolId}`;
+      }
+      
+      query = sql`${query} ORDER BY p.created_at DESC`;
+      
+      const [result] = await db.execute(query);
+      
+      // Criar CSV
+      const csvHeader = 'ID,Valor,Moeda,Status,Data,Método,Gateway,ID Externo,Matrícula,Curso,Aluno,Email\n';
+      const csvRows = result.rows.map((row: any) => {
+        return `${row.id || ''},${row.amount || ''},${row.currency || ''},${row.status || ''},${row.created_at ? new Date(row.created_at).toISOString() : ''},${row.payment_method || ''},${row.gateway || ''},${row.external_id || ''},${row.enrollment_id || ''},${(row.course_name || '').replace(/,/g, ' ')},${(row.student_name || '').replace(/,/g, ' ')},${(row.student_email || '').replace(/,/g, ' ')}`;
+      }).join('\n');
+      
+      const csv = csvHeader + csvRows;
       
       // Definir nome do arquivo
       const filename = `pagamentos_${effectiveSchoolId ? `escola_${effectiveSchoolId}_` : ''}${startDate.toISOString().split('T')[0]}_a_${endDate.toISOString().split('T')[0]}.csv`;
@@ -800,7 +838,12 @@ export function registerEnhancedPaymentRoutes(app: Express, isAuthenticated: any
         FROM payments
         ${schoolFilter ? schoolFilter + ' AND' : 'WHERE'} created_at >= NOW() - INTERVAL '${totalDays} days'
       `;
-      const [last30DaysResult] = await db.execute(last30DaysQuery, queryParams);
+      const last30DaysResult = await db.execute(last30DaysQuery, queryParams);
+      const last30DaysData = last30DaysResult.rows.length > 0 ? last30DaysResult.rows[0] : {
+        count: 0,
+        total: 0,
+        total_succeeded: 0
+      };
       
       // Estatísticas dos últimos 3 meses
       const last3MonthsQuery = `
@@ -811,7 +854,12 @@ export function registerEnhancedPaymentRoutes(app: Express, isAuthenticated: any
         FROM payments
         ${schoolFilter ? schoolFilter + ' AND' : 'WHERE'} created_at >= NOW() - INTERVAL '${totalMonths} months'
       `;
-      const [last3MonthsResult] = await db.execute(last3MonthsQuery, queryParams);
+      const last3MonthsResult = await db.execute(last3MonthsQuery, queryParams);
+      const last3MonthsData = last3MonthsResult.rows.length > 0 ? last3MonthsResult.rows[0] : {
+        count: 0,
+        total: 0,
+        total_succeeded: 0
+      };
       
       res.json({
         success: true,
@@ -829,16 +877,16 @@ export function registerEnhancedPaymentRoutes(app: Express, isAuthenticated: any
           topCourses: courseResult.rows,
           periods: {
             last30Days: {
-              count: parseInt(last30DaysResult.count),
-              total: parseFloat(last30DaysResult.total || '0'),
-              totalSucceeded: parseFloat(last30DaysResult.total_succeeded || '0'),
-              avgPerDay: parseInt(last30DaysResult.count) / totalDays
+              count: parseInt(last30DaysData.count?.toString() || '0'),
+              total: parseFloat(last30DaysData.total?.toString() || '0'),
+              totalSucceeded: parseFloat(last30DaysData.total_succeeded?.toString() || '0'),
+              avgPerDay: parseInt(last30DaysData.count?.toString() || '0') / totalDays
             },
             last3Months: {
-              count: parseInt(last3MonthsResult.count),
-              total: parseFloat(last3MonthsResult.total || '0'),
-              totalSucceeded: parseFloat(last3MonthsResult.total_succeeded || '0'),
-              avgPerMonth: parseInt(last3MonthsResult.count) / totalMonths
+              count: parseInt(last3MonthsData.count?.toString() || '0'),
+              total: parseFloat(last3MonthsData.total?.toString() || '0'),
+              totalSucceeded: parseFloat(last3MonthsData.total_succeeded?.toString() || '0'),
+              avgPerMonth: parseInt(last3MonthsData.count?.toString() || '0') / totalMonths
             }
           }
         }
@@ -852,6 +900,3 @@ export function registerEnhancedPaymentRoutes(app: Express, isAuthenticated: any
     }
   });
 }
-
-// Import para SQL
-import { sql } from "drizzle-orm";
