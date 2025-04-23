@@ -63,7 +63,7 @@ function AppRoutes() {
   if (!user) {
     return (
       <Switch>
-        <Route path="/" component={Login} />
+        <Route path="/" component={VendasPage} />
         <Route path="/login" component={Login} />
         <Route path="/register" component={Register} />
         <Route path="/forgot-password" component={ForgotPassword} />
@@ -72,7 +72,7 @@ function AppRoutes() {
         <Route path="/enrollment/success/:id" component={EnrollmentSuccessPage} />
         <Route path="/payment/success" component={PaymentSuccessPage} />
         <Route path="/vendas" component={VendasPage} />
-        <Route component={Login} />
+        <Route component={VendasPage} />
       </Switch>
     );
   }

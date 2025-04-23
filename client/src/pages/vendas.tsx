@@ -203,6 +203,7 @@ const PricingCard: React.FC<{ plan: PricingPlan }> = ({ plan }) => (
       <Button 
         className={`w-full ${plan.popular ? 'bg-primary hover:bg-primary/90' : ''}`}
         variant={plan.popular ? 'default' : 'outline'}
+        onClick={() => window.location.href = '/register'}
       >
         {plan.cta}
         <ArrowRight className="ml-2 w-4 h-4" />
@@ -294,11 +295,20 @@ export default function VendasPage() {
               Reduza em até 80% o tempo gasto com processos manuais. Valide documentos automaticamente com IA e ofereça uma experiência digital moderna para pais e alunos.
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-4">
-              <Button size="lg" className="text-lg px-8">
+              <Button 
+                size="lg" 
+                className="text-lg px-8"
+                onClick={() => window.location.href = '/login'}
+              >
                 Começar agora
               </Button>
-              <Button size="lg" variant="outline" className="text-lg px-8">
-                Agendar demonstração
+              <Button 
+                size="lg" 
+                variant="outline" 
+                className="text-lg px-8"
+                onClick={() => window.location.href = '/register'}
+              >
+                Cadastrar-se
               </Button>
             </div>
             <p className="mt-4 text-sm text-gray-500">
@@ -638,11 +648,20 @@ export default function VendasPage() {
               Reduza custos, elimine erros e ofereça uma experiência digital de matrícula que vai impressionar pais e alunos.
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-4">
-              <Button size="lg" className="bg-white text-blue-700 hover:bg-blue-50 text-lg px-8">
+              <Button 
+                size="lg" 
+                className="bg-white text-blue-700 hover:bg-blue-50 text-lg px-8"
+                onClick={() => window.location.href = '/login'}
+              >
                 Começar agora
               </Button>
-              <Button size="lg" variant="outline" className="border-white text-white hover:bg-blue-600 text-lg px-8">
-                Agendar demonstração
+              <Button 
+                size="lg" 
+                variant="outline" 
+                className="border-white text-white hover:bg-blue-600 text-lg px-8"
+                onClick={() => window.location.href = '/register'}
+              >
+                Cadastrar-se
               </Button>
             </div>
           </motion.div>
