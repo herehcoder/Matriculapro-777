@@ -157,18 +157,17 @@ const WhatsAppConfigPage: React.FC = () => {
   }
   
   if (!user) {
-    return <Redirect to="/login" />;
+    return <Redirect to="/auth" />;
   }
   
   return (
-    <DashboardLayout>
-      <div className="container py-6">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold">Configuração do WhatsApp</h1>
-          <p className="text-muted-foreground">
-            Configure os parâmetros globais para integração com a Evolution API.
-          </p>
-        </div>
+    <div className="container py-6">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold">Configuração do WhatsApp</h1>
+        <p className="text-muted-foreground">
+          Configure os parâmetros globais para integração com a Evolution API.
+        </p>
+      </div>
         
         {isLoadingConfig ? (
           <div className="flex justify-center items-center h-40">
@@ -333,7 +332,6 @@ const WhatsAppConfigPage: React.FC = () => {
           </div>
         )}
       </div>
-    </DashboardLayout>
   );
 };
 
