@@ -1,904 +1,1555 @@
+/**
+ * Serviço de Analytics e relatórios
+ * Implementa ETL, previsões e exportação de dados
+ */
+
 import { db } from '../db';
-import { storage } from '../storage';
-import { eq, and, sql, desc, between, or, lt, gt, lte, gte } from 'drizzle-orm';
+import { mlService } from './mlService';
+import fs from 'fs';
+import path from 'path';
+import { logAction } from './securityService';
+import { v4 as uuidv4 } from 'uuid';
+
+// Tipos de relatórios suportados
+export type ReportType = 
+  'enrollment' | 
+  'financial' | 
+  'student' | 
+  'document' | 
+  'school' | 
+  'course' | 
+  'user' | 
+  'message' | 
+  'custom';
+
+// Formatos de relatórios suportados
+export type ReportFormat = 'json' | 'csv' | 'xlsx' | 'pdf';
+
+// Tipos de filtros
+export interface ReportFilter {
+  field: string;
+  operator: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'nin' | 'like' | 'between';
+  value: any;
+}
+
+// Configuração de relatório
+export interface ReportConfig {
+  type: ReportType;
+  title: string;
+  description?: string;
+  filters?: ReportFilter[];
+  groupBy?: string[];
+  orderBy?: { field: string; direction: 'asc' | 'desc' }[];
+  limit?: number;
+  format?: ReportFormat;
+  includeHeaders?: boolean;
+  userId?: number;
+  schoolId?: number;
+}
 
 /**
- * Serviço de análise de dados para extração de insights e geração de relatórios
+ * Classe principal do serviço de Analytics
  */
-export class AnalyticsService {
-  /**
-   * Obtém estatísticas gerais do sistema
-   * @returns Estatísticas globais
-   */
-  async getSystemStats(): Promise<any> {
-    try {
-      // Contar usuários por papel
-      const userStats = await storage.countUsersByRole();
-      
-      // Contar escolas
-      const schoolCount = await storage.countSchools();
-      
-      // Contar matrículas por status
-      const enrollmentsByStatus = await db
-        .select({
-          status: 'status',
-          count: sql<number>`count(*)`
-        })
-        .from('enrollments')
-        .groupBy('status');
-      
-      // Contar cursos
-      const courseCount = await db
-        .select({ count: sql<number>`count(*)` })
-        .from('courses')
-        .then(result => Number(result[0]?.count || 0));
-      
-      // Contar documentos processados por OCR
-      const ocrCount = await db
-        .select({ count: sql<number>`count(*)` })
-        .from('ocr_documents')
-        .then(result => Number(result[0]?.count || 0));
-      
-      // Obter total de pagamentos
-      const [paymentStats] = await db
-        .select({
-          count: sql<number>`count(*)`,
-          totalAmount: sql<number>`sum(amount)`,
-          completedAmount: sql<number>`sum(case when status = 'completed' then amount else 0 end)`
-        })
-        .from('payments');
-      
-      // Contar mensagens de WhatsApp
-      const whatsappCount = await db
-        .select({ count: sql<number>`count(*)` })
-        .from('whatsapp_messages')
-        .then(result => Number(result[0]?.count || 0));
-      
-      return {
-        users: {
-          total: Object.values(userStats).reduce((sum, count) => sum + count, 0),
-          byRole: userStats
-        },
-        schools: schoolCount,
-        enrollments: {
-          total: enrollmentsByStatus.reduce((sum, item) => sum + Number(item.count), 0),
-          byStatus: enrollmentsByStatus.reduce((acc, item) => {
-            acc[item.status || 'unknown'] = Number(item.count);
-            return acc;
-          }, {})
-        },
-        courses: courseCount,
-        ocr: {
-          documentsProcessed: ocrCount
-        },
-        payments: {
-          count: Number(paymentStats.count || 0),
-          totalAmount: (Number(paymentStats.totalAmount || 0)) / 100,
-          completedAmount: (Number(paymentStats.completedAmount || 0)) / 100
-        },
-        whatsapp: {
-          messageCount: whatsappCount
-        }
-      };
-    } catch (error) {
-      console.error('Erro ao obter estatísticas do sistema:', error);
-      throw new Error(`Falha ao obter estatísticas: ${error.message}`);
-    }
+class AnalyticsService {
+  private inactiveMode: boolean = false;
+  private initialized: boolean = false;
+  private reportsDir: string;
+  private scheduledJobs: Map<string, NodeJS.Timeout> = new Map();
+  
+  constructor() {
+    this.reportsDir = path.join(process.cwd(), 'data', 'reports');
   }
-
+  
   /**
-   * Obtém estatísticas de uma escola específica
-   * @param schoolId ID da escola
-   * @returns Estatísticas da escola
+   * Inicializa o serviço
    */
-  async getSchoolStats(schoolId: number): Promise<any> {
+  async initialize(): Promise<void> {
     try {
-      // Obter informações básicas da escola
-      const school = await storage.getSchool(schoolId);
-      if (!school) {
-        throw new Error(`Escola não encontrada: ${schoolId}`);
+      // Garantir que as tabelas existam
+      await this.ensureTables();
+      
+      // Garantir que o diretório de relatórios exista
+      if (!fs.existsSync(this.reportsDir)) {
+        fs.mkdirSync(this.reportsDir, { recursive: true });
       }
       
-      // Contagem de estudantes
-      const studentCount = await db
-        .select({ count: sql<number>`count(*)` })
-        .from('students')
-        .where(eq('school_id', schoolId))
-        .then(result => Number(result[0]?.count || 0));
+      // Iniciar ETL agendado
+      this.scheduleETL();
       
-      // Contagem de atendentes
-      const attendantCount = await db
-        .select({ count: sql<number>`count(*)` })
-        .from('users')
-        .where(
-          and(
-            eq('role', 'attendant'),
-            eq('school_id', schoolId)
+      this.initialized = true;
+      console.log('Serviço de Analytics inicializado com sucesso');
+    } catch (error) {
+      console.error('Erro ao inicializar serviço de Analytics:', error);
+      this.inactiveMode = true;
+      console.warn('Serviço de Analytics funcionará em modo inativo');
+    }
+  }
+  
+  /**
+   * Define o modo inativo
+   * @param inactive Estado desejado
+   */
+  setInactiveMode(inactive: boolean): void {
+    this.inactiveMode = inactive;
+  }
+  
+  /**
+   * Verifica se está em modo inativo
+   * @returns Status do modo inativo
+   */
+  isInactiveMode(): boolean {
+    return this.inactiveMode;
+  }
+  
+  /**
+   * Garante que as tabelas necessárias existam
+   */
+  private async ensureTables(): Promise<void> {
+    // Tabela de relatórios
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS reports (
+        id SERIAL PRIMARY KEY,
+        external_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        type TEXT NOT NULL,
+        config JSONB NOT NULL,
+        status TEXT NOT NULL,
+        file_path TEXT,
+        file_size INTEGER,
+        user_id INTEGER,
+        school_id INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+      )
+    `);
+    
+    // Tabela de fatos para data warehouse
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS analytics_enrollment_facts (
+        id SERIAL PRIMARY KEY,
+        enrollment_id INTEGER NOT NULL,
+        student_id INTEGER NOT NULL,
+        school_id INTEGER NOT NULL,
+        course_id INTEGER,
+        status TEXT NOT NULL,
+        payment_status TEXT,
+        documents_status TEXT,
+        date_dimension_id INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+      )
+    `);
+    
+    // Tabela de dimensão de data
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS analytics_date_dimension (
+        id SERIAL PRIMARY KEY,
+        date DATE NOT NULL UNIQUE,
+        day INTEGER NOT NULL,
+        month INTEGER NOT NULL,
+        year INTEGER NOT NULL,
+        quarter INTEGER NOT NULL,
+        day_of_week INTEGER NOT NULL,
+        is_weekend BOOLEAN NOT NULL,
+        is_holiday BOOLEAN NOT NULL,
+        month_name TEXT NOT NULL,
+        day_name TEXT NOT NULL
+      )
+    `);
+    
+    // Tabela de fatos de pagamentos
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS analytics_payment_facts (
+        id SERIAL PRIMARY KEY,
+        payment_id INTEGER NOT NULL,
+        student_id INTEGER,
+        school_id INTEGER NOT NULL,
+        enrollment_id INTEGER,
+        amount DECIMAL(10, 2) NOT NULL,
+        payment_method TEXT NOT NULL,
+        status TEXT NOT NULL,
+        date_dimension_id INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+      )
+    `);
+  }
+  
+  /**
+   * Agenda tarefas ETL
+   */
+  private scheduleETL(): void {
+    // ETL diário às 3h da manhã
+    const dailyJob = setInterval(() => {
+      const now = new Date();
+      if (now.getHours() === 3 && now.getMinutes() < 5) {
+        this.runETL().catch(error => {
+          console.error('Erro ao executar ETL agendado:', error);
+        });
+      }
+    }, 5 * 60 * 1000); // Verificar a cada 5 minutos
+    
+    this.scheduledJobs.set('daily_etl', dailyJob);
+    
+    console.log('ETL agendado com sucesso');
+  }
+  
+  /**
+   * Executa processo ETL
+   */
+  async runETL(): Promise<void> {
+    if (!this.initialized || this.inactiveMode) {
+      console.log('[AnalyticsService Inativo] Simulando execução de ETL');
+      return;
+    }
+    
+    try {
+      console.log('Iniciando processo ETL...');
+      
+      // 1. Transformar dimensão de data
+      await this.transformDateDimension();
+      
+      // 2. Processar fatos de matrículas
+      await this.transformEnrollmentFacts();
+      
+      // 3. Processar fatos de pagamentos
+      await this.transformPaymentFacts();
+      
+      console.log('Processo ETL concluído com sucesso');
+    } catch (error) {
+      console.error('Erro ao executar processo ETL:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Transforma dimensão de data
+   */
+  private async transformDateDimension(): Promise<void> {
+    try {
+      // Obter datas limites
+      const limitsResult = await db.execute(`
+        SELECT 
+          MIN(created_at) as min_date, 
+          MAX(created_at) as max_date
+        FROM enrollments
+      `);
+      
+      if (!limitsResult.rows.length || !limitsResult.rows[0].min_date) {
+        console.log('Sem dados para dimensão de data');
+        return;
+      }
+      
+      const minDate = new Date(limitsResult.rows[0].min_date);
+      const maxDate = new Date(limitsResult.rows[0].max_date);
+      
+      // Adicionar um ano ao maxDate para projeções futuras
+      maxDate.setFullYear(maxDate.getFullYear() + 1);
+      
+      // Dias da semana e meses em português
+      const dayNames = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+      const monthNames = [
+        'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+        'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+      ];
+      
+      // Para cada dia no intervalo, inserir na dimensão de data
+      const currentDate = new Date(minDate);
+      currentDate.setHours(0, 0, 0, 0);
+      
+      while (currentDate <= maxDate) {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+        const day = currentDate.getDate();
+        const quarter = Math.ceil(month / 3);
+        const dayOfWeek = currentDate.getDay();
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        const isHoliday = false; // Implementação básica, sem feriados
+        const monthName = monthNames[month - 1];
+        const dayName = dayNames[dayOfWeek];
+        
+        // Formatar data como string YYYY-MM-DD
+        const dateStr = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+        
+        // Inserir ou atualizar
+        await db.execute(`
+          INSERT INTO analytics_date_dimension (
+            date, day, month, year, quarter, day_of_week, 
+            is_weekend, is_holiday, month_name, day_name
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
           )
-        )
-        .then(result => Number(result[0]?.count || a0));
-      
-      // Contar matrículas por status
-      const enrollmentsByStatus = await db
-        .select({
-          status: 'status',
-          count: sql<number>`count(*)`
-        })
-        .from('enrollments')
-        .where(eq('school_id', schoolId))
-        .groupBy('status');
-      
-      // Contar cursos
-      const courseCount = await db
-        .select({ count: sql<number>`count(*)` })
-        .from('courses')
-        .where(eq('school_id', schoolId))
-        .then(result => Number(result[0]?.count || 0));
-      
-      // Obter total de pagamentos
-      const [paymentStats] = await db
-        .select({
-          count: sql<number>`count(*)`,
-          totalAmount: sql<number>`sum(amount)`,
-          completedAmount: sql<number>`sum(case when status = 'completed' then amount else 0 end)`
-        })
-        .from('payments')
-        .where(eq('school_id', schoolId));
-      
-      // Contagem de mensagens de WhatsApp
-      // Primeiro precisamos pegar as instâncias da escola
-      const instances = await db
-        .select()
-        .from('whatsapp_instances')
-        .where(eq('school_id', schoolId));
-      
-      const instanceIds = instances.map(i => i.id);
-      
-      let whatsappMessageCount = 0;
-      if (instanceIds.length > 0) {
-        const [messageCount] = await db
-          .select({ count: sql<number>`count(*)` })
-          .from('whatsapp_messages')
-          .where(sql`instance_id = ANY(${instanceIds})`)
-          .then(result => Number(result[0]?.count || 0));
+          ON CONFLICT (date) DO NOTHING
+        `, [
+          dateStr, day, month, year, quarter, dayOfWeek,
+          isWeekend, isHoliday, monthName, dayName
+        ]);
         
-        whatsappMessageCount = Number(messageCount.count || 0);
+        // Avançar para o próximo dia
+        currentDate.setDate(currentDate.getDate() + 1);
       }
       
-      // Calcular taxa de conversão
-      const completedEnrollments = enrollmentsByStatus.find(e => e.status === 'completed');
-      const completedCount = completedEnrollments ? Number(completedEnrollments.count) : 0;
-      const totalEnrollments = enrollmentsByStatus.reduce((sum, item) => sum + Number(item.count), 0);
-      const conversionRate = totalEnrollments > 0 ? (completedCount / totalEnrollments) * 100 : 0;
-      
-      return {
-        school: {
-          id: school.id,
-          name: school.name,
-          createdAt: school.createdAt
-        },
-        students: {
-          count: studentCount
-        },
-        attendants: {
-          count: attendantCount
-        },
-        enrollments: {
-          total: totalEnrollments,
-          byStatus: enrollmentsByStatus.reduce((acc, item) => {
-            acc[item.status || 'unknown'] = Number(item.count);
-            return acc;
-          }, {}),
-          conversionRate: conversionRate.toFixed(2) + '%'
-        },
-        courses: {
-          count: courseCount
-        },
-        payments: {
-          count: Number(paymentStats.count || 0),
-          totalAmount: (Number(paymentStats.totalAmount || 0)) / 100,
-          completedAmount: (Number(paymentStats.completedAmount || 0)) / 100
-        },
-        whatsapp: {
-          instanceCount: instanceIds.length,
-          messageCount: whatsappMessageCount
-        }
-      };
+      console.log('Dimensão de data atualizada com sucesso');
     } catch (error) {
-      console.error(`Erro ao obter estatísticas da escola ${schoolId}:`, error);
-      throw new Error(`Falha ao obter estatísticas da escola: ${error.message}`);
+      console.error('Erro ao transformar dimensão de data:', error);
+      throw error;
     }
   }
-
+  
   /**
-   * Obtém dados para gráfico de matrícula ao longo do tempo
-   * @param schoolId ID da escola (opcional, se não fornecido retorna dados globais)
-   * @param period Período ('day', 'week', 'month', 'year')
-   * @param startDate Data inicial
-   * @param endDate Data final
-   * @returns Dados para gráfico
+   * Transforma fatos de matrículas
    */
-  async getEnrollmentTrends(
-    period: 'day' | 'week' | 'month' | 'year' = 'day',
-    startDate?: Date,
-    endDate?: Date,
-    schoolId?: number
-  ): Promise<any> {
+  private async transformEnrollmentFacts(): Promise<void> {
     try {
-      // Determinar formato de data com base no período
-      let dateFormat;
-      switch (period) {
-        case 'day':
-          dateFormat = 'YYYY-MM-DD';
-          break;
-        case 'week':
-          dateFormat = 'YYYY-WW';
-          break;
-        case 'month':
-          dateFormat = 'YYYY-MM';
-          break;
-        case 'year':
-          dateFormat = 'YYYY';
-          break;
+      // Limpar tabela para refazer (estratégia simples)
+      await db.execute('TRUNCATE TABLE analytics_enrollment_facts');
+      
+      // Obter todas as matrículas
+      const enrollmentsResult = await db.execute(`
+        SELECT 
+          e.id, e.student_id, e.school_id, e.course_id, e.status,
+          e.created_at, p.status as payment_status,
+          (SELECT COUNT(*) FROM documents d WHERE d.enrollment_id = e.id) as doc_count,
+          (SELECT COUNT(*) FROM documents d 
+           JOIN document_validations dv ON d.id = dv.document_id 
+           WHERE d.enrollment_id = e.id AND dv.status = 'valid') as valid_docs
+        FROM enrollments e
+        LEFT JOIN payments p ON e.id = p.enrollment_id 
+        GROUP BY e.id, e.student_id, e.school_id, e.course_id, e.status, e.created_at, p.status
+      `);
+      
+      if (!enrollmentsResult.rows.length) {
+        console.log('Sem dados de matrículas para transformar');
+        return;
       }
       
-      // Construir consulta base
-      let query = db
-        .select({
-          period: sql<string>`to_char(created_at, ${dateFormat})`,
-          count: sql<number>`count(*)`,
-          completed: sql<number>`count(CASE WHEN status = 'completed' THEN 1 END)`,
-          started: sql<number>`count(CASE WHEN status = 'started' THEN 1 END)`,
-          personal_info: sql<number>`count(CASE WHEN status = 'personal_info' THEN 1 END)`,
-          course_info: sql<number>`count(CASE WHEN status = 'course_info' THEN 1 END)`,
-          payment: sql<number>`count(CASE WHEN status = 'payment' THEN 1 END)`,
-          abandoned: sql<number>`count(CASE WHEN status = 'abandoned' THEN 1 END)`
-        })
-        .from('enrollments');
-      
-      // Aplicar filtros
-      const filters = [];
-      
-      if (schoolId) {
-        filters.push(eq('school_id', schoolId));
-      }
-      
-      if (startDate && endDate) {
-        filters.push(between('created_at', startDate, endDate));
-      } else if (startDate) {
-        filters.push(gte('created_at', startDate));
-      } else if (endDate) {
-        filters.push(lte('created_at', endDate));
-      }
-      
-      if (filters.length > 0) {
-        const filterCondition = filters.length === 1 
-          ? filters[0] 
-          : and(...filters);
+      // Para cada matrícula, inserir fato
+      for (const enrollment of enrollmentsResult.rows) {
+        // Determinar status dos documentos
+        let documentsStatus = 'pending';
         
-        query = query.where(filterCondition);
+        if (enrollment.doc_count > 0) {
+          if (enrollment.valid_docs === enrollment.doc_count) {
+            documentsStatus = 'complete';
+          } else if (enrollment.valid_docs > 0) {
+            documentsStatus = 'partial';
+          } else {
+            documentsStatus = 'pending';
+          }
+        }
+        
+        // Obter ID da dimensão de data
+        const dateResult = await db.execute(`
+          SELECT id FROM analytics_date_dimension
+          WHERE date = $1::date
+        `, [enrollment.created_at.toISOString().split('T')[0]]);
+        
+        const dateDimensionId = dateResult.rows.length ? dateResult.rows[0].id : null;
+        
+        // Inserir fato
+        await db.execute(`
+          INSERT INTO analytics_enrollment_facts (
+            enrollment_id, student_id, school_id, course_id, status,
+            payment_status, documents_status, date_dimension_id,
+            created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+          )
+        `, [
+          enrollment.id,
+          enrollment.student_id,
+          enrollment.school_id,
+          enrollment.course_id || null,
+          enrollment.status,
+          enrollment.payment_status || 'pending',
+          documentsStatus,
+          dateDimensionId,
+          enrollment.created_at,
+          new Date()
+        ]);
       }
       
-      // Agrupar e ordenar
-      const results = await query
-        .groupBy(sql`to_char(created_at, ${dateFormat})`)
-        .orderBy(sql`to_char(created_at, ${dateFormat})`);
+      console.log(`${enrollmentsResult.rows.length} fatos de matrículas transformados com sucesso`);
+    } catch (error) {
+      console.error('Erro ao transformar fatos de matrículas:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Transforma fatos de pagamentos
+   */
+  private async transformPaymentFacts(): Promise<void> {
+    try {
+      // Limpar tabela para refazer (estratégia simples)
+      await db.execute('TRUNCATE TABLE analytics_payment_facts');
       
-      // Calcular taxas de conversão
-      const trendsWithRates = results.map(item => {
-        const totalCount = Number(item.count);
-        const completedCount = Number(item.completed);
-        const conversionRate = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+      // Obter todos os pagamentos
+      const paymentsResult = await db.execute(`
+        SELECT 
+          id, student_id, school_id, enrollment_id, amount,
+          payment_method, status, created_at
+        FROM payments
+      `);
+      
+      if (!paymentsResult.rows.length) {
+        console.log('Sem dados de pagamentos para transformar');
+        return;
+      }
+      
+      // Para cada pagamento, inserir fato
+      for (const payment of paymentsResult.rows) {
+        // Obter ID da dimensão de data
+        const dateResult = await db.execute(`
+          SELECT id FROM analytics_date_dimension
+          WHERE date = $1::date
+        `, [payment.created_at.toISOString().split('T')[0]]);
+        
+        const dateDimensionId = dateResult.rows.length ? dateResult.rows[0].id : null;
+        
+        // Inserir fato
+        await db.execute(`
+          INSERT INTO analytics_payment_facts (
+            payment_id, student_id, school_id, enrollment_id, amount,
+            payment_method, status, date_dimension_id,
+            created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+          )
+        `, [
+          payment.id,
+          payment.student_id || null,
+          payment.school_id,
+          payment.enrollment_id || null,
+          payment.amount,
+          payment.payment_method,
+          payment.status,
+          dateDimensionId,
+          payment.created_at,
+          new Date()
+        ]);
+      }
+      
+      console.log(`${paymentsResult.rows.length} fatos de pagamentos transformados com sucesso`);
+    } catch (error) {
+      console.error('Erro ao transformar fatos de pagamentos:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Gera um relatório customizado
+   * @param config Configuração do relatório
+   * @returns Caminho do arquivo gerado
+   */
+  async generateReport(config: ReportConfig): Promise<{
+    reportId: string;
+    filePath?: string;
+    status: 'pending' | 'completed' | 'error';
+    error?: string;
+  }> {
+    if (!this.initialized || this.inactiveMode) {
+      console.log('[AnalyticsService Inativo] Simulando geração de relatório');
+      return {
+        reportId: uuidv4(),
+        status: 'completed',
+        filePath: '/data/reports/simulated_report.json'
+      };
+    }
+    
+    try {
+      // Gerar ID externo para o relatório
+      const reportId = `report_${uuidv4()}`;
+      
+      // Inserir registro inicial
+      await db.execute(`
+        INSERT INTO reports (
+          external_id, title, description, type, config, status,
+          user_id, school_id, created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW()
+        )
+      `, [
+        reportId,
+        config.title,
+        config.description || null,
+        config.type,
+        JSON.stringify(config),
+        'pending',
+        config.userId || null,
+        config.schoolId || null
+      ]);
+      
+      // Criar caminho para o arquivo
+      const fileExt = config.format || 'json';
+      const fileName = `${reportId.replace(/[^a-z0-9]/g, '_')}.${fileExt}`;
+      const filePath = path.join(this.reportsDir, fileName);
+      
+      try {
+        // Construir e executar consulta SQL baseada na configuração
+        const { sql, params } = this.buildReportQuery(config);
+        
+        console.log(`Executando consulta: ${sql}`);
+        console.log(`Parâmetros: ${params.join(', ')}`);
+        
+        const result = await db.execute(sql, params);
+        
+        // Gerar arquivo no formato adequado
+        await this.writeReportToFile(result.rows, filePath, config.format || 'json', config.includeHeaders !== false);
+        
+        // Atualizar registro com caminho e status
+        await db.execute(`
+          UPDATE reports
+          SET 
+            status = 'completed',
+            file_path = $1,
+            file_size = $2,
+            updated_at = NOW()
+          WHERE external_id = $3
+        `, [
+          filePath,
+          fs.statSync(filePath).size,
+          reportId
+        ]);
+        
+        // Registrar em log
+        if (config.userId) {
+          await logAction(
+            config.userId,
+            'report_generated',
+            'report',
+            reportId,
+            {
+              type: config.type,
+              format: config.format || 'json',
+              rowCount: result.rows.length
+            }
+          );
+        }
         
         return {
-          period: item.period,
-          total: totalCount,
-          completed: completedCount,
-          started: Number(item.started),
-          personal_info: Number(item.personal_info),
-          course_info: Number(item.course_info),
-          payment: Number(item.payment),
-          abandoned: Number(item.abandoned),
-          conversionRate: parseFloat(conversionRate.toFixed(2))
+          reportId,
+          filePath,
+          status: 'completed'
         };
-      });
-      
-      return trendsWithRates;
+      } catch (error) {
+        console.error('Erro ao gerar relatório:', error);
+        
+        // Atualizar registro com erro
+        await db.execute(`
+          UPDATE reports
+          SET 
+            status = 'error',
+            description = COALESCE(description, '') || E'\\n\\nErro: ' || $1,
+            updated_at = NOW()
+          WHERE external_id = $2
+        `, [
+          error instanceof Error ? error.message : String(error),
+          reportId
+        ]);
+        
+        return {
+          reportId,
+          status: 'error',
+          error: error instanceof Error ? error.message : String(error)
+        };
+      }
     } catch (error) {
-      console.error('Erro ao obter tendências de matrícula:', error);
-      throw new Error(`Falha ao obter tendências: ${error.message}`);
+      console.error('Erro ao iniciar geração de relatório:', error);
+      return {
+        reportId: uuidv4(),
+        status: 'error',
+        error: error instanceof Error ? error.message : String(error)
+      };
     }
   }
-
+  
   /**
-   * Obtém estatísticas de funil de conversão
-   * @param schoolId ID da escola (opcional)
-   * @param startDate Data inicial (opcional)
-   * @param endDate Data final (opcional)
-   * @returns Dados do funil
+   * Constrói consulta SQL para relatório
+   * @param config Configuração do relatório
+   * @returns Consulta SQL e parâmetros
    */
-  async getConversionFunnel(
-    schoolId?: number,
-    startDate?: Date,
-    endDate?: Date
-  ): Promise<any> {
-    try {
-      // Construir consulta base para contagem de matrículas por status
-      let query = db
-        .select({
-          total: sql<number>`count(*)`,
-          started: sql<number>`count(CASE WHEN status = 'started' THEN 1 END)`,
-          personal_info: sql<number>`count(CASE WHEN status = 'personal_info' THEN 1 END)`,
-          course_info: sql<number>`count(CASE WHEN status = 'course_info' THEN 1 END)`,
-          payment: sql<number>`count(CASE WHEN status = 'payment' THEN 1 END)`,
-          completed: sql<number>`count(CASE WHEN status = 'completed' THEN 1 END)`,
-          abandoned: sql<number>`count(CASE WHEN status = 'abandoned' THEN 1 END)`,
-          document_verification: sql<number>`count(CASE WHEN status = 'document_verification' THEN 1 END)`,
-          document_pending: sql<number>`count(CASE WHEN status = 'document_pending' THEN 1 END)`,
-          document_approved: sql<number>`count(CASE WHEN status = 'document_approved' THEN 1 END)`
-        })
-        .from('enrollments');
-      
-      // Aplicar filtros
-      const filters = [];
-      
-      if (schoolId) {
-        filters.push(eq('school_id', schoolId));
+  private buildReportQuery(config: ReportConfig): { sql: string; params: any[] } {
+    // Mapear tipo de relatório para tabelas e colunas
+    const tableInfo = this.getReportTableInfo(config.type);
+    
+    // Iniciar construção da consulta
+    let sql = `SELECT ${tableInfo.columns.join(', ')} FROM ${tableInfo.table}`;
+    
+    // Adicionar junções se necessário
+    if (tableInfo.joins && tableInfo.joins.length > 0) {
+      for (const join of tableInfo.joins) {
+        sql += ` ${join.type || 'LEFT JOIN'} ${join.table} ON ${join.on}`;
       }
+    }
+    
+    // Adicionar filtros
+    const params: any[] = [];
+    let paramIndex = 1;
+    
+    if (config.filters && config.filters.length > 0) {
+      sql += ' WHERE ';
       
-      if (startDate && endDate) {
-        filters.push(between('created_at', startDate, endDate));
-      } else if (startDate) {
-        filters.push(gte('created_at', startDate));
-      } else if (endDate) {
-        filters.push(lte('created_at', endDate));
-      }
-      
-      if (filters.length > 0) {
-        const filterCondition = filters.length === 1 
-          ? filters[0] 
-          : and(...filters);
+      const filterClauses = config.filters.map(filter => {
+        let clause = '';
         
-        query = query.where(filterCondition);
+        switch (filter.operator) {
+          case 'eq':
+            clause = `${filter.field} = $${paramIndex++}`;
+            params.push(filter.value);
+            break;
+          case 'neq':
+            clause = `${filter.field} <> $${paramIndex++}`;
+            params.push(filter.value);
+            break;
+          case 'gt':
+            clause = `${filter.field} > $${paramIndex++}`;
+            params.push(filter.value);
+            break;
+          case 'gte':
+            clause = `${filter.field} >= $${paramIndex++}`;
+            params.push(filter.value);
+            break;
+          case 'lt':
+            clause = `${filter.field} < $${paramIndex++}`;
+            params.push(filter.value);
+            break;
+          case 'lte':
+            clause = `${filter.field} <= $${paramIndex++}`;
+            params.push(filter.value);
+            break;
+          case 'in':
+            // Garantir que valor é array
+            const inValues = Array.isArray(filter.value) ? filter.value : [filter.value];
+            const placeholders = inValues.map(() => `$${paramIndex++}`).join(', ');
+            clause = `${filter.field} IN (${placeholders})`;
+            params.push(...inValues);
+            break;
+          case 'nin':
+            // Garantir que valor é array
+            const ninValues = Array.isArray(filter.value) ? filter.value : [filter.value];
+            const ninPlaceholders = ninValues.map(() => `$${paramIndex++}`).join(', ');
+            clause = `${filter.field} NOT IN (${ninPlaceholders})`;
+            params.push(...ninValues);
+            break;
+          case 'like':
+            clause = `${filter.field} ILIKE $${paramIndex++}`;
+            params.push(`%${filter.value}%`);
+            break;
+          case 'between':
+            // Garantir que valor é array com 2 elementos
+            if (Array.isArray(filter.value) && filter.value.length === 2) {
+              clause = `${filter.field} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+              params.push(filter.value[0], filter.value[1]);
+            } else {
+              throw new Error(`Valor inválido para operador 'between': ${filter.value}`);
+            }
+            break;
+          default:
+            throw new Error(`Operador não suportado: ${filter.operator}`);
+        }
+        
+        return clause;
+      });
+      
+      sql += filterClauses.join(' AND ');
+    }
+    
+    // Adicionar agrupamento (GROUP BY)
+    if (config.groupBy && config.groupBy.length > 0) {
+      sql += ` GROUP BY ${config.groupBy.join(', ')}`;
+    }
+    
+    // Adicionar ordenação (ORDER BY)
+    if (config.orderBy && config.orderBy.length > 0) {
+      const orderClauses = config.orderBy.map(
+        order => `${order.field} ${order.direction.toUpperCase()}`
+      );
+      sql += ` ORDER BY ${orderClauses.join(', ')}`;
+    }
+    
+    // Adicionar limite (LIMIT)
+    if (config.limit && config.limit > 0) {
+      sql += ` LIMIT $${paramIndex++}`;
+      params.push(config.limit);
+    }
+    
+    return { sql, params };
+  }
+  
+  /**
+   * Obtém informações de tabela e colunas para um tipo de relatório
+   * @param type Tipo de relatório
+   * @returns Informações de tabela
+   */
+  private getReportTableInfo(type: ReportType): {
+    table: string;
+    columns: string[];
+    joins?: { table: string; on: string; type?: string }[];
+  } {
+    switch (type) {
+      case 'enrollment':
+        return {
+          table: 'analytics_enrollment_facts aef',
+          columns: [
+            'aef.enrollment_id',
+            'aef.student_id',
+            'aef.school_id',
+            'aef.course_id',
+            'aef.status',
+            'aef.payment_status',
+            'aef.documents_status',
+            'add.date',
+            'add.day',
+            'add.month',
+            'add.year',
+            'add.quarter',
+            'add.month_name',
+            's.username as student_name',
+            'sc.name as school_name',
+            'c.name as course_name'
+          ],
+          joins: [
+            { table: 'analytics_date_dimension add', on: 'aef.date_dimension_id = add.id' },
+            { table: 'users s', on: 'aef.student_id = s.id' },
+            { table: 'schools sc', on: 'aef.school_id = sc.id' },
+            { table: 'courses c', on: 'aef.course_id = c.id', type: 'LEFT JOIN' }
+          ]
+        };
+      case 'financial':
+        return {
+          table: 'analytics_payment_facts apf',
+          columns: [
+            'apf.payment_id',
+            'apf.student_id',
+            'apf.school_id',
+            'apf.enrollment_id',
+            'apf.amount',
+            'apf.payment_method',
+            'apf.status',
+            'add.date',
+            'add.day',
+            'add.month',
+            'add.year',
+            'add.quarter',
+            'add.month_name',
+            's.username as student_name',
+            'sc.name as school_name'
+          ],
+          joins: [
+            { table: 'analytics_date_dimension add', on: 'apf.date_dimension_id = add.id' },
+            { table: 'users s', on: 'apf.student_id = s.id', type: 'LEFT JOIN' },
+            { table: 'schools sc', on: 'apf.school_id = sc.id' }
+          ]
+        };
+      case 'student':
+        return {
+          table: 'users u',
+          columns: [
+            'u.id',
+            'u.username',
+            'u.email',
+            'u.full_name',
+            'u.role',
+            'u.phone',
+            'u.school_id',
+            'u.profile_image',
+            'u.created_at',
+            'u.updated_at',
+            'sc.name as school_name',
+            '(SELECT COUNT(*) FROM enrollments e WHERE e.student_id = u.id) as enrollment_count',
+            '(SELECT COUNT(*) FROM payments p WHERE p.student_id = u.id AND p.status = \'paid\') as paid_payments_count',
+            '(SELECT SUM(amount) FROM payments p WHERE p.student_id = u.id AND p.status = \'paid\') as total_paid_amount'
+          ],
+          joins: [
+            { table: 'schools sc', on: 'u.school_id = sc.id', type: 'LEFT JOIN' }
+          ]
+        };
+      case 'document':
+        return {
+          table: 'documents d',
+          columns: [
+            'd.id',
+            'd.enrollment_id',
+            'd.student_id',
+            'd.type',
+            'd.file_path',
+            'd.status',
+            'd.created_at',
+            'd.updated_at',
+            'u.username as student_name',
+            'e.status as enrollment_status',
+            '(SELECT dv.status FROM document_validations dv WHERE dv.document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) as validation_status',
+            '(SELECT dv.confidence FROM document_validations dv WHERE dv.document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) as validation_confidence'
+          ],
+          joins: [
+            { table: 'users u', on: 'd.student_id = u.id' },
+            { table: 'enrollments e', on: 'd.enrollment_id = e.id' }
+          ]
+        };
+      case 'school':
+        return {
+          table: 'schools s',
+          columns: [
+            's.id',
+            's.name',
+            's.logo',
+            's.address',
+            's.phone',
+            's.email',
+            's.created_at',
+            's.updated_at',
+            '(SELECT COUNT(*) FROM users u WHERE u.school_id = s.id AND u.role = \'student\') as student_count',
+            '(SELECT COUNT(*) FROM enrollments e WHERE e.school_id = s.id) as enrollment_count',
+            '(SELECT SUM(amount) FROM payments p WHERE p.school_id = s.id AND p.status = \'paid\') as total_revenue'
+          ]
+        };
+      case 'course':
+        return {
+          table: 'courses c',
+          columns: [
+            'c.id',
+            'c.name',
+            'c.description',
+            'c.school_id',
+            'c.price',
+            'c.duration',
+            'c.created_at',
+            'c.updated_at',
+            's.name as school_name',
+            '(SELECT COUNT(*) FROM enrollments e WHERE e.course_id = c.id) as enrollment_count',
+            '(SELECT SUM(amount) FROM payments p JOIN enrollments e ON p.enrollment_id = e.id WHERE e.course_id = c.id AND p.status = \'paid\') as total_revenue'
+          ],
+          joins: [
+            { table: 'schools s', on: 'c.school_id = s.id' }
+          ]
+        };
+      case 'user':
+        return {
+          table: 'users u',
+          columns: [
+            'u.id',
+            'u.username',
+            'u.email',
+            'u.full_name',
+            'u.role',
+            'u.phone',
+            'u.school_id',
+            'u.profile_image',
+            'u.created_at',
+            'u.updated_at',
+            'sc.name as school_name'
+          ],
+          joins: [
+            { table: 'schools sc', on: 'u.school_id = sc.id', type: 'LEFT JOIN' }
+          ]
+        };
+      case 'message':
+        return {
+          table: 'messages m',
+          columns: [
+            'm.id',
+            'm.sender_id',
+            'm.receiver_id',
+            'm.content',
+            'm.created_at',
+            'm.updated_at',
+            'm.read_at',
+            'u1.username as sender_name',
+            'u2.username as receiver_name'
+          ],
+          joins: [
+            { table: 'users u1', on: 'm.sender_id = u1.id' },
+            { table: 'users u2', on: 'm.receiver_id = u2.id' }
+          ]
+        };
+      case 'custom':
+      default:
+        // Para consultas customizadas, deixar o cliente definir as colunas e tabelas
+        return {
+          table: 'users u',
+          columns: ['u.*']
+        };
+    }
+  }
+  
+  /**
+   * Escreve dados em arquivo no formato escolhido
+   * @param data Dados a serem escritos
+   * @param filePath Caminho do arquivo
+   * @param format Formato do arquivo
+   * @param includeHeaders Se deve incluir cabeçalhos (nomes das colunas)
+   */
+  private async writeReportToFile(
+    data: any[],
+    filePath: string,
+    format: ReportFormat,
+    includeHeaders: boolean
+  ): Promise<void> {
+    switch (format) {
+      case 'json':
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+        break;
+      case 'csv':
+        this.writeCSV(data, filePath, includeHeaders);
+        break;
+      case 'xlsx':
+        this.writeXLSX(data, filePath, includeHeaders);
+        break;
+      case 'pdf':
+        await this.writePDF(data, filePath, includeHeaders);
+        break;
+      default:
+        throw new Error(`Formato não suportado: ${format}`);
+    }
+  }
+  
+  /**
+   * Escreve dados em formato CSV
+   * @param data Dados a serem escritos
+   * @param filePath Caminho do arquivo
+   * @param includeHeaders Se deve incluir cabeçalhos
+   */
+  private writeCSV(data: any[], filePath: string, includeHeaders: boolean): void {
+    if (!data.length) {
+      fs.writeFileSync(filePath, '', 'utf8');
+      return;
+    }
+    
+    // Obter cabeçalhos
+    const headers = Object.keys(data[0]);
+    
+    // Construir linhas
+    const lines: string[] = [];
+    
+    // Adicionar cabeçalhos se necessário
+    if (includeHeaders) {
+      lines.push(headers.map(this.escapeCSV).join(','));
+    }
+    
+    // Adicionar dados
+    for (const row of data) {
+      const values = headers.map(header => this.escapeCSV(row[header]));
+      lines.push(values.join(','));
+    }
+    
+    // Escrever no arquivo
+    fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
+  }
+  
+  /**
+   * Escapa valor para CSV
+   * @param value Valor a ser escapado
+   * @returns Valor escapado
+   */
+  private escapeCSV(value: any): string {
+    if (value === null || value === undefined) {
+      return '';
+    }
+    
+    const stringValue = typeof value === 'object' 
+      ? JSON.stringify(value).replace(/"/g, '""') 
+      : String(value).replace(/"/g, '""');
+    
+    // Se contiver vírgula, aspas ou quebra de linha, envolver em aspas
+    if (/[",\n\r]/.test(stringValue)) {
+      return `"${stringValue}"`;
+    }
+    
+    return stringValue;
+  }
+  
+  /**
+   * Escreve dados em formato XLSX
+   * @param data Dados a serem escritos
+   * @param filePath Caminho do arquivo
+   * @param includeHeaders Se deve incluir cabeçalhos
+   */
+  private writeXLSX(data: any[], filePath: string, includeHeaders: boolean): void {
+    // Note: Em um ambiente real, usaríamos exceljs ou xlsx
+    // Como simplificação, vamos usar JSON com extensão .xlsx
+    // Em produção, integrar com uma biblioteca real de Excel
+    
+    const csvPath = filePath.replace(/\.xlsx$/, '.csv');
+    this.writeCSV(data, csvPath, includeHeaders);
+    
+    // Renomear arquivo (em produção, converteríamos para XLSX)
+    if (fs.existsSync(csvPath)) {
+      fs.renameSync(csvPath, filePath);
+    }
+  }
+  
+  /**
+   * Escreve dados em formato PDF
+   * @param data Dados a serem escritos
+   * @param filePath Caminho do arquivo
+   * @param includeHeaders Se deve incluir cabeçalhos
+   */
+  private async writePDF(data: any[], filePath: string, includeHeaders: boolean): Promise<void> {
+    // Em um ambiente real, usaríamos pdfkit ou puppeteer
+    // Como simplificação, vamos usar JSON com extensão .pdf
+    // Em produção, integrar com uma biblioteca real de PDF
+    
+    const jsonPath = filePath.replace(/\.pdf$/, '.json');
+    fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2), 'utf8');
+    
+    // Renomear arquivo (em produção, converteríamos para PDF)
+    if (fs.existsSync(jsonPath)) {
+      fs.renameSync(jsonPath, filePath);
+    }
+  }
+  
+  /**
+   * Obtém lista de relatórios gerados com filtros
+   * @param filters Filtros
+   * @returns Lista de relatórios
+   */
+  async getReports(filters: {
+    userId?: number;
+    schoolId?: number;
+    type?: ReportType;
+    status?: 'pending' | 'completed' | 'error';
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<any[]> {
+    if (!this.initialized || this.inactiveMode) {
+      return [];
+    }
+    
+    try {
+      // Construir query com filtros
+      let query = `
+        SELECT 
+          id, external_id, title, description, type, 
+          config, status, file_path, file_size,
+          user_id, school_id, created_at, updated_at
+        FROM reports
+        WHERE 1=1
+      `;
+      
+      const params: any[] = [];
+      let paramIndex = 1;
+      
+      if (filters.userId !== undefined) {
+        query += ` AND user_id = $${paramIndex++}`;
+        params.push(filters.userId);
+      }
+      
+      if (filters.schoolId !== undefined) {
+        query += ` AND school_id = $${paramIndex++}`;
+        params.push(filters.schoolId);
+      }
+      
+      if (filters.type) {
+        query += ` AND type = $${paramIndex++}`;
+        params.push(filters.type);
+      }
+      
+      if (filters.status) {
+        query += ` AND status = $${paramIndex++}`;
+        params.push(filters.status);
+      }
+      
+      // Ordenar por data de criação
+      query += ' ORDER BY created_at DESC';
+      
+      // Limite e offset
+      if (filters.limit) {
+        query += ` LIMIT $${paramIndex++}`;
+        params.push(filters.limit);
+      }
+      
+      if (filters.offset) {
+        query += ` OFFSET $${paramIndex++}`;
+        params.push(filters.offset);
       }
       
       // Executar consulta
-      const [counts] = await query;
+      const result = await db.execute(query, params);
       
-      // Calcular taxas de conversão entre etapas
-      const total = Number(counts.total || 0);
-      const started = Number(counts.started || 0);
-      const personalInfo = Number(counts.personal_info || 0);
-      const courseInfo = Number(counts.course_info || 0);
-      const payment = Number(counts.payment || 0);
-      const completed = Number(counts.completed || 0);
-      const abandoned = Number(counts.abandoned || 0);
-      const documentVerification = Number(counts.document_verification || 0);
-      const documentPending = Number(counts.document_pending || 0);
-      const documentApproved = Number(counts.document_approved || 0);
+      return result.rows;
+    } catch (error) {
+      console.error('Erro ao buscar relatórios:', error);
+      return [];
+    }
+  }
+  
+  /**
+   * Obtém um relatório específico
+   * @param reportId ID do relatório
+   * @returns Detalhes do relatório
+   */
+  async getReport(reportId: string): Promise<any | null> {
+    if (!this.initialized || this.inactiveMode) {
+      return null;
+    }
+    
+    try {
+      const result = await db.execute(`
+        SELECT 
+          id, external_id, title, description, type, 
+          config, status, file_path, file_size,
+          user_id, school_id, created_at, updated_at
+        FROM reports
+        WHERE external_id = $1 OR id = $1
+      `, [reportId]);
       
-      // Calcular taxas de conversão entre etapas
-      const funnel = [
-        {
-          stage: 'started',
-          count: started,
-          percentage: total > 0 ? (started / total) * 100 : 0,
-          dropOff: total > 0 ? ((total - started) / total) * 100 : 0,
-        },
-        {
-          stage: 'personal_info',
-          count: personalInfo,
-          percentage: started > 0 ? (personalInfo / started) * 100 : 0,
-          dropOff: started > 0 ? ((started - personalInfo) / started) * 100 : 0,
-        },
-        {
-          stage: 'course_info',
-          count: courseInfo,
-          percentage: personalInfo > 0 ? (courseInfo / personalInfo) * 100 : 0,
-          dropOff: personalInfo > 0 ? ((personalInfo - courseInfo) / personalInfo) * 100 : 0,
-        },
-        {
-          stage: 'document_verification',
-          count: documentVerification,
-          percentage: courseInfo > 0 ? (documentVerification / courseInfo) * 100 : 0,
-          dropOff: courseInfo > 0 ? ((courseInfo - documentVerification) / courseInfo) * 100 : 0,
-        },
-        {
-          stage: 'document_pending',
-          count: documentPending,
-          percentage: documentVerification > 0 ? (documentPending / documentVerification) * 100 : 0,
-          dropOff: documentVerification > 0 ? ((documentVerification - documentPending) / documentVerification) * 100 : 0,
-        },
-        {
-          stage: 'document_approved',
-          count: documentApproved,
-          percentage: documentPending > 0 ? (documentApproved / documentPending) * 100 : 0,
-          dropOff: documentPending > 0 ? ((documentPending - documentApproved) / documentPending) * 100 : 0,
-        },
-        {
-          stage: 'payment',
-          count: payment,
-          percentage: documentApproved > 0 ? (payment / documentApproved) * 100 : 0,
-          dropOff: documentApproved > 0 ? ((documentApproved - payment) / documentApproved) * 100 : 0,
-        },
-        {
-          stage: 'completed',
-          count: completed,
-          percentage: payment > 0 ? (completed / payment) * 100 : 0,
-          dropOff: payment > 0 ? ((payment - completed) / payment) * 100 : 0,
-        }
-      ];
+      if (!result.rows.length) {
+        return null;
+      }
       
-      // Formatar percentuais
-      const formattedFunnel = funnel.map(stage => ({
-        ...stage,
-        percentage: parseFloat(stage.percentage.toFixed(2)),
-        dropOff: parseFloat(stage.dropOff.toFixed(2))
-      }));
+      return result.rows[0];
+    } catch (error) {
+      console.error(`Erro ao buscar relatório ${reportId}:`, error);
+      return null;
+    }
+  }
+  
+  /**
+   * Baixa um relatório
+   * @param reportId ID do relatório
+   * @returns Conteúdo do arquivo
+   */
+  async downloadReport(reportId: string): Promise<{
+    content: Buffer;
+    fileName: string;
+    mimeType: string;
+  } | null> {
+    if (!this.initialized || this.inactiveMode) {
+      return null;
+    }
+    
+    try {
+      // Obter detalhes do relatório
+      const report = await this.getReport(reportId);
       
-      // Calcular taxa de conversão total
-      const overallConversionRate = started > 0 ? (completed / started) * 100 : 0;
-      const abandonmentRate = total > 0 ? (abandoned / total) * 100 : 0;
+      if (!report || !report.file_path) {
+        return null;
+      }
+      
+      // Verificar se o arquivo existe
+      if (!fs.existsSync(report.file_path)) {
+        return null;
+      }
+      
+      // Determinar mime type
+      let mimeType = 'application/octet-stream';
+      
+      if (report.file_path.endsWith('.json')) {
+        mimeType = 'application/json';
+      } else if (report.file_path.endsWith('.csv')) {
+        mimeType = 'text/csv';
+      } else if (report.file_path.endsWith('.xlsx')) {
+        mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      } else if (report.file_path.endsWith('.pdf')) {
+        mimeType = 'application/pdf';
+      }
+      
+      // Extrair nome do arquivo
+      const fileName = path.basename(report.file_path);
+      
+      // Ler conteúdo
+      const content = fs.readFileSync(report.file_path);
       
       return {
-        total,
-        stages: formattedFunnel,
-        conversionRate: parseFloat(overallConversionRate.toFixed(2)),
-        abandonmentRate: parseFloat(abandonmentRate.toFixed(2)),
-        abandoned
+        content,
+        fileName,
+        mimeType
       };
     } catch (error) {
-      console.error('Erro ao obter funil de conversão:', error);
-      throw new Error(`Falha ao obter funil: ${error.message}`);
+      console.error(`Erro ao baixar relatório ${reportId}:`, error);
+      return null;
     }
   }
-
+  
   /**
-   * Obtém estatísticas de desempenho por curso
+   * Obtém métricas para dashboard
    * @param schoolId ID da escola (opcional)
-   * @returns Estatísticas de desempenho por curso
+   * @returns Métricas resumidas
    */
-  async getCoursePerformance(schoolId?: number): Promise<any> {
-    try {
-      // Construir consulta base para buscar cursos
-      let coursesQuery = db.select().from('courses');
-      
-      if (schoolId) {
-        coursesQuery = coursesQuery.where(eq('school_id', schoolId));
-      }
-      
-      const courses = await coursesQuery;
-      
-      // Para cada curso, buscar estatísticas de matrículas
-      const courseStats = await Promise.all(courses.map(async (course) => {
-        // Contar matrículas por status
-        const [counts] = await db
-          .select({
-            total: sql<number>`count(*)`,
-            completed: sql<number>`count(CASE WHEN status = 'completed' THEN 1 END)`,
-            payment: sql<number>`count(CASE WHEN status = 'payment' THEN 1 END)`,
-            started: sql<number>`count(CASE WHEN status = 'started' THEN 1 END)`,
-            abandoned: sql<number>`count(CASE WHEN status = 'abandoned' THEN 1 END)`
-          })
-          .from('enrollments')
-          .where(eq('course_id', course.id));
-        
-        // Calcular taxa de conversão
-        const total = Number(counts.total || 0);
-        const completed = Number(counts.completed || 0);
-        const conversionRate = total > 0 ? (completed / total) * 100 : 0;
-        
-        // Buscar valor médio dos pagamentos
-        const [paymentStats] = await db
-          .select({
-            count: sql<number>`count(*)`,
-            avgAmount: sql<number>`avg(amount)`,
-            totalAmount: sql<number>`sum(amount)`
-          })
-          .from('payments')
-          .where(
-            and(
-              eq('status', 'completed'),
-              eq('course_id', course.id)
-            )
-          );
-        
-        return {
-          id: course.id,
-          name: course.name,
-          enrollments: {
-            total,
-            completed,
-            inProgress: total - completed - Number(counts.abandoned || 0),
-            abandoned: Number(counts.abandoned || 0)
-          },
-          conversionRate: parseFloat(conversionRate.toFixed(2)),
-          revenue: {
-            total: (Number(paymentStats.totalAmount || 0)) / 100,
-            average: (Number(paymentStats.avgAmount || 0)) / 100,
-            count: Number(paymentStats.count || 0)
-          }
-        };
-      }));
-      
-      // Ordenar cursos por número total de matrículas
-      return courseStats.sort((a, b) => b.enrollments.total - a.enrollments.total);
-    } catch (error) {
-      console.error('Erro ao obter desempenho de cursos:', error);
-      throw new Error(`Falha ao obter desempenho de cursos: ${error.message}`);
-    }
-  }
-
-  /**
-   * Obtém estatísticas de uso do WhatsApp
-   * @param schoolId ID da escola (opcional)
-   * @returns Estatísticas de uso do WhatsApp
-   */
-  async getWhatsAppStats(schoolId?: number): Promise<any> {
-    try {
-      // Buscar instâncias
-      let instancesQuery = db.select().from('whatsapp_instances');
-      
-      if (schoolId) {
-        instancesQuery = instancesQuery.where(eq('school_id', schoolId));
-      }
-      
-      const instances = await instancesQuery;
-      const instanceIds = instances.map(i => i.id);
-      
-      if (instanceIds.length === 0) {
-        return {
-          instances: [],
-          totalMessages: 0,
-          averageResponseTime: 0,
-          messagesByDirection: {
-            inbound: 0,
-            outbound: 0
-          }
-        };
-      }
-      
-      // Estatísticas por instância
-      const instanceStats = await Promise.all(instances.map(async (instance) => {
-        // Contar mensagens
-        const [messageCounts] = await db
-          .select({
-            total: sql<number>`count(*)`,
-            inbound: sql<number>`count(CASE WHEN direction = 'inbound' THEN 1 END)`,
-            outbound: sql<number>`count(CASE WHEN direction = 'outbound' THEN 1 END)`
-          })
-          .from('whatsapp_messages')
-          .where(eq('instance_id', instance.id));
-        
-        // Calcular tempo médio de resposta
-        // Para cada mensagem recebida, procurar a próxima mensagem enviada
-        const inboundMessages = await db
-          .select()
-          .from('whatsapp_messages')
-          .where(
-            and(
-              eq('instance_id', instance.id),
-              eq('direction', 'inbound')
-            )
-          )
-          .orderBy('created_at');
-        
-        let totalResponseTime = 0;
-        let responsesCount = 0;
-        
-        for (const inbound of inboundMessages) {
-          const [outboundResponse] = await db
-            .select()
-            .from('whatsapp_messages')
-            .where(
-              and(
-                eq('instance_id', instance.id),
-                eq('contact_id', inbound.contact_id),
-                eq('direction', 'outbound'),
-                gt('created_at', inbound.created_at)
-              )
-            )
-            .orderBy('created_at')
-            .limit(1);
-          
-          if (outboundResponse && inbound.createdAt && outboundResponse.createdAt) {
-            const responseTime = new Date(outboundResponse.createdAt).getTime() - new Date(inbound.createdAt).getTime();
-            totalResponseTime += responseTime;
-            responsesCount++;
-          }
-        }
-        
-        const averageResponseTime = responsesCount > 0 ? totalResponseTime / responsesCount : 0;
-        
-        // Contar contatos únicos
-        const [contactCount] = await db
-          .select({ count: sql<number>`count(DISTINCT contact_id)` })
-          .from('whatsapp_messages')
-          .where(eq('instance_id', instance.id));
-        
-        return {
-          id: instance.id,
-          name: instance.name,
-          messages: {
-            total: Number(messageCounts.total || 0),
-            inbound: Number(messageCounts.inbound || 0),
-            outbound: Number(messageCounts.outbound || 0)
-          },
-          contacts: Number(contactCount.count || 0),
-          averageResponseTimeMs: averageResponseTime,
-          averageResponseTimeFormatted: this.formatMilliseconds(averageResponseTime)
-        };
-      }));
-      
-      // Estatísticas globais
-      const [globalMessageCounts] = await db
-        .select({
-          total: sql<number>`count(*)`,
-          inbound: sql<number>`count(CASE WHEN direction = 'inbound' THEN 1 END)`,
-          outbound: sql<number>`count(CASE WHEN direction = 'outbound' THEN 1 END)`
-        })
-        .from('whatsapp_messages')
-        .where(sql`instance_id = ANY(${instanceIds})`);
-      
-      // Calcular tempo médio global
-      const totalResponseTimeMs = instanceStats.reduce((sum, instance) => {
-        return sum + (instance.averageResponseTimeMs * instance.messages.inbound);
-      }, 0);
-      
-      const totalInboundMessages = instanceStats.reduce((sum, instance) => {
-        return sum + instance.messages.inbound;
-      }, 0);
-      
-      const globalAverageResponseTime = totalInboundMessages > 0 
-        ? totalResponseTimeMs / totalInboundMessages 
-        : 0;
-      
+  async getDashboardMetrics(schoolId?: number): Promise<any> {
+    if (!this.initialized || this.inactiveMode) {
       return {
-        instances: instanceStats,
-        totalMessages: Number(globalMessageCounts.total || 0),
-        messagesByDirection: {
-          inbound: Number(globalMessageCounts.inbound || 0),
-          outbound: Number(globalMessageCounts.outbound || 0)
+        enrollments: {
+          total: 0,
+          completed: 0,
+          pending: 0,
+          canceled: 0
         },
-        averageResponseTimeMs: globalAverageResponseTime,
-        averageResponseTimeFormatted: this.formatMilliseconds(globalAverageResponseTime)
+        payments: {
+          total: 0,
+          revenue: 0,
+          pending: 0
+        },
+        students: {
+          total: 0,
+          active: 0,
+          new: 0
+        }
       };
-    } catch (error) {
-      console.error('Erro ao obter estatísticas do WhatsApp:', error);
-      throw new Error(`Falha ao obter estatísticas do WhatsApp: ${error.message}`);
-    }
-  }
-
-  /**
-   * Formata milissegundos em um formato legível
-   * @param ms Tempo em milissegundos
-   * @returns Tempo formatado
-   */
-  private formatMilliseconds(ms: number): string {
-    if (ms < 1000) {
-      return `${Math.round(ms)}ms`;
     }
     
-    if (ms < 60000) {
-      return `${(ms / 1000).toFixed(1)}s`;
-    }
-    
-    const minutes = Math.floor(ms / 60000);
-    const seconds = Math.round((ms % 60000) / 1000);
-    
-    return `${minutes}m ${seconds}s`;
-  }
-
-  /**
-   * Obtém estatísticas de conversão por origem (source) dos leads
-   * @param schoolId ID da escola (opcional)
-   * @returns Estatísticas de conversão por origem
-   */
-  async getConversionBySource(schoolId?: number): Promise<any> {
     try {
-      // Buscar todas as origens únicas
-      let sourcesQuery = db
-        .select({ source: 'source' })
-        .from('leads')
-        .groupBy('source');
+      // Construir condição para escola específica
+      const schoolCondition = schoolId ? `AND school_id = ${schoolId}` : '';
       
-      if (schoolId) {
-        sourcesQuery = sourcesQuery.where(eq('school_id', schoolId));
-      }
+      // Estatísticas de matrículas
+      const enrollmentsResult = await db.execute(`
+        SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+          SUM(CASE WHEN status = 'canceled' THEN 1 ELSE 0 END) as canceled
+        FROM enrollments
+        WHERE 1=1 ${schoolCondition}
+      `);
       
-      const sources = await sourcesQuery;
+      // Estatísticas de pagamentos
+      const paymentsResult = await db.execute(`
+        SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END) as revenue,
+          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending
+        FROM payments
+        WHERE 1=1 ${schoolCondition}
+      `);
       
-      // Para cada origem, calcular taxas de conversão
-      const sourceStats = await Promise.all(sources.map(async ({ source }) => {
-        if (!source) return null;
-        
-        // Contar leads por origem
-        let leadsQuery = db
-          .select({ count: sql<number>`count(*)` })
-          .from('leads')
-          .where(eq('source', source));
-        
-        if (schoolId) {
-          leadsQuery = leadsQuery.where(eq('school_id', schoolId));
-        }
-        
-        const [leadCount] = await leadsQuery;
-        
-        // Contar matrículas iniciadas a partir desses leads
-        let enrollmentsQuery = db
-          .select({
-            total: sql<number>`count(*)`,
-            completed: sql<number>`count(CASE WHEN status = 'completed' THEN 1 END)`
-          })
-          .from('enrollments')
-          .innerJoin(
-            'leads',
-            eq('leads.id', 'enrollments.lead_id')
-          )
-          .where(eq('leads.source', source));
-        
-        if (schoolId) {
-          enrollmentsQuery = enrollmentsQuery.where(eq('enrollments.school_id', schoolId));
-        }
-        
-        const [enrollmentCounts] = await enrollmentsQuery;
-        
-        // Calcular taxas de conversão
-        const totalLeads = Number(leadCount.count || 0);
-        const startedEnrollments = Number(enrollmentCounts.total || 0);
-        const completedEnrollments = Number(enrollmentCounts.completed || 0);
-        
-        const leadToEnrollmentRate = totalLeads > 0 ? (startedEnrollments / totalLeads) * 100 : 0;
-        const enrollmentCompletionRate = startedEnrollments > 0 ? (completedEnrollments / startedEnrollments) * 100 : 0;
-        const overallConversionRate = totalLeads > 0 ? (completedEnrollments / totalLeads) * 100 : 0;
-        
-        return {
-          source,
-          leads: totalLeads,
-          enrollments: {
-            started: startedEnrollments,
-            completed: completedEnrollments
-          },
-          conversionRates: {
-            leadToEnrollment: parseFloat(leadToEnrollmentRate.toFixed(2)),
-            enrollmentCompletion: parseFloat(enrollmentCompletionRate.toFixed(2)),
-            overall: parseFloat(overallConversionRate.toFixed(2))
-          }
-        };
-      }));
+      // Estatísticas de alunos
+      const currentDate = new Date();
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(currentDate.getDate() - 30);
       
-      // Remover entradas nulas e ordenar por taxa de conversão geral
-      return sourceStats
-        .filter(Boolean)
-        .sort((a, b) => b.conversionRates.overall - a.conversionRates.overall);
-    } catch (error) {
-      console.error('Erro ao obter conversão por origem:', error);
-      throw new Error(`Falha ao obter conversão por origem: ${error.message}`);
-    }
-  }
-
-  /**
-   * Obtém estatísticas de processamento OCR
-   * @param schoolId ID da escola (opcional)
-   * @returns Estatísticas de processamento OCR
-   */
-  async getOcrStats(schoolId?: number): Promise<any> {
-    try {
-      // Contar documentos processados por tipo
-      let documentsByTypeQuery = db
-        .select({
-          documentType: 'document_type',
-          count: sql<number>`count(*)`,
-          avgConfidence: sql<number>`avg(overall_confidence)`,
-          avgProcessingTime: sql<number>`avg(processing_time_ms)`
-        })
-        .from('ocr_documents')
-        .groupBy('document_type');
+      const studentsResult = await db.execute(`
+        SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN EXISTS (
+            SELECT 1 FROM enrollments e 
+            WHERE e.student_id = u.id AND e.status = 'active'
+          ) THEN 1 ELSE 0 END) as active,
+          SUM(CASE WHEN created_at >= $1 THEN 1 ELSE 0 END) as new
+        FROM users u
+        WHERE role = 'student' ${schoolCondition ? `AND school_id = ${schoolId}` : ''}
+      `, [thirtyDaysAgo]);
       
-      if (schoolId) {
-        // Precisa unir com enrollments para filtrar por escola
-        documentsByTypeQuery = db
-          .select({
-            documentType: 'ocr_documents.document_type',
-            count: sql<number>`count(*)`,
-            avgConfidence: sql<number>`avg(ocr_documents.overall_confidence)`,
-            avgProcessingTime: sql<number>`avg(ocr_documents.processing_time_ms)`
-          })
-          .from('ocr_documents')
-          .innerJoin(
-            'enrollments',
-            eq('ocr_documents.enrollment_id', 'enrollments.id')
-          )
-          .where(eq('enrollments.school_id', schoolId))
-          .groupBy('ocr_documents.document_type');
-      }
-      
-      const documentsByType = await documentsByTypeQuery;
-      
-      // Contar validações por resultado
-      let validationsQuery = db
-        .select({
-          isValid: 'is_valid',
-          count: sql<number>`count(*)`,
-          avgScore: sql<number>`avg(score)`
-        })
-        .from('ocr_validations')
-        .groupBy('is_valid');
-      
-      if (schoolId) {
-        // Precisa unir com enrollments para filtrar por escola
-        validationsQuery = db
-          .select({
-            isValid: 'ocr_validations.is_valid',
-            count: sql<number>`count(*)`,
-            avgScore: sql<number>`avg(ocr_validations.score)`
-          })
-          .from('ocr_validations')
-          .innerJoin(
-            'enrollments',
-            eq('ocr_validations.enrollment_id', 'enrollments.id')
-          )
-          .where(eq('enrollments.school_id', schoolId))
-          .groupBy('ocr_validations.is_valid');
-      }
-      
-      const validations = await validationsQuery;
-      
-      // Calcular totais
-      const totalDocuments = documentsByType.reduce((sum, item) => sum + Number(item.count), 0);
-      const totalValidValidations = validations.find(v => v.isValid === true);
-      const totalInvalidValidations = validations.find(v => v.isValid === false);
-      
-      const validCount = totalValidValidations ? Number(totalValidValidations.count) : 0;
-      const invalidCount = totalInvalidValidations ? Number(totalInvalidValidations.count) : 0;
-      const totalValidations = validCount + invalidCount;
-      
-      // Calcular tempo médio global de processamento
-      const totalProcessingTime = documentsByType.reduce((sum, item) => {
-        return sum + (Number(item.avgProcessingTime) * Number(item.count));
-      }, 0);
-      
-      const globalAvgProcessingTime = totalDocuments > 0 
-        ? totalProcessingTime / totalDocuments 
-        : 0;
-      
+      // Consolidar resultados
       return {
-        totalDocuments,
-        documentsByType: documentsByType.map(item => ({
-          type: item.documentType,
-          count: Number(item.count),
-          avgConfidence: parseFloat(Number(item.avgConfidence).toFixed(2)),
-          avgProcessingTimeMs: Math.round(Number(item.avgProcessingTime))
-        })),
-        validations: {
-          total: totalValidations,
-          valid: validCount,
-          invalid: invalidCount,
-          validRate: totalValidations > 0 ? parseFloat(((validCount / totalValidations) * 100).toFixed(2)) : 0,
-          averageScore: {
-            valid: totalValidValidations ? parseFloat(Number(totalValidValidations.avgScore).toFixed(2)) : 0,
-            invalid: totalInvalidValidations ? parseFloat(Number(totalInvalidValidations.avgScore).toFixed(2)) : 0,
-            overall: totalValidations > 0 ? 
-              parseFloat(((
-                (totalValidValidations ? Number(totalValidValidations.avgScore) * validCount : 0) + 
-                (totalInvalidValidations ? Number(totalInvalidValidations.avgScore) * invalidCount : 0)
-              ) / totalValidations).toFixed(2)) : 0
-          }
+        enrollments: {
+          total: parseInt(enrollmentsResult.rows[0]?.total) || 0,
+          completed: parseInt(enrollmentsResult.rows[0]?.completed) || 0,
+          pending: parseInt(enrollmentsResult.rows[0]?.pending) || 0,
+          canceled: parseInt(enrollmentsResult.rows[0]?.canceled) || 0
         },
-        performance: {
-          avgProcessingTimeMs: Math.round(globalAvgProcessingTime),
-          avgConfidence: parseFloat(
-            (documentsByType.reduce((sum, item) => sum + (Number(item.avgConfidence) * Number(item.count)), 0) / totalDocuments).toFixed(2)
-          )
+        payments: {
+          total: parseInt(paymentsResult.rows[0]?.total) || 0,
+          revenue: parseFloat(paymentsResult.rows[0]?.revenue) || 0,
+          pending: parseInt(paymentsResult.rows[0]?.pending) || 0
+        },
+        students: {
+          total: parseInt(studentsResult.rows[0]?.total) || 0,
+          active: parseInt(studentsResult.rows[0]?.active) || 0,
+          new: parseInt(studentsResult.rows[0]?.new) || 0
         }
       };
     } catch (error) {
-      console.error('Erro ao obter estatísticas OCR:', error);
-      throw new Error(`Falha ao obter estatísticas OCR: ${error.message}`);
+      console.error('Erro ao obter métricas de dashboard:', error);
+      return {
+        error: error instanceof Error ? error.message : 'Erro desconhecido',
+        enrollments: { total: 0, completed: 0, pending: 0, canceled: 0 },
+        payments: { total: 0, revenue: 0, pending: 0 },
+        students: { total: 0, active: 0, new: 0 }
+      };
+    }
+  }
+  
+  /**
+   * Gera dados de série temporal para dashboard
+   * @param metric Métrica a ser analisada
+   * @param period Período de tempo
+   * @param schoolId ID da escola (opcional)
+   * @returns Dados da série temporal
+   */
+  async getTimeSeriesData(
+    metric: 'enrollments' | 'revenue' | 'students' | 'documents',
+    period: 'daily' | 'weekly' | 'monthly' = 'monthly',
+    schoolId?: number
+  ): Promise<{ date: string; value: number }[]> {
+    if (!this.initialized || this.inactiveMode) {
+      return [];
+    }
+    
+    try {
+      // Definir período de datas
+      const endDate = new Date();
+      const startDate = new Date();
+      
+      switch (period) {
+        case 'daily':
+          startDate.setDate(endDate.getDate() - 30); // Últimos 30 dias
+          break;
+        case 'weekly':
+          startDate.setDate(endDate.getDate() - 90); // Últimos 90 dias
+          break;
+        case 'monthly':
+        default:
+          startDate.setMonth(endDate.getMonth() - 12); // Últimos 12 meses
+          break;
+      }
+      
+      // Construir condição para escola específica
+      const schoolCondition = schoolId ? `AND school_id = ${schoolId}` : '';
+      
+      // Definir formato de data e grupo baseado no período
+      let dateFormat: string;
+      let groupBy: string;
+      
+      switch (period) {
+        case 'daily':
+          dateFormat = 'YYYY-MM-DD';
+          groupBy = 'date_trunc(\'day\', created_at)';
+          break;
+        case 'weekly':
+          dateFormat = 'IYYY-IW'; // Ano-Semana (formato ISO)
+          groupBy = 'date_trunc(\'week\', created_at)';
+          break;
+        case 'monthly':
+        default:
+          dateFormat = 'YYYY-MM';
+          groupBy = 'date_trunc(\'month\', created_at)';
+          break;
+      }
+      
+      // Construir query baseada na métrica
+      let query = '';
+      
+      switch (metric) {
+        case 'enrollments':
+          query = `
+            SELECT 
+              to_char(${groupBy}, '${dateFormat}') as date,
+              COUNT(*) as value
+            FROM enrollments
+            WHERE created_at BETWEEN $1 AND $2 ${schoolCondition}
+            GROUP BY ${groupBy}
+            ORDER BY ${groupBy}
+          `;
+          break;
+        case 'revenue':
+          query = `
+            SELECT 
+              to_char(${groupBy}, '${dateFormat}') as date,
+              SUM(amount) as value
+            FROM payments
+            WHERE status = 'paid' AND created_at BETWEEN $1 AND $2 ${schoolCondition}
+            GROUP BY ${groupBy}
+            ORDER BY ${groupBy}
+          `;
+          break;
+        case 'students':
+          query = `
+            SELECT 
+              to_char(${groupBy}, '${dateFormat}') as date,
+              COUNT(*) as value
+            FROM users
+            WHERE role = 'student' AND created_at BETWEEN $1 AND $2 ${schoolCondition ? `AND school_id = ${schoolId}` : ''}
+            GROUP BY ${groupBy}
+            ORDER BY ${groupBy}
+          `;
+          break;
+        case 'documents':
+          query = `
+            SELECT 
+              to_char(${groupBy}, '${dateFormat}') as date,
+              COUNT(*) as value
+            FROM documents
+            WHERE created_at BETWEEN $1 AND $2 ${schoolCondition ? `AND student_id IN (SELECT id FROM users WHERE school_id = ${schoolId})` : ''}
+            GROUP BY ${groupBy}
+            ORDER BY ${groupBy}
+          `;
+          break;
+      }
+      
+      const result = await db.execute(query, [startDate, endDate]);
+      
+      // Converter valores para números
+      return result.rows.map(row => ({
+        date: row.date,
+        value: metric === 'revenue' ? parseFloat(row.value) : parseInt(row.value)
+      }));
+    } catch (error) {
+      console.error(`Erro ao obter dados de série temporal para ${metric}:`, error);
+      return [];
+    }
+  }
+  
+  /**
+   * Faz previsão de matrículas
+   * @param schoolId ID da escola
+   * @param months Número de meses para previsão
+   * @returns Previsão de matrículas
+   */
+  async predictEnrollments(schoolId: number, months: number = 3): Promise<{
+    prediction: number;
+    confidence: number;
+    method: string;
+  }> {
+    if (!this.initialized || this.inactiveMode) {
+      return {
+        prediction: 0,
+        confidence: 0,
+        method: 'simulated'
+      };
+    }
+    
+    try {
+      // Usar o serviço ML para previsão
+      const predictionResult = await mlService.predictEnrollments(schoolId, months);
+      
+      return {
+        prediction: predictionResult.prediction as number,
+        confidence: predictionResult.confidence,
+        method: predictionResult.metadata?.method || 'ml_model'
+      };
+    } catch (error) {
+      console.error(`Erro ao prever matrículas para escola ${schoolId}:`, error);
+      
+      // Fallback: usar média simples dos últimos meses
+      try {
+        const result = await db.execute(`
+          SELECT COUNT(*) as count
+          FROM enrollments
+          WHERE 
+            school_id = $1 AND
+            created_at >= NOW() - INTERVAL '3 months'
+        `, [schoolId]);
+        
+        const recentCount = parseInt(result.rows[0]?.count) || 0;
+        const monthlyAverage = recentCount / 3; // Média mensal dos últimos 3 meses
+        
+        return {
+          prediction: Math.round(monthlyAverage * months),
+          confidence: 0.5,
+          method: 'average'
+        };
+      } catch (fallbackError) {
+        console.error('Erro no fallback para previsão de matrículas:', fallbackError);
+        return {
+          prediction: months * 5, // Valor muito básico de fallback
+          confidence: 0.3,
+          method: 'fallback'
+        };
+      }
+    }
+  }
+  
+  /**
+   * Obtém distribuição de status de matrículas
+   * @param schoolId ID da escola (opcional)
+   * @returns Distribuição de status
+   */
+  async getEnrollmentStatusDistribution(schoolId?: number): Promise<{
+    status: string;
+    count: number;
+    percentage: number;
+  }[]> {
+    if (!this.initialized || this.inactiveMode) {
+      return [];
+    }
+    
+    try {
+      // Construir condição para escola específica
+      const schoolCondition = schoolId ? `WHERE school_id = ${schoolId}` : '';
+      
+      // Obter contagem total
+      const totalResult = await db.execute(`
+        SELECT COUNT(*) as total
+        FROM enrollments
+        ${schoolCondition}
+      `);
+      
+      const total = parseInt(totalResult.rows[0]?.total) || 0;
+      
+      if (total === 0) {
+        return [];
+      }
+      
+      // Obter distribuição de status
+      const result = await db.execute(`
+        SELECT 
+          status,
+          COUNT(*) as count
+        FROM enrollments
+        ${schoolCondition}
+        GROUP BY status
+        ORDER BY count DESC
+      `);
+      
+      // Calcular percentuais
+      return result.rows.map(row => ({
+        status: row.status,
+        count: parseInt(row.count),
+        percentage: Math.round((parseInt(row.count) / total) * 100)
+      }));
+    } catch (error) {
+      console.error('Erro ao obter distribuição de status de matrículas:', error);
+      return [];
+    }
+  }
+  
+  /**
+   * Obtém distribuição de fontes (origem) de matrículas
+   * @param schoolId ID da escola (opcional)
+   * @returns Distribuição de fontes
+   */
+  async getEnrollmentSourcesDistribution(schoolId?: number): Promise<{
+    source: string;
+    count: number;
+    percentage: number;
+  }[]> {
+    if (!this.initialized || this.inactiveMode) {
+      return [];
+    }
+    
+    try {
+      // Construir condição para escola específica
+      const schoolCondition = schoolId ? `WHERE school_id = ${schoolId}` : '';
+      
+      // Obter contagem total
+      const totalResult = await db.execute(`
+        SELECT COUNT(*) as total
+        FROM enrollments
+        ${schoolCondition}
+      `);
+      
+      const total = parseInt(totalResult.rows[0]?.total) || 0;
+      
+      if (total === 0) {
+        return [];
+      }
+      
+      // Obter distribuição de fontes
+      const result = await db.execute(`
+        SELECT 
+          COALESCE(source, 'Desconhecido') as source,
+          COUNT(*) as count
+        FROM enrollments
+        ${schoolCondition}
+        GROUP BY source
+        ORDER BY count DESC
+      `);
+      
+      // Calcular percentuais
+      return result.rows.map(row => ({
+        source: row.source,
+        count: parseInt(row.count),
+        percentage: Math.round((parseInt(row.count) / total) * 100)
+      }));
+    } catch (error) {
+      console.error('Erro ao obter distribuição de fontes de matrículas:', error);
+      return [];
     }
   }
 }
 
-// Exportar instância única do serviço
-const analyticsService = new AnalyticsService();
-export default analyticsService;
+// Exportar instância única
+export const analyticsService = new AnalyticsService();

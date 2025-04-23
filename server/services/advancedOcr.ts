@@ -528,21 +528,52 @@ class AdvancedOcrService {
       .trim()
       .toLowerCase();
     
-    // Estruturas de dados específicas por tipo de documento
+    // Se o tipo de documento não for fornecido ou for "other", tentar classificar via ML
+    if (documentType === 'other') {
+      try {
+        const classificationResult = await mlService.classifyDocument(normalizedText);
+        
+        if (classificationResult.confidence > 0.6) {
+          documentType = classificationResult.prediction as DocumentType;
+          console.log(`Documento classificado automaticamente como ${documentType} (confiança: ${classificationResult.confidence.toFixed(2)})`);
+        }
+      } catch (error) {
+        console.error('Erro ao classificar documento:', error);
+      }
+    }
+    
+    // Extrair dados de acordo com o tipo de documento
+    let extractedData;
+    
     switch (documentType) {
       case 'rg': 
-        return this.extractRgData(normalizedText);
+        extractedData = this.extractRgData(normalizedText);
+        break;
       case 'cpf': 
-        return this.extractCpfData(normalizedText);
+        extractedData = this.extractCpfData(normalizedText);
+        break;
       case 'address_proof': 
-        return this.extractAddressProofData(normalizedText);
+        extractedData = this.extractAddressProofData(normalizedText);
+        break;
       case 'school_certificate': 
-        return this.extractSchoolCertificateData(normalizedText);
+        extractedData = this.extractSchoolCertificateData(normalizedText);
+        break;
       case 'birth_certificate': 
-        return this.extractBirthCertificateData(normalizedText);
+        extractedData = this.extractBirthCertificateData(normalizedText);
+        break;
       default:
-        return { rawText: text };
+        extractedData = { rawText: text };
+        break;
     }
+    
+    // Melhorar campos extraídos com ML
+    try {
+      extractedData = await mlService.enhanceExtractedFields(documentType, extractedData);
+    } catch (error) {
+      console.error('Erro ao melhorar campos extraídos:', error);
+    }
+    
+    return extractedData;
   }
   
   /**
