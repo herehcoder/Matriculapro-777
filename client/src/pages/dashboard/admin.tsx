@@ -43,7 +43,6 @@ import { Input } from "@/components/ui/input";
 import {
   School,
   Users,
-  Users2,
   Book,
   Building,
   BarChart,
@@ -61,7 +60,6 @@ import {
   Edit,
   Trash2,
   Eye,
-  GraduationCap,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -328,13 +326,13 @@ export default function AdminDashboard() {
               title="Total de Estudantes"
               value={platformData.metrics.totalStudents}
               description="estudantes cadastrados"
-              icon={<GraduationCap className="h-4 w-4 text-primary" />}
+              icon={<School className="h-4 w-4 text-primary" />}
             />
             <MetricCard
               title="Total de Leads"
               value={platformData.metrics.totalLeads}
               description="leads cadastrados"
-              icon={<Users2 className="h-4 w-4 text-primary" />}
+              icon={<Users className="h-4 w-4 text-primary" />}
             />
             <MetricCard
               title="Receita Total"
