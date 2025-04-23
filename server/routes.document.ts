@@ -165,10 +165,18 @@ export function registerDocumentRoutes(app: Express) {
           error: 'ID da matrícula é obrigatório' 
         });
       }
+      
+      // Garantir que o id seja um número válido
+      const enrollmentIdNum = Number(enrollmentId);
+      if (isNaN(enrollmentIdNum)) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'ID da matrícula inválido' 
+        });
+      }
 
-      const allDocuments = await db.query.documents.findMany({
-        where: eq(documents.enrollmentId, parseInt(enrollmentId))
-      });
+      const allDocuments = await db.select().from(documents)
+        .where(eq(documents.enrollmentId, enrollmentIdNum));
 
       return res.status(200).json({
         success: true,
@@ -194,10 +202,20 @@ export function registerDocumentRoutes(app: Express) {
           error: 'ID do documento é obrigatório' 
         });
       }
+      
+      // Garantir que o id seja um número válido
+      const docId = Number(id);
+      if (isNaN(docId)) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'ID do documento inválido' 
+        });
+      }
 
-      const document = await db.query.documents.findFirst({
-        where: eq(documents.id, parseInt(id))
-      });
+      const document = await db.select().from(documents)
+        .where(eq(documents.id, docId))
+        .limit(1)
+        .then(rows => rows[0]);
 
       if (!document) {
         return res.status(404).json({
@@ -247,11 +265,21 @@ export function registerDocumentRoutes(app: Express) {
           error: 'ID do documento é obrigatório' 
         });
       }
+      
+      // Garantir que o id seja um número válido
+      const docId = Number(id);
+      if (isNaN(docId)) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'ID do documento inválido' 
+        });
+      }
 
       // Find the document
-      const document = await db.query.documents.findFirst({
-        where: eq(documents.id, parseInt(id))
-      });
+      const document = await db.select().from(documents)
+        .where(eq(documents.id, docId))
+        .limit(1)
+        .then(rows => rows[0]);
 
       if (!document) {
         return res.status(404).json({
@@ -266,7 +294,7 @@ export function registerDocumentRoutes(app: Express) {
       }
 
       // Delete the document record
-      await db.delete(documents).where(eq(documents.id, parseInt(id)));
+      await db.delete(documents).where(eq(documents.id, docId));
 
       return res.status(200).json({
         success: true,

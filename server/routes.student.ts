@@ -13,8 +13,14 @@ export function registerStudentRoutes(app: Express, isAuthenticated: any) {
         return res.status(403).json({ message: "Acesso não autorizado" });
       }
 
+      // Garantir que o ID do usuário seja um número válido
+      const userId = Number(student.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: "ID de usuário inválido" });
+      }
+      
       // Buscar as matrículas do aluno
-      const enrollments = await storage.getEnrollmentsByStudentId(student.id);
+      const enrollments = await storage.getEnrollmentsByStudentId(userId);
 
       // Enriquecer os dados de matrícula com informações do curso
       const enrichedEnrollments = await Promise.all(
@@ -136,14 +142,26 @@ export function registerStudentRoutes(app: Express, isAuthenticated: any) {
       }
       
       // Primeiro precisamos encontrar o registro de estudante para este usuário
-      const studentRecord = await storage.getStudentByUserId(student.id);
+      // Garantir que o ID do usuário é um número válido
+      const userId = Number(student.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ success: false, error: "ID do usuário inválido" });
+      }
+      
+      const studentRecord = await storage.getStudentByUserId(userId);
       
       if (!studentRecord) {
         return res.status(404).json({ success: false, error: "Registro de estudante não encontrado" });
       }
 
       // Agora precisamos buscar as matrículas deste estudante
-      const enrollments = await storage.getEnrollmentsByStudent(studentRecord.id);
+      // Garantir que o ID do estudante é um número válido
+      const studentId = Number(studentRecord.id);
+      if (isNaN(studentId)) {
+        return res.status(400).json({ success: false, error: "ID do estudante inválido" });
+      }
+      
+      const enrollments = await storage.getEnrollmentsByStudent(studentId);
       
       if (!enrollments || enrollments.length === 0) {
         return res.json([]);
@@ -234,7 +252,14 @@ export function registerStudentRoutes(app: Express, isAuthenticated: any) {
   // API para buscar aluno pelo ID
   app.get("/api/students/:id", isAuthenticated, async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.id);
+      const { id } = req.params;
+      
+      // Garantir que o id seja um número válido
+      const userId = Number(id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: "ID de usuário inválido" });
+      }
+      
       const user = await storage.getUser(userId);
       
       if (!user) {
