@@ -544,7 +544,7 @@ export default function VendasPage() {
             initial="hidden"
             whileInView="visible"
             viewport={{ once: true, amount: 0.2 }}
-            className="text-center mb-16"
+            className="text-center mb-12"
           >
             <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
               Escolha o plano ideal para sua instituição
@@ -553,6 +553,27 @@ export default function VendasPage() {
               Soluções flexíveis que crescem junto com sua escola
             </motion.p>
           </motion.div>
+          
+          {/* Toggle para escolha do período de cobrança */}
+          <div className="flex justify-center items-center mb-10">
+            <p className={`mr-3 font-medium ${!isAnnual ? 'text-gray-900' : 'text-gray-500'}`}>Mensal</p>
+            <div 
+              className="relative inline-block w-14 h-7 rounded-full bg-gray-200 cursor-pointer"
+              onClick={toggleBillingCycle}
+            >
+              <div 
+                className={`absolute w-5 h-5 rounded-full bg-accent transition-transform duration-200 ease-in-out transform ${
+                  isAnnual ? 'translate-x-8' : 'translate-x-1'
+                } top-1`}
+              />
+            </div>
+            <div className="flex items-center ml-3">
+              <p className={`font-medium ${isAnnual ? 'text-gray-900' : 'text-gray-500'}`}>Anual</p>
+              <span className="ml-2 py-1 px-2 text-xs bg-accent text-white rounded-full font-medium">
+                Economize 20%
+              </span>
+            </div>
+          </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
             {pricingPlans.map((plan) => (
@@ -564,7 +585,15 @@ export default function VendasPage() {
                 viewport={{ once: true }}
                 className={plan.popular ? 'mt-[-1rem]' : ''}
               >
-                <PricingCard plan={plan} />
+                <PricingCard 
+                  plan={{
+                    ...plan,
+                    price: isAnnual 
+                      ? `R$ ${Math.floor(parseInt(plan.price.replace('R$ ', '')) * 0.8 * 12)}`
+                      : plan.price,
+                    period: isAnnual ? '/ano' : '/mês'
+                  }} 
+                />
               </motion.div>
             ))}
           </div>
