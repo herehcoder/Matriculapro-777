@@ -639,34 +639,185 @@ export function registerWhatsAppRoutes(app: Express) {
   });
   
   /**
-   * @route POST /api/whatsapp/webhook/:schoolId
-   * @desc Recebe webhooks do WhatsApp para uma escola específica
+   * @route POST /api/whatsapp/webhook/:instanceId
+   * @desc Recebe webhooks do WhatsApp para uma instância específica
    * @access Public
    */
-  app.post('/api/whatsapp/webhook/:schoolId', async (req: Request, res: Response) => {
+  app.post('/api/whatsapp/webhook/:instanceId', async (req: Request, res: Response) => {
     try {
-      const schoolId = parseInt(req.params.schoolId);
+      const instanceId = req.params.instanceId;
       
-      // Em produção, aqui verificaria a assinatura do webhook
-      // para garantir que a requisição veio da Evolution API
+      // Verificar se a instância existe
+      const [instance] = await db
+        .select()
+        .from(whatsappInstances)
+        .where(eq(whatsappInstances.instanceId, instanceId));
       
-      // Simula recebimento de webhook
-      console.log(`Recebido webhook para a escola ${schoolId}:`, req.body);
-      
-      // Processa o webhook de acordo com o tipo
-      const eventType = req.body.type;
-      
-      if (eventType === 'message') {
-        // Em produção, aqui processaria a mensagem recebida
-        const message = req.body.message;
-        
-        // Salvar mensagem no banco de dados
-        // ...
-        
-        // Notificar usuários relevantes
-        // ...
+      if (!instance) {
+        console.error(`Webhook recebido para instância inexistente: ${instanceId}`);
+        return res.sendStatus(404);
       }
       
+      const schoolId = instance.schoolId;
+      
+      // Em um ambiente de produção, verificar a assinatura do webhook
+      // para garantir que a requisição é legítima da Evolution API
+      // const signature = req.headers['x-evolution-signature'];
+      // const isValid = verifySignature(signature, req.body, instance.instanceToken);
+      // if (!isValid) return res.status(401).send('Assinatura inválida');
+      
+      console.log(`Recebido webhook para a escola ${schoolId}, instância ${instanceId}:`, req.body);
+      
+      // Processar o webhook de acordo com o tipo de evento
+      const eventType = req.body.event || req.body.type;
+      
+      if (eventType === 'message' || eventType === 'messages.upsert') {
+        // Processar mensagem recebida
+        const messageData = req.body.data || req.body.message || req.body;
+        const phone = messageData.phone || messageData.from || messageData.sender || '';
+        const content = messageData.text || messageData.body || messageData.content || '';
+        const messageId = messageData.id || messageData.messageId || `msg_${Date.now()}`;
+        const timestamp = new Date();
+        
+        // Verificar se essa mensagem já foi processada (evitar duplicatas)
+        const [existingMessage] = await db
+          .select()
+          .from(whatsappMessages)
+          .where(eq(whatsappMessages.externalId, messageId));
+          
+        if (existingMessage) {
+          console.log(`Mensagem já processada: ${messageId}`);
+          return res.sendStatus(200);
+        }
+        
+        // Salvar mensagem no banco de dados
+        const [savedMessage] = await db
+          .insert(whatsappMessages)
+          .values({
+            instanceId: instance.id,
+            contactId: 0, // Este valor precisa ser mapeado corretamente
+            direction: 'incoming',
+            status: 'delivered',
+            content,
+            metadata: req.body,
+            externalId: messageId,
+            type: 'text',
+            timestamp,
+            createdAt: timestamp,
+            updatedAt: timestamp
+          })
+          .returning();
+        
+        // Buscar ou criar contato com base no número
+        // Isso depende da estrutura do seu sistema
+        let contactName = 'Contato';
+        let studentId = null;
+        let leadId = null;
+        
+        // Tentar identificar se o número pertence a um estudante ou lead
+        // Aqui você implementaria a lógica para mapear o número ao estudante/lead
+        
+        // Enviar notificação em tempo real para os usuários da escola
+        const notification: NotificationPayload = {
+          title: 'Nova mensagem do WhatsApp',
+          message: `${contactName}: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`,
+          type: 'message',
+          data: {
+            messageId: savedMessage.id,
+            phone,
+            content,
+            timestamp: timestamp.toISOString()
+          },
+          relatedId: savedMessage.id,
+          relatedType: 'whatsapp_message'
+        };
+        
+        // Enviar notificação para todos os atendentes da escola
+        // Este é um exemplo - você pode querer ajustar isso para o seu caso de uso
+        await sendUserNotification(schoolId, notification);
+      } else if (eventType === 'status' || eventType === 'connection.update') {
+        // Processar atualizações de status de conexão
+        const status = req.body.status || req.body.connectionStatus || 'unknown';
+        
+        if (status === 'connected' || status === 'open') {
+          // Atualizar status da instância para conectado
+          await db
+            .update(whatsappInstances)
+            .set({
+              status: 'connected',
+              qrCode: null,
+              phoneNumber: req.body.phone || req.body.phoneNumber || instance.phoneNumber,
+              lastConnection: new Date(),
+              updatedAt: new Date()
+            })
+            .where(eq(whatsappInstances.id, instance.id));
+            
+          // Notificar a escola que o WhatsApp está conectado
+          const notification: NotificationPayload = {
+            title: 'WhatsApp Conectado',
+            message: 'Sua instância do WhatsApp foi conectada com sucesso.',
+            type: 'system',
+            data: {
+              instanceId: instance.id,
+              status: 'connected'
+            }
+          };
+          
+          await sendUserNotification(schoolId, notification);
+        } else if (status === 'disconnected' || status === 'close') {
+          // Atualizar status da instância para desconectado
+          await db
+            .update(whatsappInstances)
+            .set({
+              status: 'disconnected',
+              updatedAt: new Date()
+            })
+            .where(eq(whatsappInstances.id, instance.id));
+            
+          // Notificar a escola que o WhatsApp está desconectado
+          const notification: NotificationPayload = {
+            title: 'WhatsApp Desconectado',
+            message: 'Sua instância do WhatsApp foi desconectada. Por favor, reconecte.',
+            type: 'system',
+            data: {
+              instanceId: instance.id,
+              status: 'disconnected'
+            }
+          };
+          
+          await sendUserNotification(schoolId, notification);
+        } else if (status === 'qr' || status === 'require_qr') {
+          // Atualizar QR code da instância
+          const qrCode = req.body.qrCode || req.body.qrcode || req.body.qr || null;
+          
+          if (qrCode) {
+            await db
+              .update(whatsappInstances)
+              .set({
+                status: 'connecting',
+                qrCode,
+                updatedAt: new Date()
+              })
+              .where(eq(whatsappInstances.id, instance.id));
+              
+            // Notificar a escola que um novo QR code está disponível
+            const notification: NotificationPayload = {
+              title: 'Novo QR Code',
+              message: 'Um novo QR code está disponível para conectar seu WhatsApp.',
+              type: 'system',
+              data: {
+                instanceId: instance.id,
+                status: 'connecting',
+                hasQrCode: true
+              }
+            };
+            
+            await sendUserNotification(schoolId, notification);
+          }
+        }
+      }
+      
+      // Responder com sucesso
       res.sendStatus(200);
     } catch (error) {
       console.error('Erro ao processar webhook:', error);

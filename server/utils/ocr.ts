@@ -7,12 +7,29 @@ export interface DocumentData {
   documentType: string;
   fields: Record<string, string>;
   confidence: number;
+  validationResults?: DocumentValidationResult;
 }
 
 export interface OcrResult {
   success: boolean;
   data?: DocumentData;
   error?: string;
+}
+
+export interface DocumentValidationResult {
+  isValid: boolean;
+  fieldValidations: Record<string, FieldValidation>;
+  score: number; // 0-100 score
+}
+
+export interface FieldValidation {
+  isValid: boolean;
+  confidence: number; // 0-100 confidence score
+  extractedValue: string;
+  expectedValue?: string; // Value from form, if provided for comparison
+  normalizedExtracted?: string; // Normalized version for better comparison
+  normalizedExpected?: string; // Normalized version for better comparison
+  reason?: string; // Explanation for validation result
 }
 
 // Cache para workers do Tesseract
@@ -228,9 +245,13 @@ function detectDocumentType(text: string): string {
 /**
  * Analisa um documento de identificação por OCR
  * @param filePath Caminho para o arquivo do documento
+ * @param formFields Dados informados pelo usuário no formulário para validação cruzada (opcional)
  * @returns Resultados da análise OCR
  */
-export async function analyzeDocument(filePath: string): Promise<OcrResult> {
+export async function analyzeDocument(
+  filePath: string, 
+  formFields?: Record<string, string>
+): Promise<OcrResult> {
   try {
     // Verificar se o arquivo existe
     if (!fs.existsSync(filePath)) {
@@ -270,7 +291,8 @@ export async function analyzeDocument(filePath: string): Promise<OcrResult> {
         };
     }
     
-    return {
+    // Construir resposta básica
+    const response: OcrResult = {
       success: true,
       data: {
         documentType,
@@ -278,6 +300,17 @@ export async function analyzeDocument(filePath: string): Promise<OcrResult> {
         confidence: result.data.confidence
       }
     };
+    
+    // Se formFields foi fornecido, realizar validação cruzada
+    if (formFields && Object.keys(formFields).length > 0) {
+      const validationResults = validateDocumentAgainstForm(documentType, fields, formFields);
+      
+      if (response.data) {
+        response.data.validationResults = validationResults;
+      }
+    }
+    
+    return response;
     
   } catch (error) {
     console.error('Erro na análise do documento:', error);
@@ -289,28 +322,225 @@ export async function analyzeDocument(filePath: string): Promise<OcrResult> {
 }
 
 /**
+ * Normaliza uma string para comparação
+ * Remove acentos, espaços extras, capitalização e caracteres especiais
+ */
+function normalizeString(str: string): string {
+  if (!str) return '';
+  
+  // Remover acentos
+  const normalized = str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  
+  // Converter para minúsculas
+  const lowercase = normalized.toLowerCase();
+  
+  // Remover caracteres especiais e espaços extras
+  return lowercase.replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Normaliza números para comparação
+ * Remove todos os caracteres não numéricos
+ */
+function normalizeNumber(str: string): string {
+  if (!str) return '';
+  return str.replace(/\D/g, '');
+}
+
+/**
+ * Normaliza data para comparação
+ * Converte para formato DD/MM/YYYY
+ */
+function normalizeDate(dateStr: string): string {
+  if (!dateStr) return '';
+  
+  // Remover caracteres não numéricos e transformar em array
+  const numbers = dateStr.replace(/\D/g, '');
+  
+  if (numbers.length === 8) {
+    // Formato DDMMYYYY
+    return `${numbers.slice(0, 2)}/${numbers.slice(2, 4)}/${numbers.slice(4, 8)}`;
+  } else if (numbers.length === 6) {
+    // Formato DDMMYY
+    return `${numbers.slice(0, 2)}/${numbers.slice(2, 4)}/20${numbers.slice(4, 6)}`;
+  }
+  
+  return dateStr; // Retorna o original se não for possível normalizar
+}
+
+/**
+ * Calcula a similaridade entre duas strings usando o algoritmo de Levenshtein
+ * @returns Valor entre 0 e 1, onde 1 é uma correspondência exata
+ */
+function stringSimilarity(s1: string, s2: string): number {
+  if (!s1 && !s2) return 1;
+  if (!s1 || !s2) return 0;
+  
+  const track = Array(s2.length + 1).fill(null).map(() => 
+    Array(s1.length + 1).fill(null));
+  
+  for (let i = 0; i <= s1.length; i += 1) {
+    track[0][i] = i;
+  }
+  
+  for (let j = 0; j <= s2.length; j += 1) {
+    track[j][0] = j;
+  }
+  
+  for (let j = 1; j <= s2.length; j += 1) {
+    for (let i = 1; i <= s1.length; i += 1) {
+      const indicator = s1[i - 1] === s2[j - 1] ? 0 : 1;
+      track[j][i] = Math.min(
+        track[j][i - 1] + 1, // delete
+        track[j - 1][i] + 1, // insert
+        track[j - 1][i - 1] + indicator, // substitute
+      );
+    }
+  }
+  
+  const maxLength = Math.max(s1.length, s2.length);
+  if (maxLength === 0) return 1; // dois strings vazios
+  
+  // Retorna 1 - distance/maxLength para ter um valor onde 1 é uma correspondência exata
+  return 1 - (track[s2.length][s1.length] / maxLength);
+}
+
+/**
  * Verifica a validade de um documento com base em dados extraídos por OCR
  * @param documentType Tipo do documento
- * @param fields Campos extraídos do documento
+ * @param extractedFields Campos extraídos do documento
  * @returns Resultado da verificação
  */
-export function verifyDocument(documentType: string, fields: Record<string, string>): boolean {
+export function verifyDocument(documentType: string, extractedFields: Record<string, string>): boolean {
   switch (documentType) {
     case 'rg':
       // Verificar se tem os campos mínimos de um RG
-      return !!(fields.rg && fields.name);
+      return !!(extractedFields.rg && extractedFields.name);
       
     case 'cpf':
       // Verificar se tem os campos mínimos de um CPF e se o número é válido
-      return !!(fields.cpf && fields.name && validateCPF(fields.cpf));
+      return !!(extractedFields.cpf && extractedFields.name && validateCPF(extractedFields.cpf));
       
     case 'address_proof':
       // Verificar se tem os campos mínimos de um comprovante de residência
-      return !!(fields.address);
+      return !!(extractedFields.address);
       
     default:
       return false;
   }
+}
+
+/**
+ * Compara dados extraídos via OCR com dados fornecidos pelo usuário
+ * @param documentType Tipo do documento
+ * @param extractedFields Campos extraídos do documento via OCR
+ * @param formFields Campos informados pelo usuário no formulário
+ * @returns Resultado da validação com pontuação e detalhamento por campo
+ */
+export function validateDocumentAgainstForm(
+  documentType: string, 
+  extractedFields: Record<string, string>,
+  formFields: Record<string, string>
+): DocumentValidationResult {
+  const fieldValidations: Record<string, FieldValidation> = {};
+  let totalScore = 0;
+  let validFieldsCount = 0;
+  
+  // Definir as validações específicas para cada tipo de documento
+  const fieldsToValidate: Record<string, { 
+    normalizer: (str: string) => string;
+    minSimilarity: number;
+    weight: number;
+  }> = {};
+  
+  // Configurar validações baseado no tipo de documento
+  switch (documentType) {
+    case 'rg':
+      fieldsToValidate.name = { normalizer: normalizeString, minSimilarity: 0.7, weight: 0.4 };
+      fieldsToValidate.rg = { normalizer: normalizeNumber, minSimilarity: 0.9, weight: 0.4 };
+      fieldsToValidate.birthDate = { normalizer: normalizeDate, minSimilarity: 0.9, weight: 0.2 };
+      break;
+      
+    case 'cpf':
+      fieldsToValidate.name = { normalizer: normalizeString, minSimilarity: 0.7, weight: 0.3 };
+      fieldsToValidate.cpf = { normalizer: normalizeNumber, minSimilarity: 0.9, weight: 0.5 };
+      fieldsToValidate.birthDate = { normalizer: normalizeDate, minSimilarity: 0.9, weight: 0.2 };
+      break;
+      
+    case 'address_proof':
+      fieldsToValidate.name = { normalizer: normalizeString, minSimilarity: 0.7, weight: 0.3 };
+      fieldsToValidate.address = { normalizer: normalizeString, minSimilarity: 0.6, weight: 0.5 };
+      fieldsToValidate.zipCode = { normalizer: normalizeNumber, minSimilarity: 0.9, weight: 0.2 };
+      break;
+  }
+  
+  // Validar cada campo configurado
+  for (const [fieldName, config] of Object.entries(fieldsToValidate)) {
+    if (extractedFields[fieldName] && formFields[fieldName]) {
+      const extractedValue = extractedFields[fieldName];
+      const formValue = formFields[fieldName];
+      
+      // Normalizar valores para comparação
+      const normalizedExtracted = config.normalizer(extractedValue);
+      const normalizedForm = config.normalizer(formValue);
+      
+      // Calcular similaridade
+      const similarity = stringSimilarity(normalizedExtracted, normalizedForm);
+      const confidence = Math.round(similarity * 100);
+      const isValid = similarity >= config.minSimilarity;
+      
+      // Calcular pontuação ponderada para este campo
+      const fieldScore = confidence * config.weight;
+      totalScore += fieldScore;
+      
+      // Armazenar resultado da validação
+      fieldValidations[fieldName] = {
+        isValid,
+        confidence,
+        extractedValue,
+        expectedValue: formValue,
+        normalizedExtracted,
+        normalizedExpected: normalizedForm,
+        reason: isValid 
+          ? `Valor extraído corresponde ao informado (${confidence}% de confiança)` 
+          : `Valor extraído diferente do informado (${confidence}% de confiança)`
+      };
+      
+      validFieldsCount++;
+    } else if (formFields[fieldName]) {
+      // Campo não encontrado, mas esperado
+      fieldValidations[fieldName] = {
+        isValid: false,
+        confidence: 0,
+        extractedValue: '',
+        expectedValue: formFields[fieldName],
+        reason: 'Campo não encontrado no documento'
+      };
+    }
+  }
+  
+  // Normalizar a pontuação total para escala 0-100
+  const finalScore = validFieldsCount > 0 ? Math.round(totalScore / validFieldsCount) : 0;
+  
+  // Determinar a validade geral do documento
+  // Um documento é considerado válido se tiver pelo menos 70 pontos
+  // E nenhum campo essencial for inválido (exemplo: CPF ou RG)
+  let isValid = finalScore >= 70;
+  
+  // Verificar campos críticos específicos por tipo de documento
+  if (documentType === 'rg' && fieldValidations.rg && !fieldValidations.rg.isValid) {
+    isValid = false;
+  } else if (documentType === 'cpf' && fieldValidations.cpf && !fieldValidations.cpf.isValid) {
+    isValid = false;
+  } else if (documentType === 'address_proof' && fieldValidations.address && !fieldValidations.address.isValid) {
+    isValid = false;
+  }
+  
+  return {
+    isValid,
+    fieldValidations,
+    score: finalScore
+  };
 }
 
 /**
