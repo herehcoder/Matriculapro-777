@@ -16,6 +16,7 @@ import {
   FormInput,
   LineChart,
   PlusCircle,
+  BookOpen,
 } from "lucide-react";
 
 interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -103,6 +104,12 @@ export function Sidebar({ className, isOpen, onClose, ...props }: SidebarProps) 
           {/* Student Links */}
           {role === "student" && (
             <>
+              <SidebarItem
+                href="/courses/explore"
+                icon={<BookOpen size={18} />}
+                label="Explorar Cursos"
+                onClick={onClose}
+              />
               <SidebarItem
                 href="/my-enrollments"
                 icon={<ClipboardList size={18} />}

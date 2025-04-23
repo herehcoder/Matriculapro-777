@@ -13,9 +13,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Select,
   SelectContent,
@@ -23,23 +25,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
-
 import {
-  Search,
-  Book,
-  School,
+  BookOpen,
   Clock,
-  Tag,
-  GraduationCap,
+  DollarSign,
   Filter,
-  CheckCircle,
+  GraduationCap,
   Info,
-  Calendar,
-  Users,
   Loader2,
+  School,
+  Search,
+  Tag,
 } from "lucide-react";
 
 interface Course {
@@ -167,9 +163,9 @@ export default function ExploreCoursesPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        {/* Filtros para desktop */}
-        <div className="hidden md:block col-span-1 space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        {/* Sidebar de filtros */}
+        <div className="col-span-1">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center">
@@ -233,127 +229,96 @@ export default function ExploreCoursesPage() {
                 className="pl-10"
               />
             </div>
-
-            {/* Filtros para mobile */}
-            <div className="flex md:hidden space-x-2">
-              <Select
-                value={selectedCategory}
-                onValueChange={setSelectedCategory}
-              >
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Categoria" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  {categories.map((category: string) => (
-                    <SelectItem key={category} value={category}>
-                      {category}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select
-                value={selectedSchool}
-                onValueChange={setSelectedSchool}
-              >
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Instituição" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  {schools.map((school: any) => (
-                    <SelectItem key={school.id} value={school.id.toString()}>
-                      {school.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="flex gap-2 items-center text-sm">
+              <span className="text-muted-foreground">
+                {filteredCourses.length} curso(s) encontrado(s)
+              </span>
             </div>
           </div>
 
           {filteredCourses.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="bg-muted rounded-full p-3 mb-4">
-                <Book className="h-6 w-6 text-muted-foreground" />
+            <Card className="p-8 flex flex-col items-center justify-center text-center">
+              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
+                <BookOpen className="h-8 w-8 text-muted-foreground" />
               </div>
               <h3 className="text-xl font-semibold mb-2">Nenhum curso encontrado</h3>
-              <p className="text-muted-foreground max-w-md">
-                Nenhum curso corresponde aos critérios de busca selecionados. Tente
-                ajustar seus filtros ou buscar por outros termos.
+              <p className="text-muted-foreground max-w-md mb-4">
+                Não foram encontrados cursos correspondentes aos filtros selecionados.
+                Tente ajustar seus critérios de pesquisa.
               </p>
-            </div>
+              <Button
+                onClick={() => {
+                  setSearchQuery("");
+                  setSelectedCategory("all");
+                  setSelectedSchool("all");
+                }}
+                variant="outline"
+              >
+                Limpar filtros
+              </Button>
+            </Card>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {filteredCourses.map((course) => (
-                <Card key={course.id} className="overflow-hidden flex flex-col h-full hover:shadow-md transition-shadow">
+                <Card key={course.id} className="overflow-hidden hover:shadow-md transition-shadow">
                   <CardHeader className="pb-2">
-                    <div className="flex justify-between items-start gap-2">
+                    <div className="flex justify-between items-start">
                       <div className="flex items-center gap-2">
-                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                          <Book className="h-5 w-5 text-primary" />
-                        </div>
-                        <div>
-                          <CardTitle className="text-xl">{course.name}</CardTitle>
-                          <CardDescription className="flex items-center mt-1">
-                            <School className="h-3 w-3 mr-1" />
-                            {course.schoolName || "Escola"}
-                          </CardDescription>
-                        </div>
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={course.schoolLogo || ""} alt={course.schoolName} />
+                          <AvatarFallback className="bg-primary/10">
+                            <School className="h-4 w-4" />
+                          </AvatarFallback>
+                        </Avatar>
+                        <CardTitle className="text-lg">{course.name}</CardTitle>
                       </div>
                       {course.category && (
-                        <Badge variant="secondary" className="text-xs">
+                        <Badge variant="outline" className="bg-primary/10">
                           {course.category}
                         </Badge>
                       )}
                     </div>
+                    <CardDescription className="line-clamp-2 mt-2">
+                      {course.description || "Nenhuma descrição disponível"}
+                    </CardDescription>
                   </CardHeader>
-                  <CardContent className="pb-4 flex-grow">
-                    {course.description && (
-                      <p className="text-sm text-muted-foreground mb-4 line-clamp-3">
-                        {course.description}
-                      </p>
-                    )}
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      {course.duration && (
-                        <div className="flex items-center">
-                          <Clock className="h-4 w-4 mr-1 text-muted-foreground" />
-                          <span>{course.duration}</span>
-                        </div>
-                      )}
-                      <div className="flex items-center">
-                        <Tag className="h-4 w-4 mr-1 text-muted-foreground" />
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div className="flex items-center text-muted-foreground">
+                        <School className="h-4 w-4 mr-2" />
+                        <span>{course.schoolName || "Instituição não especificada"}</span>
+                      </div>
+                      <div className="flex items-center text-muted-foreground">
+                        <Clock className="h-4 w-4 mr-2" />
+                        <span>{course.duration || "Duração não especificada"}</span>
+                      </div>
+                      <div className="flex items-center text-muted-foreground">
+                        <GraduationCap className="h-4 w-4 mr-2" />
+                        <span>{course.enrollmentCount || 0} alunos</span>
+                      </div>
+                      <div className="flex items-center font-medium">
+                        <DollarSign className="h-4 w-4 mr-2 text-green-600" />
                         <span>
                           {course.price
-                            ? `R$ ${(course.price / 100).toFixed(2).replace(".", ",")}`
+                            ? new Intl.NumberFormat("pt-BR", {
+                                style: "currency",
+                                currency: "BRL",
+                              }).format(course.price)
                             : "Gratuito"}
                         </span>
                       </div>
-                      <div className="flex items-center">
-                        <Calendar className="h-4 w-4 mr-1 text-muted-foreground" />
-                        <span>
-                          {new Date(course.createdAt).toLocaleDateString("pt-BR")}
-                        </span>
-                      </div>
-                      <div className="flex items-center">
-                        <Users className="h-4 w-4 mr-1 text-muted-foreground" />
-                        <span>{course.enrollmentCount || 0} alunos</span>
-                      </div>
                     </div>
                   </CardContent>
-                  <CardFooter className="pt-2 border-t flex justify-between">
+                  <CardFooter className="border-t pt-4 flex justify-between">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => navigate(`/courses/${course.id}`)}
                     >
-                      <Info className="h-4 w-4 mr-1" /> Detalhes
+                      Ver Detalhes
                     </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => handleEnroll(course.id)}
-                    >
-                      <GraduationCap className="h-4 w-4 mr-1" /> Matricular
+                    <Button size="sm" onClick={() => handleEnroll(course.id)}>
+                      Matricular
                     </Button>
                   </CardFooter>
                 </Card>
