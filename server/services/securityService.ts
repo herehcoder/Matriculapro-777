@@ -1,633 +1,626 @@
-/**
- * Serviço de Segurança e LGPD
- * Implementa logs de auditoria, backups automáticos e
- * funcionalidades de segurança requeridas para compliance com LGPD.
- */
-
-import fs from 'fs';
-import path from 'path';
-import { exec } from 'child_process';
+import { randomBytes, createHash, scrypt, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 import { db } from '../db';
-import { eq, and, sql, desc } from 'drizzle-orm';
+import { eq, and, lt, gt } from 'drizzle-orm';
 import { storage } from '../storage';
-import { hashPassword } from '../auth';
+import * as jwt from 'jsonwebtoken';
+import { v4 as uuidv4 } from 'uuid';
 
-// Promisificar exec para uso com async/await
-const execAsync = promisify(exec);
-
-// Constantes
-const LOG_LEVELS = {
-  INFO: 'info',
-  WARNING: 'warning',
-  ERROR: 'error',
-  CRITICAL: 'critical',
-  SECURITY: 'security'
-};
-
-// Tipos para sistema de auditoria
-export interface AuditLog {
-  id: number;
-  userId: number;
-  action: string;
-  entity: string;
-  entityId?: number;
-  details?: Record<string, any>;
-  ipAddress?: string;
-  userAgent?: string;
-  timestamp: Date;
-  level: string;
-}
-
-export interface AuditSearchParams {
-  userId?: number;
-  action?: string;
-  entity?: string;
-  entityId?: number;
-  startDate?: Date;
-  endDate?: Date;
-  level?: string;
-  limit?: number;
-  offset?: number;
-}
+const scryptAsync = promisify(scrypt);
 
 /**
- * Registra uma ação no log de auditoria
+ * Serviço de segurança responsável pelo gerenciamento de tokens,
+ * autenticação, autorização, criptografia e conformidade com a LGPD.
  */
-export async function logAction(
-  userId: number,
-  action: string,
-  entity: string,
-  entityId?: number,
-  details?: Record<string, any>,
-  level: string = LOG_LEVELS.INFO,
-  ipAddress?: string,
-  userAgent?: string
-): Promise<void> {
-  try {
-    // Sanitizar detalhes para remover dados sensíveis
-    const sanitizedDetails = details ? sanitizeDetails(details) : undefined;
-    
-    // Inserir log no banco de dados
-    await db.execute(sql`
-      INSERT INTO audit_logs (
-        user_id, 
-        action, 
-        entity, 
-        entity_id, 
-        details, 
-        ip_address, 
-        user_agent, 
-        level, 
-        created_at
-      )
-      VALUES (
-        ${userId},
-        ${action},
-        ${entity},
-        ${entityId || null},
-        ${sanitizedDetails ? JSON.stringify(sanitizedDetails) : null},
-        ${ipAddress || null},
-        ${userAgent || null},
-        ${level},
-        NOW()
-      )
-    `);
-    
-    console.log(`Audit log created: ${action} on ${entity}${entityId ? ' #' + entityId : ''} by user ${userId}`);
-  } catch (error) {
-    // Falhas no log de auditoria não devem impedir a operação principal
-    // mas devem ser registradas para análise
-    console.error('Error creating audit log:', error);
+export class SecurityService {
+  private jwtSecret: string;
+  private tokenExpiration: string;
+  
+  constructor(jwtSecret?: string, tokenExpiration?: string) {
+    this.jwtSecret = jwtSecret || process.env.JWT_SECRET || randomBytes(32).toString('hex');
+    this.tokenExpiration = tokenExpiration || '7d'; // 7 dias por padrão
   }
-}
 
-/**
- * Sanitiza detalhes para remover dados sensíveis
- */
-function sanitizeDetails(details: Record<string, any>): Record<string, any> {
-  const sensitiveFields = [
-    'password', 'senha', 'secret', 'token', 'apiKey', 'api_key',
-    'credit_card', 'creditCard', 'cartao', 'cvv', 'cvc'
-  ];
-  
-  const sanitized = { ...details };
-  
-  // Recursivamente procurar e remover campos sensíveis
-  function sanitizeObject(obj: Record<string, any>): Record<string, any> {
-    for (const key in obj) {
-      // Se o campo for sensível, substituir por ******
-      if (sensitiveFields.some(field => key.toLowerCase().includes(field.toLowerCase()))) {
-        obj[key] = '******';
-      } 
-      // Se for um objeto aninhado, processa recursivamente
-      else if (obj[key] && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
-        obj[key] = sanitizeObject(obj[key]);
-      }
-      // Se for um array de objetos, processa cada item
-      else if (Array.isArray(obj[key])) {
-        obj[key] = obj[key].map((item: any) => {
-          if (item && typeof item === 'object') {
-            return sanitizeObject(item);
-          }
-          return item;
-        });
-      }
-    }
-    return obj;
+  /**
+   * Gera um hash seguro para uma senha
+   * @param password Senha em texto puro
+   * @returns Hash seguro da senha no formato hash.salt
+   */
+  async hashPassword(password: string): Promise<string> {
+    const salt = randomBytes(16).toString('hex');
+    const buf = await scryptAsync(password, salt, 64) as Buffer;
+    return `${buf.toString('hex')}.${salt}`;
   }
-  
-  return sanitizeObject(sanitized);
-}
 
-/**
- * Busca logs de auditoria com vários filtros
- */
-export async function searchAuditLogs(params: AuditSearchParams): Promise<{
-  logs: AuditLog[];
-  total: number;
-}> {
-  try {
-    // Construir query base
-    let queryStr = `
-      SELECT 
-        al.id, 
-        al.user_id as "userId", 
-        al.action, 
-        al.entity, 
-        al.entity_id as "entityId", 
-        al.details, 
-        al.ip_address as "ipAddress", 
-        al.user_agent as "userAgent", 
-        al.level, 
-        al.created_at as "timestamp",
-        u.username,
-        u.email,
-        u.role
-      FROM audit_logs al
-      LEFT JOIN users u ON al.user_id = u.id
-      WHERE 1=1
-    `;
-    
-    // Adicionar filtros conforme parâmetros
-    const queryParams: any[] = [];
-    let paramCount = 1;
-    
-    if (params.userId) {
-      queryStr += ` AND al.user_id = $${paramCount++}`;
-      queryParams.push(params.userId);
-    }
-    
-    if (params.action) {
-      queryStr += ` AND al.action = $${paramCount++}`;
-      queryParams.push(params.action);
-    }
-    
-    if (params.entity) {
-      queryStr += ` AND al.entity = $${paramCount++}`;
-      queryParams.push(params.entity);
-    }
-    
-    if (params.entityId) {
-      queryStr += ` AND al.entity_id = $${paramCount++}`;
-      queryParams.push(params.entityId);
-    }
-    
-    if (params.level) {
-      queryStr += ` AND al.level = $${paramCount++}`;
-      queryParams.push(params.level);
-    }
-    
-    if (params.startDate) {
-      queryStr += ` AND al.created_at >= $${paramCount++}`;
-      queryParams.push(params.startDate);
-    }
-    
-    if (params.endDate) {
-      queryStr += ` AND al.created_at <= $${paramCount++}`;
-      queryParams.push(params.endDate);
-    }
-    
-    // Ordenar por data de criação (mais recentes primeiro)
-    queryStr += ' ORDER BY al.created_at DESC';
-    
-    // Aplicar paginação
-    const limit = params.limit || 50;
-    const offset = params.offset || 0;
-    
-    // Consulta para contagem total
-    const countQueryStr = queryStr.replace(
-      'SELECT al.id, al.user_id as "userId", al.action, al.entity, al.entity_id as "entityId", al.details, al.ip_address as "ipAddress", al.user_agent as "userAgent", al.level, al.created_at as "timestamp", u.username, u.email, u.role',
-      'SELECT COUNT(*) as total'
-    ).split('ORDER BY')[0];
-    
-    // Adicionar paginação à query principal
-    queryStr += ` LIMIT $${paramCount++} OFFSET $${paramCount++}`;
-    queryParams.push(limit, offset);
-    
-    // Executar consultas
-    const logsResult = await db.execute(sql([queryStr, ...queryParams]));
-    const countResult = await db.execute(sql([countQueryStr, ...queryParams.slice(0, -2)]));
-    
-    return {
-      logs: logsResult.rows as AuditLog[],
-      total: parseInt(countResult.rows[0].total)
+  /**
+   * Verifica se uma senha corresponde ao hash armazenado
+   * @param password Senha em texto puro
+   * @param hashedPassword Hash armazenado
+   * @returns `true` se a senha corresponder ao hash
+   */
+  async verifyPassword(password: string, hashedPassword: string): Promise<boolean> {
+    const [hash, salt] = hashedPassword.split('.');
+    const hashBuf = Buffer.from(hash, 'hex');
+    const suppliedBuf = await scryptAsync(password, salt, 64) as Buffer;
+    return timingSafeEqual(hashBuf, suppliedBuf);
+  }
+
+  /**
+   * Gera um token JWT para autenticação
+   * @param userId ID do usuário
+   * @param role Papel do usuário
+   * @param schoolId ID da escola (opcional)
+   * @returns Token JWT
+   */
+  generateJwtToken(userId: number, role: string, schoolId?: number): string {
+    const payload = {
+      sub: userId,
+      role,
+      ...(schoolId && { schoolId }),
+      iat: Math.floor(Date.now() / 1000)
     };
-  } catch (error) {
-    console.error('Error searching audit logs:', error);
-    throw error;
+    
+    return jwt.sign(payload, this.jwtSecret, { expiresIn: this.tokenExpiration });
   }
-}
 
-/**
- * Realiza backup automático do banco de dados
- */
-export async function backupDatabase(backupDir: string = './backups'): Promise<string> {
-  try {
-    // Criar diretório de backup se não existir
-    if (!fs.existsSync(backupDir)) {
-      fs.mkdirSync(backupDir, { recursive: true });
+  /**
+   * Verifica e decodifica um token JWT
+   * @param token Token JWT
+   * @returns Payload decodificado ou null se inválido
+   */
+  verifyJwtToken(token: string): any {
+    try {
+      return jwt.verify(token, this.jwtSecret);
+    } catch (error) {
+      console.error('Erro ao verificar token JWT:', error.message);
+      return null;
     }
-    
-    // Nome do arquivo de backup
-    const date = new Date();
-    const dateStr = date.toISOString().replace(/[:.]/g, '-').split('T')[0];
-    const filename = `edumatrik_backup_${dateStr}.sql`;
-    const filepath = path.join(backupDir, filename);
-    
-    const {
-      PGDATABASE,
-      PGUSER,
-      PGPASSWORD,
-      PGHOST,
-      PGPORT
-    } = process.env;
-    
-    // Verificar variáveis de ambiente necessárias
-    if (!PGDATABASE || !PGUSER || !PGPASSWORD || !PGHOST) {
-      throw new Error('Database environment variables missing');
-    }
-    
-    // Comando pg_dump com variáveis de ambiente
-    const cmd = `PGPASSWORD="${PGPASSWORD}" pg_dump -U ${PGUSER} -h ${PGHOST} -p ${PGPORT || '5432'} -d ${PGDATABASE} -f "${filepath}"`;
-    
-    // Executar pg_dump
-    console.log(`Starting database backup to ${filepath}...`);
-    await execAsync(cmd);
-    console.log(`Database backup completed: ${filepath}`);
-    
-    // Compactar arquivo (opcional)
-    // await execAsync(`gzip "${filepath}"`);
-    // console.log(`Backup compressed: ${filepath}.gz`);
-    
-    // Registrar backup no log
-    await db.execute(sql`
-      INSERT INTO system_backups (
-        filename, 
-        filepath, 
-        size_bytes, 
-        created_at
-      )
-      VALUES (
-        ${filename},
-        ${filepath},
-        ${fs.statSync(filepath).size},
-        NOW()
-      )
-    `);
-    
-    return filepath;
-  } catch (error) {
-    console.error('Error creating database backup:', error);
-    throw error;
   }
-}
 
-/**
- * Restaura backup do banco de dados
- * ATENÇÃO: Isto irá substituir todos os dados atuais!
- */
-export async function restoreDatabase(backupFilePath: string): Promise<boolean> {
-  try {
-    // Verificar se o arquivo existe
-    if (!fs.existsSync(backupFilePath)) {
-      throw new Error(`Backup file not found: ${backupFilePath}`);
-    }
+  /**
+   * Gera um token de redefinição de senha
+   * @param userId ID do usuário
+   * @param expiresIn Tempo de expiração em milissegundos (padrão: 1 hora)
+   * @returns Token gerado
+   */
+  async generatePasswordResetToken(userId: number, expiresIn: number = 3600000): Promise<string> {
+    const token = uuidv4();
+    const expiresAt = new Date(Date.now() + expiresIn);
     
-    const {
-      PGDATABASE,
-      PGUSER,
-      PGPASSWORD,
-      PGHOST,
-      PGPORT
-    } = process.env;
+    await db.insert('password_reset_tokens').values({
+      token,
+      user_id: userId,
+      expires_at: expiresAt,
+      created_at: new Date(),
+      used: false
+    });
     
-    // Verificar variáveis de ambiente necessárias
-    if (!PGDATABASE || !PGUSER || !PGPASSWORD || !PGHOST) {
-      throw new Error('Database environment variables missing');
-    }
-    
-    // Comando psql para restaurar
-    const cmd = `PGPASSWORD="${PGPASSWORD}" psql -U ${PGUSER} -h ${PGHOST} -p ${PGPORT || '5432'} -d ${PGDATABASE} -f "${backupFilePath}"`;
-    
-    // Executar restauração
-    console.log(`Starting database restore from ${backupFilePath}...`);
-    await execAsync(cmd);
-    console.log(`Database restore completed from ${backupFilePath}`);
-    
-    return true;
-  } catch (error) {
-    console.error('Error restoring database:', error);
-    throw error;
+    return token;
   }
-}
 
-/**
- * Lista backups disponíveis
- */
-export async function listBackups(): Promise<any[]> {
-  try {
-    // Buscar backups no banco de dados
-    const result = await db.execute(sql`
-      SELECT 
-        id,
-        filename,
-        filepath,
-        size_bytes,
-        created_at
-      FROM system_backups
-      ORDER BY created_at DESC
-    `);
+  /**
+   * Valida um token de redefinição de senha
+   * @param token Token a ser validado
+   * @returns ID do usuário se válido, null se inválido
+   */
+  async validatePasswordResetToken(token: string): Promise<number | null> {
+    const now = new Date();
     
-    return result.rows;
-  } catch (error) {
-    console.error('Error listing backups:', error);
-    throw error;
-  }
-}
-
-/**
- * Configura job de backup automático diário
- */
-export function scheduleAutomaticBackup(backupDir: string = './backups'): NodeJS.Timeout {
-  console.log('Scheduling automatic daily database backup...');
-  
-  // Calcular tempo até a próxima execução (às 2 AM)
-  const now = new Date();
-  const nextRun = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate() + (now.getHours() >= 2 ? 1 : 0),
-    2, 0, 0
-  );
-  
-  // Tempo em ms até a próxima execução
-  const msUntilNextRun = nextRun.getTime() - now.getTime();
-  
-  // Agendar primeira execução
-  const timer = setTimeout(() => {
-    // Executar backup
-    backupDatabase(backupDir)
-      .catch(err => console.error('Automatic backup failed:', err));
+    const [tokenRecord] = await db
+      .select()
+      .from('password_reset_tokens')
+      .where(
+        and(
+          eq('token', token),
+          eq('used', false),
+          gt('expires_at', now)
+        )
+      );
     
-    // Configurar execução diária (a cada 24 horas)
-    setInterval(() => {
-      backupDatabase(backupDir)
-        .catch(err => console.error('Automatic backup failed:', err));
-    }, 24 * 60 * 60 * 1000);
-  }, msUntilNextRun);
-  
-  console.log(`Next automatic backup scheduled for ${nextRun.toLocaleString()}`);
-  
-  return timer;
-}
-
-/**
- * Pseudonimiza/Anonimiza dados de um usuário (para atender LGPD)
- */
-export async function pseudonymizeUser(userId: number): Promise<boolean> {
-  try {
-    // Gerar string aleatória para substituir dados pessoais
-    const randomString = () => Math.random().toString(36).substring(2, 15);
-    
-    // Buscar informações do usuário
-    const [user] = await db.select()
-      .from('users')
-      .where(eq('users.id', userId));
-    
-    if (!user) {
-      throw new Error(`User not found: ${userId}`);
+    if (!tokenRecord) {
+      return null;
     }
     
-    // Pseudonimizar dados pessoais
+    return tokenRecord.user_id;
+  }
+
+  /**
+   * Marca um token de redefinição de senha como usado
+   * @param token Token a ser marcado
+   * @returns `true` se o token foi marcado com sucesso
+   */
+  async markPasswordResetTokenAsUsed(token: string): Promise<boolean> {
+    const result = await db
+      .update('password_reset_tokens')
+      .set({ used: true, used_at: new Date() })
+      .where(eq('token', token));
+    
+    return !!result;
+  }
+
+  /**
+   * Limpa tokens expirados
+   * @returns Número de tokens removidos
+   */
+  async cleanupExpiredTokens(): Promise<number> {
+    const now = new Date();
+    
+    const result = await db
+      .delete('password_reset_tokens')
+      .where(lt('expires_at', now));
+    
+    return result.count;
+  }
+
+  /**
+   * Registra uma tentativa de login
+   * @param userId ID do usuário (ou null se não encontrado)
+   * @param username Nome de usuário tentado
+   * @param ip Endereço IP do cliente
+   * @param userAgent User Agent do cliente
+   * @param success Se a tentativa foi bem-sucedida
+   */
+  async logLoginAttempt(
+    userId: number | null,
+    username: string,
+    ip: string,
+    userAgent: string,
+    success: boolean
+  ): Promise<void> {
+    await db.insert('login_attempts').values({
+      user_id: userId,
+      username,
+      ip_address: ip,
+      user_agent: userAgent,
+      success,
+      created_at: new Date()
+    });
+    
+    // Se for uma tentativa malsucedida, verificar se deve bloquear o usuário
+    if (!success && userId) {
+      const oneHourAgo = new Date();
+      oneHourAgo.setHours(oneHourAgo.getHours() - 1);
+      
+      const [recentAttempts] = await db
+        .select({ count: db.sql<number>`count(*)` })
+        .from('login_attempts')
+        .where(
+          and(
+            eq('user_id', userId),
+            eq('success', false),
+            gt('created_at', oneHourAgo)
+          )
+        );
+      
+      // Se houver mais de 5 tentativas malsucedidas em 1 hora, bloquear temporariamente
+      if (recentAttempts.count >= 5) {
+        await this.lockAccount(userId, 30); // 30 minutos de bloqueio
+      }
+    }
+  }
+
+  /**
+   * Bloqueia temporariamente uma conta de usuário
+   * @param userId ID do usuário
+   * @param minutes Duração do bloqueio em minutos
+   */
+  private async lockAccount(userId: number, minutes: number): Promise<void> {
+    const unlockAt = new Date();
+    unlockAt.setMinutes(unlockAt.getMinutes() + minutes);
+    
     await db.update('users')
-      .set({
-        email: `anonimizado_${randomString()}@example.com`,
-        fullName: `Usuário Anonimizado ${userId}`,
-        phone: null,
-        username: `anon_${userId}_${randomString()}`,
-        // Senha inutilizável
-        password: await hashPassword(randomString() + randomString()),
-        // Configurar flag de pseudonimização
-        pseudonymized: true,
-        pseudonymizedAt: new Date()
+      .set({ 
+        locked_until: unlockAt,
+        locked_reason: 'Múltiplas tentativas de login malsucedidas',
+        updated_at: new Date()
       })
-      .where(eq('users.id', userId));
-    
-    // Pseudonimizar dados em tabelas relacionadas
-    
-    // Endereços
-    await db.execute(sql`
-      UPDATE addresses
-      SET 
-        street = 'Endereço removido',
-        number = 'N/A',
-        complement = NULL,
-        neighborhood = 'Anonimizado',
-        city = 'Anonimizado',
-        state = 'AN',
-        zipcode = '00000000'
-      WHERE user_id = ${userId}
-    `);
-    
-    // Documentos
-    await db.execute(sql`
-      UPDATE documents
-      SET 
-        document_number = 'ANONIMIZADO',
-        filename = NULL,
-        filepath = NULL,
-        content = NULL
-      WHERE user_id = ${userId}
-    `);
-    
-    console.log(`User ${userId} successfully pseudonymized`);
-    
-    return true;
-  } catch (error) {
-    console.error(`Error pseudonymizing user ${userId}:`, error);
-    throw error;
+      .where(eq('id', userId));
   }
-}
 
-/**
- * Gera relatório de dados pessoais armazenados para um usuário (LGPD)
- */
-export async function generateUserDataReport(userId: number): Promise<Record<string, any>> {
-  try {
-    // Buscar informações do usuário
-    const [user] = await db.select({
-      id: 'users.id',
-      username: 'users.username',
-      email: 'users.email',
-      fullName: 'users.fullName',
-      phone: 'users.phone',
-      role: 'users.role',
-      createdAt: 'users.createdAt'
-    })
-    .from('users')
-    .where(eq('users.id', userId));
+  /**
+   * Verifica se uma conta está bloqueada
+   * @param userId ID do usuário
+   * @returns Razão do bloqueio se bloqueado, null se desbloqueado
+   */
+  async isAccountLocked(userId: number): Promise<string | null> {
+    const [user] = await db
+      .select({
+        lockedUntil: 'locked_until',
+        lockedReason: 'locked_reason'
+      })
+      .from('users')
+      .where(eq('id', userId));
     
-    if (!user) {
-      throw new Error(`User not found: ${userId}`);
+    if (!user || !user.lockedUntil) {
+      return null;
     }
     
-    // Buscar endereços
-    const addresses = await db.select()
-      .from('addresses')
-      .where(eq('addresses.userId', userId));
+    const now = new Date();
+    if (new Date(user.lockedUntil) > now) {
+      return user.lockedReason || 'Conta temporariamente bloqueada';
+    }
     
-    // Buscar documentos (apenas metadados, não conteúdo)
-    const documents = await db.select({
-      id: 'documents.id',
-      documentType: 'documents.documentType',
-      documentNumber: 'documents.documentNumber',
-      uploadedAt: 'documents.createdAt'
-    })
-    .from('documents')
-    .where(eq('documents.userId', userId));
+    // Se o bloqueio expirou, desbloquear a conta
+    await db.update('users')
+      .set({ 
+        locked_until: null,
+        locked_reason: null,
+        updated_at: now
+      })
+      .where(eq('id', userId));
     
-    // Buscar matrículas
-    const enrollments = await db.select({
-      id: 'enrollments.id',
-      courseId: 'enrollments.courseId',
-      courseName: 'courses.name',
-      status: 'enrollments.status',
-      createdAt: 'enrollments.createdAt'
-    })
-    .from('enrollments')
-    .leftJoin('courses', eq('enrollments.courseId', 'courses.id'))
-    .where(eq('enrollments.studentId', userId));
-    
-    // Buscar logs de auditoria
-    const auditLogs = await db.select({
-      action: 'audit_logs.action',
-      entity: 'audit_logs.entity',
-      entityId: 'audit_logs.entityId',
-      timestamp: 'audit_logs.createdAt'
-    })
-    .from('audit_logs')
-    .where(eq('audit_logs.userId', userId))
-    .orderBy(desc('audit_logs.createdAt'))
-    .limit(100);
-    
-    // Montar relatório completo
-    return {
-      userData: user,
-      addresses,
-      documents,
-      enrollments,
-      auditActivity: auditLogs,
-      reportGeneratedAt: new Date()
-    };
-  } catch (error) {
-    console.error(`Error generating data report for user ${userId}:`, error);
-    throw error;
+    return null;
   }
-}
 
-/**
- * Verifica senhas vulneráveis contra lista comum
- */
-export async function isPasswordVulnerable(password: string): Promise<boolean> {
-  // Lista de senhas comuns/vulneráveis
-  const commonPasswords = [
-    'password', '123456', '12345678', 'qwerty', 'admin',
-    'welcome', '1234', 'senha', 'admin123', '123456789',
-    'abcd1234', 'qwerty123', 'senha123', '12345', 'abc123'
-  ];
-  
-  // Verificar se a senha está na lista
-  if (commonPasswords.includes(password.toLowerCase())) {
-    return true;
+  /**
+   * Revoga todos os tokens de redefinição de senha pendentes para um usuário
+   * @param userId ID do usuário
+   * @returns Número de tokens revogados
+   */
+  async revokeAllPendingPasswordResetTokens(userId: number): Promise<number> {
+    const result = await db
+      .update('password_reset_tokens')
+      .set({ used: true, used_at: new Date() })
+      .where(
+        and(
+          eq('user_id', userId),
+          eq('used', false)
+        )
+      );
+    
+    return result.count;
   }
-  
-  // Verificar padrões óbvios
-  if (/^(123|abc|qwe|password|admin|user).*/i.test(password)) {
-    return true;
+
+  /**
+   * Gera um ID de auditoria para rastreamento de ações
+   * @returns ID de auditoria único
+   */
+  generateAuditId(): string {
+    return uuidv4();
   }
-  
-  // Verificar sequências
-  const sequences = ['123456789', 'abcdefghi', 'qwertyuio'];
-  for (const seq of sequences) {
-    if (password.toLowerCase().includes(seq)) {
+
+  /**
+   * Registra uma ação de usuário para fins de auditoria
+   * @param userId ID do usuário que realizou a ação
+   * @param action Ação realizada
+   * @param resource Recurso afetado
+   * @param resourceId ID do recurso afetado
+   * @param details Detalhes adicionais
+   * @returns ID da entrada de auditoria
+   */
+  async logAuditEntry(
+    userId: number,
+    action: string,
+    resource: string,
+    resourceId: string | number,
+    details: any = {}
+  ): Promise<number> {
+    const [entry] = await db.insert('audit_logs').values({
+      user_id: userId,
+      action,
+      resource,
+      resource_id: resourceId.toString(),
+      details: JSON.stringify(details),
+      ip_address: details.ipAddress || null,
+      user_agent: details.userAgent || null,
+      created_at: new Date()
+    }).returning();
+    
+    return entry.id;
+  }
+
+  /**
+   * Verifica se um usuário tem permissão para acessar um recurso
+   * @param userId ID do usuário
+   * @param resource Recurso a ser acessado
+   * @param action Ação a ser realizada (view, edit, delete)
+   * @returns `true` se o usuário tem permissão
+   */
+  async checkPermission(userId: number, resource: string, action: string): Promise<boolean> {
+    // Obter usuário
+    const user = await storage.getUser(userId);
+    if (!user) return false;
+    
+    // Administradores têm acesso total
+    if (user.role === 'admin') return true;
+    
+    // Verificar permissões baseadas em papel
+    switch (user.role) {
+      case 'school':
+        // Diretores de escola têm acesso apenas aos recursos da própria escola
+        if (resource.startsWith('school') && action === 'view') return true;
+        if (resource === `school:${user.schoolId}`) return true;
+        if (resource.startsWith(`student:`) && this.isStudentInSchool(resource, user.schoolId)) return true;
+        if (resource.startsWith(`enrollment:`) && this.isEnrollmentInSchool(resource, user.schoolId)) return true;
+        if (resource.startsWith(`course:`) && this.isCourseInSchool(resource, user.schoolId)) return true;
+        break;
+        
+      case 'attendant':
+        // Atendentes têm acesso limitado a recursos da escola
+        if (resource.startsWith(`student:`) && this.isStudentInSchool(resource, user.schoolId)) {
+          return action === 'view' || action === 'edit';
+        }
+        if (resource.startsWith(`enrollment:`) && this.isEnrollmentInSchool(resource, user.schoolId)) {
+          return action === 'view' || action === 'edit';
+        }
+        if (resource.startsWith(`course:`) && this.isCourseInSchool(resource, user.schoolId)) {
+          return action === 'view';
+        }
+        break;
+        
+      case 'student':
+        // Estudantes têm acesso apenas aos próprios dados
+        if (resource === `student:${user.id}`) return action === 'view' || action === 'edit';
+        if (resource.startsWith(`enrollment:`) && this.isStudentEnrollment(resource, user.id)) {
+          return action === 'view';
+        }
+        break;
+    }
+    
+    return false;
+  }
+
+  /**
+   * Verifica se um estudante pertence a uma escola
+   * @param resourceId ID do recurso no formato "student:123"
+   * @param schoolId ID da escola
+   * @returns `true` se o estudante pertence à escola
+   */
+  private async isStudentInSchool(resourceId: string, schoolId: number): Promise<boolean> {
+    const studentId = this.extractResourceId(resourceId);
+    if (!studentId) return false;
+    
+    const student = await storage.getStudent(studentId);
+    return student?.schoolId === schoolId;
+  }
+
+  /**
+   * Verifica se uma matrícula pertence a uma escola
+   * @param resourceId ID do recurso no formato "enrollment:123"
+   * @param schoolId ID da escola
+   * @returns `true` se a matrícula pertence à escola
+   */
+  private async isEnrollmentInSchool(resourceId: string, schoolId: number): Promise<boolean> {
+    const enrollmentId = this.extractResourceId(resourceId);
+    if (!enrollmentId) return false;
+    
+    const enrollment = await storage.getEnrollment(enrollmentId);
+    return enrollment?.schoolId === schoolId;
+  }
+
+  /**
+   * Verifica se um curso pertence a uma escola
+   * @param resourceId ID do recurso no formato "course:123"
+   * @param schoolId ID da escola
+   * @returns `true` se o curso pertence à escola
+   */
+  private async isCourseInSchool(resourceId: string, schoolId: number): Promise<boolean> {
+    const courseId = this.extractResourceId(resourceId);
+    if (!courseId) return false;
+    
+    const course = await storage.getCourse(courseId);
+    return course?.schoolId === schoolId;
+  }
+
+  /**
+   * Verifica se uma matrícula pertence a um estudante
+   * @param resourceId ID do recurso no formato "enrollment:123"
+   * @param studentUserId ID do usuário estudante
+   * @returns `true` se a matrícula pertence ao estudante
+   */
+  private async isStudentEnrollment(resourceId: string, studentUserId: number): Promise<boolean> {
+    const enrollmentId = this.extractResourceId(resourceId);
+    if (!enrollmentId) return false;
+    
+    const enrollment = await storage.getEnrollment(enrollmentId);
+    if (!enrollment) return false;
+    
+    const student = await storage.getStudent(enrollment.studentId);
+    return student?.userId === studentUserId;
+  }
+
+  /**
+   * Extrai o ID numérico de um recurso no formato "tipo:id"
+   * @param resourceId ID do recurso no formato "tipo:id"
+   * @returns ID numérico ou null se inválido
+   */
+  private extractResourceId(resourceId: string): number | null {
+    const parts = resourceId.split(':');
+    if (parts.length !== 2) return null;
+    
+    const id = parseInt(parts[1]);
+    return isNaN(id) ? null : id;
+  }
+
+  /**
+   * Anonimiza os dados de um usuário (conformidade com LGPD)
+   * @param userId ID do usuário
+   * @returns `true` se anonimizado com sucesso
+   */
+  async anonymizeUser(userId: number): Promise<boolean> {
+    const randomSuffix = randomBytes(4).toString('hex');
+    
+    try {
+      // Anonimizar dados pessoais
+      await db.update('users')
+        .set({
+          email: `anonymized-${randomSuffix}@example.com`,
+          username: `anonymized-${randomSuffix}`,
+          fullName: 'Usuário Anonimizado',
+          phone: null,
+          profileImage: null,
+          password: await this.hashPassword(randomBytes(16).toString('hex')), // senha aleatória impossível de adivinhar
+          updatedAt: new Date()
+        })
+        .where(eq('id', userId));
+      
+      // Anonimizar dados de estudante, se aplicável
+      const student = await storage.getStudent(userId);
+      if (student) {
+        await db.update('students')
+          .set({
+            cpf: null,
+            rg: null,
+            address: null,
+            city: null,
+            state: null,
+            updated_at: new Date()
+          })
+          .where(eq('user_id', userId));
+      }
+      
+      // Registrar ação de anonimização
+      await this.logAuditEntry(
+        userId,
+        'anonymize',
+        'user',
+        userId,
+        { reason: 'LGPD compliance request' }
+      );
+      
       return true;
+    } catch (error) {
+      console.error('Erro ao anonimizar usuário:', error);
+      return false;
     }
   }
-  
-  // Verificar repetições
-  if (/(.)\1{3,}/.test(password)) { // 4+ caracteres repetidos
-    return true;
+
+  /**
+   * Gera e armazena um hash de consentimento LGPD
+   * @param userId ID do usuário
+   * @param consentType Tipo de consentimento
+   * @param consentText Texto completo do consentimento
+   * @param ipAddress Endereço IP do usuário
+   * @param userAgent User Agent do navegador
+   * @returns ID do registro de consentimento
+   */
+  async recordConsent(
+    userId: number,
+    consentType: string,
+    consentText: string,
+    ipAddress: string,
+    userAgent: string
+  ): Promise<number> {
+    // Gerar hash do texto de consentimento para verificação futura
+    const consentHash = createHash('sha256')
+      .update(consentText)
+      .digest('hex');
+    
+    const [consent] = await db.insert('user_consents').values({
+      user_id: userId,
+      consent_type: consentType,
+      consent_hash: consentHash,
+      ip_address: ipAddress,
+      user_agent: userAgent,
+      granted_at: new Date()
+    }).returning();
+    
+    return consent.id;
   }
-  
-  // Senha não é vulnerável pelos critérios avaliados
-  return false;
+
+  /**
+   * Verifica se um usuário deu consentimento para um determinado tipo
+   * @param userId ID do usuário
+   * @param consentType Tipo de consentimento
+   * @returns `true` se o consentimento foi dado
+   */
+  async hasUserConsent(userId: number, consentType: string): Promise<boolean> {
+    const [consent] = await db
+      .select()
+      .from('user_consents')
+      .where(
+        and(
+          eq('user_id', userId),
+          eq('consent_type', consentType),
+          eq('revoked', false)
+        )
+      );
+    
+    return !!consent;
+  }
+
+  /**
+   * Revoga um consentimento específico
+   * @param userId ID do usuário
+   * @param consentType Tipo de consentimento
+   * @returns `true` se revogado com sucesso
+   */
+  async revokeConsent(userId: number, consentType: string): Promise<boolean> {
+    const result = await db
+      .update('user_consents')
+      .set({
+        revoked: true,
+        revoked_at: new Date()
+      })
+      .where(
+        and(
+          eq('user_id', userId),
+          eq('consent_type', consentType),
+          eq('revoked', false)
+        )
+      );
+    
+    return result.count > 0;
+  }
+
+  /**
+   * Exporta todos os dados pessoais de um usuário (direito à portabilidade da LGPD)
+   * @param userId ID do usuário
+   * @returns Objeto com todos os dados do usuário
+   */
+  async exportUserData(userId: number): Promise<any> {
+    // Obter dados básicos do usuário
+    const user = await storage.getUser(userId);
+    if (!user) {
+      throw new Error(`Usuário não encontrado: ${userId}`);
+    }
+    
+    // Remover campos sensíveis
+    const { password, ...userData } = user;
+    
+    // Obter dados adicionais
+    const student = await storage.getStudent(userId);
+    
+    // Obter matrículas
+    const enrollments = student
+      ? await storage.getEnrollmentsByStudent(student.id)
+      : [];
+    
+    // Obter respostas de formulários
+    const answers = [];
+    for (const enrollment of enrollments) {
+      const enrollmentAnswers = await storage.getAnswersByEnrollment(enrollment.id);
+      answers.push({
+        enrollmentId: enrollment.id,
+        answers: enrollmentAnswers
+      });
+    }
+    
+    // Obter consentimentos
+    const consents = await db
+      .select()
+      .from('user_consents')
+      .where(eq('user_id', userId));
+    
+    // Obter histórico de login
+    const loginHistory = await db
+      .select()
+      .from('login_attempts')
+      .where(eq('user_id', userId))
+      .orderBy(db.sql`created_at DESC`)
+      .limit(100);
+    
+    return {
+      user: userData,
+      student,
+      enrollments,
+      answers,
+      consents: consents.map(({ consent_hash, ...rest }) => rest), // Remover hash por segurança
+      loginHistory: loginHistory.map(({ ip_address, ...rest }) => rest) // Remover IP por segurança
+    };
+  }
 }
 
-// SQL para criar tabelas de segurança
-export const getSecurityTablesSQL = () => `
-CREATE TABLE IF NOT EXISTS audit_logs (
-  id SERIAL PRIMARY KEY,
-  user_id INTEGER REFERENCES users(id),
-  action VARCHAR(100) NOT NULL,
-  entity VARCHAR(100) NOT NULL,
-  entity_id INTEGER,
-  details JSONB,
-  ip_address VARCHAR(45),
-  user_agent TEXT,
-  level VARCHAR(20) NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS system_backups (
-  id SERIAL PRIMARY KEY,
-  filename VARCHAR(255) NOT NULL,
-  filepath VARCHAR(255) NOT NULL,
-  size_bytes BIGINT NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS security_events (
-  id SERIAL PRIMARY KEY,
-  event_type VARCHAR(50) NOT NULL,
-  severity VARCHAR(20) NOT NULL,
-  description TEXT NOT NULL,
-  ip_address VARCHAR(45),
-  user_id INTEGER REFERENCES users(id),
-  affected_entity VARCHAR(50),
-  affected_id INTEGER,
-  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-);
-
--- Adicionar campo de pseudonimização a tabela de usuários
-ALTER TABLE users ADD COLUMN IF NOT EXISTS pseudonymized BOOLEAN DEFAULT FALSE;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS pseudonymized_at TIMESTAMP WITH TIME ZONE;
-
--- Índices para otimizar consultas
-CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity, entity_id);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
-CREATE INDEX IF NOT EXISTS idx_security_events_event_type ON security_events(event_type);
-CREATE INDEX IF NOT EXISTS idx_security_events_user_id ON security_events(user_id);
-`;
+// Exportar instância única do serviço
+const securityService = new SecurityService();
+export default securityService;

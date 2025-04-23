@@ -1,979 +1,904 @@
-/**
- * Serviço de Analytics Avançado
- * Implementa pipeline ETL completo, dashboards customizados
- * e exportação de dados em vários formatos.
- */
-
 import { db } from '../db';
-import { eq, and, sql, desc, asc, like, not, isNull, or } from 'drizzle-orm';
 import { storage } from '../storage';
-import { parse as json2csv } from 'json2csv';
-import * as fs from 'fs';
-import * as path from 'path';
-
-// Tipos para análises e relatórios
-export interface EnrollmentMetrics {
-  totalEnrollments: number;
-  activeEnrollments: number;
-  completedEnrollments: number;
-  abandonedEnrollments: number;
-  pendingDocuments: number;
-  pendingPayments: number;
-  byStatus: Record<string, number>;
-  byMonth: Array<{
-    month: string;
-    count: number;
-  }>;
-  conversionRate: number;
-}
-
-export interface SchoolMetrics extends EnrollmentMetrics {
-  schoolId: number;
-  schoolName: string;
-  totalStudents: number;
-  totalRevenue: number;
-  averageEnrollmentTime: number;
-  coursePerformance: Array<{
-    courseId: number;
-    courseName: string;
-    enrollmentCount: number;
-    completionRate: number;
-    revenue: number;
-  }>;
-}
-
-export interface CourseMetrics {
-  courseId: number;
-  courseName: string;
-  totalEnrollments: number;
-  activeEnrollments: number;
-  completedEnrollments: number;
-  abandonedEnrollments: number;
-  averageCompletionTime: number;
-  revenue: number;
-  byMonth: Array<{
-    month: string;
-    count: number;
-  }>;
-}
-
-export interface DocumentMetrics {
-  totalDocuments: number;
-  verifiedDocuments: number;
-  pendingDocuments: number;
-  rejectedDocuments: number;
-  verificationRate: number;
-  averageVerificationTime: number;
-  byType: Record<string, {
-    count: number;
-    verifiedCount: number;
-    verificationRate: number;
-  }>;
-}
-
-export interface PlatformMetrics {
-  totalSchools: number;
-  activeSchools: number;
-  totalCourses: number;
-  totalStudents: number;
-  totalEnrollments: number;
-  totalRevenue: number;
-  enrollmentsByMonth: Record<string, number>;
-  revenueByMonth: Record<string, number>;
-  topSchools: Array<{
-    schoolId: number;
-    schoolName: string;
-    enrollmentCount: number;
-    revenue: number;
-  }>;
-  topCourses: Array<{
-    courseId: number;
-    courseName: string;
-    enrollmentCount: number;
-    revenue: number;
-  }>;
-  documentVerificationRate: number;
-  paymentSuccessRate: number;
-}
-
-export interface ETLConfig {
-  sourceTable: string;
-  targetTable: string;
-  transformations: Array<{
-    sourceField: string;
-    targetField: string;
-    transformation?: string; // SQL transformation
-  }>;
-  filters?: string; // SQL WHERE clause
-  groupBy?: string; // SQL GROUP BY clause
-  schedule: {
-    frequency: 'hourly' | 'daily' | 'weekly' | 'monthly';
-    dayOfWeek?: number; // 0-6 for weekly
-    dayOfMonth?: number; // 1-31 for monthly
-    hour: number; // 0-23
-    minute: number; // 0-59
-  };
-}
-
-// Tipo para exportação de dados
-export interface ExportOptions {
-  format: 'csv' | 'json' | 'excel' | 'pdf';
-  filename: string;
-  data: any[];
-  columns?: string[];
-}
+import { eq, and, sql, desc, between, or, lt, gt, lte, gte } from 'drizzle-orm';
 
 /**
- * Obtém métricas de matrículas globais ou por escola
+ * Serviço de análise de dados para extração de insights e geração de relatórios
  */
-export async function getEnrollmentMetrics(schoolId?: number): Promise<EnrollmentMetrics> {
-  try {
-    // Base query para contagem total
-    let baseQuery = 'enrollments';
-    let whereClause = '';
-    const queryParams: any[] = [];
-    
-    // Adicionar filtro por escola se fornecido
-    if (schoolId) {
-      whereClause = 'WHERE school_id = ?';
-      queryParams.push(schoolId);
-    }
-    
-    // Total de matrículas
-    const [totalResult] = await db.execute(sql`
-      SELECT COUNT(*) as count
-      FROM enrollments
-      ${schoolId ? sql`WHERE school_id = ${schoolId}` : sql``}
-    `);
-    
-    // Matrículas por status
-    const statusResults = await db.execute(sql`
-      SELECT status, COUNT(*) as count
-      FROM enrollments
-      ${schoolId ? sql`WHERE school_id = ${schoolId}` : sql``}
-      GROUP BY status
-    `);
-    
-    const byStatus: Record<string, number> = {};
-    statusResults.rows.forEach((row: any) => {
-      byStatus[row.status || 'unknown'] = parseInt(row.count);
-    });
-    
-    // Contar matrículas com documentos pendentes
-    const [pendingDocsResult] = await db.execute(sql`
-      SELECT COUNT(DISTINCT e.id) as count
-      FROM enrollments e
-      LEFT JOIN documents d ON d.enrollment_id = e.id
-      WHERE d.status = 'pending'
-      ${schoolId ? sql`AND e.school_id = ${schoolId}` : sql``}
-    `);
-    
-    // Contar matrículas com pagamentos pendentes
-    const [pendingPaymentsResult] = await db.execute(sql`
-      SELECT COUNT(*) as count
-      FROM enrollments
-      WHERE payment_status = 'pending'
-      ${schoolId ? sql`AND school_id = ${schoolId}` : sql``}
-    `);
-    
-    // Matrículas por mês
-    const monthlyResults = await db.execute(sql`
-      SELECT 
-        TO_CHAR(created_at, 'YYYY-MM') as month,
-        COUNT(*) as count
-      FROM enrollments
-      ${schoolId ? sql`WHERE school_id = ${schoolId}` : sql``}
-      GROUP BY TO_CHAR(created_at, 'YYYY-MM')
-      ORDER BY month
-    `);
-    
-    const byMonth = monthlyResults.rows.map((row: any) => ({
-      month: row.month,
-      count: parseInt(row.count)
-    }));
-    
-    // Calcular taxa de conversão (matrículas completas / total)
-    const completedCount = byStatus['completed'] || 0;
-    const totalCount = parseInt(totalResult.count);
-    const conversionRate = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
-    
-    return {
-      totalEnrollments: totalCount,
-      activeEnrollments: (byStatus['personal_info'] || 0) + (byStatus['course_info'] || 0) + (byStatus['payment'] || 0) + (byStatus['document_verification'] || 0),
-      completedEnrollments: byStatus['completed'] || 0,
-      abandonedEnrollments: byStatus['abandoned'] || 0,
-      pendingDocuments: parseInt(pendingDocsResult.count || '0'),
-      pendingPayments: parseInt(pendingPaymentsResult.count || '0'),
-      byStatus,
-      byMonth,
-      conversionRate
-    };
-  } catch (error) {
-    console.error('Error generating enrollment metrics:', error);
-    throw error;
-  }
-}
-
-/**
- * Obtém métricas detalhadas para uma escola específica
- */
-export async function getSchoolAnalytics(schoolId: number): Promise<SchoolMetrics> {
-  try {
-    // Obter métricas básicas de matrículas
-    const enrollmentMetrics = await getEnrollmentMetrics(schoolId);
-    
-    // Buscar informações da escola
-    const [school] = await db.select()
-      .from('schools')
-      .where(eq('schools.id', schoolId));
-    
-    if (!school) {
-      throw new Error(`School not found: ${schoolId}`);
-    }
-    
-    // Contar total de estudantes únicos
-    const [studentsResult] = await db.execute(sql`
-      SELECT COUNT(DISTINCT student_id) as count
-      FROM enrollments
-      WHERE school_id = ${schoolId}
-      AND student_id IS NOT NULL
-    `);
-    
-    // Calcular receita total
-    const [revenueResult] = await db.execute(sql`
-      SELECT SUM(amount) as total
-      FROM payments
-      WHERE school_id = ${schoolId}
-      AND status = 'succeeded'
-    `);
-    
-    // Calcular tempo médio de conclusão de matrícula (em dias)
-    const [timeResult] = await db.execute(sql`
-      SELECT AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) / 86400) as avg_days
-      FROM enrollments
-      WHERE school_id = ${schoolId}
-      AND status = 'completed'
-    `);
-    
-    // Desempenho por curso
-    const courseResults = await db.execute(sql`
-      SELECT 
-        c.id as course_id,
-        c.name as course_name,
-        COUNT(e.id) as enrollment_count,
-        SUM(CASE WHEN e.status = 'completed' THEN 1 ELSE 0 END) as completed_count,
-        SUM(CASE WHEN p.status = 'succeeded' THEN p.amount ELSE 0 END) as revenue
-      FROM courses c
-      LEFT JOIN enrollments e ON c.id = e.course_id
-      LEFT JOIN payments p ON e.id = p.enrollment_id
-      WHERE c.school_id = ${schoolId}
-      GROUP BY c.id, c.name
-      ORDER BY enrollment_count DESC
-    `);
-    
-    const coursePerformance = courseResults.rows.map((row: any) => ({
-      courseId: row.course_id,
-      courseName: row.course_name,
-      enrollmentCount: parseInt(row.enrollment_count),
-      completionRate: parseInt(row.enrollment_count) > 0 
-        ? (parseInt(row.completed_count) / parseInt(row.enrollment_count)) * 100 
-        : 0,
-      revenue: parseFloat(row.revenue || 0)
-    }));
-    
-    return {
-      ...enrollmentMetrics,
-      schoolId,
-      schoolName: school.name,
-      totalStudents: parseInt(studentsResult.count || '0'),
-      totalRevenue: parseFloat(revenueResult.total || '0'),
-      averageEnrollmentTime: parseFloat(timeResult.avg_days || '0'),
-      coursePerformance
-    };
-  } catch (error) {
-    console.error(`Error generating school analytics for school ${schoolId}:`, error);
-    throw error;
-  }
-}
-
-/**
- * Obtém métricas para um curso específico
- */
-export async function getCourseAnalytics(courseId: number): Promise<CourseMetrics> {
-  try {
-    // Buscar informações do curso
-    const [course] = await db.select()
-      .from('courses')
-      .where(eq('courses.id', courseId));
-    
-    if (!course) {
-      throw new Error(`Course not found: ${courseId}`);
-    }
-    
-    // Total de matrículas
-    const [totalResult] = await db.execute(sql`
-      SELECT COUNT(*) as count
-      FROM enrollments
-      WHERE course_id = ${courseId}
-    `);
-    
-    // Matrículas por status
-    const statusResults = await db.execute(sql`
-      SELECT status, COUNT(*) as count
-      FROM enrollments
-      WHERE course_id = ${courseId}
-      GROUP BY status
-    `);
-    
-    const statusCounts: Record<string, number> = {};
-    statusResults.rows.forEach((row: any) => {
-      statusCounts[row.status || 'unknown'] = parseInt(row.count);
-    });
-    
-    // Tempo médio de conclusão (em dias)
-    const [timeResult] = await db.execute(sql`
-      SELECT AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) / 86400) as avg_days
-      FROM enrollments
-      WHERE course_id = ${courseId}
-      AND status = 'completed'
-    `);
-    
-    // Receita total
-    const [revenueResult] = await db.execute(sql`
-      SELECT SUM(p.amount) as total
-      FROM payments p
-      JOIN enrollments e ON p.enrollment_id = e.id
-      WHERE e.course_id = ${courseId}
-      AND p.status = 'succeeded'
-    `);
-    
-    // Matrículas por mês
-    const monthlyResults = await db.execute(sql`
-      SELECT 
-        TO_CHAR(created_at, 'YYYY-MM') as month,
-        COUNT(*) as count
-      FROM enrollments
-      WHERE course_id = ${courseId}
-      GROUP BY TO_CHAR(created_at, 'YYYY-MM')
-      ORDER BY month
-    `);
-    
-    const byMonth = monthlyResults.rows.map((row: any) => ({
-      month: row.month,
-      count: parseInt(row.count)
-    }));
-    
-    return {
-      courseId,
-      courseName: course.name,
-      totalEnrollments: parseInt(totalResult.count),
-      activeEnrollments: (statusCounts['personal_info'] || 0) + (statusCounts['course_info'] || 0) + (statusCounts['payment'] || 0) + (statusCounts['document_verification'] || 0),
-      completedEnrollments: statusCounts['completed'] || 0,
-      abandonedEnrollments: statusCounts['abandoned'] || 0,
-      averageCompletionTime: parseFloat(timeResult.avg_days || '0'),
-      revenue: parseFloat(revenueResult.total || '0'),
-      byMonth
-    };
-  } catch (error) {
-    console.error(`Error generating course analytics for course ${courseId}:`, error);
-    throw error;
-  }
-}
-
-/**
- * Obtém métricas para processamento de documentos
- */
-export async function getDocumentMetrics(schoolId?: number): Promise<DocumentMetrics> {
-  try {
-    // Consulta base
-    let baseQuery = db.select();
-    
-    // Adicionar filtro por escola se fornecido
-    const conditions = [];
-    if (schoolId) {
-      conditions.push(sql`e.school_id = ${schoolId}`);
-    }
-    
-    // Total de documentos
-    const [totalResult] = await db.execute(sql`
-      SELECT COUNT(*) as count
-      FROM documents d
-      JOIN enrollments e ON d.enrollment_id = e.id
-      ${conditions.length > 0 ? sql`WHERE ${sql.join(conditions, sql` AND `)}` : sql``}
-    `);
-    
-    // Documentos por status
-    const statusResults = await db.execute(sql`
-      SELECT d.status, COUNT(*) as count
-      FROM documents d
-      JOIN enrollments e ON d.enrollment_id = e.id
-      ${conditions.length > 0 ? sql`WHERE ${sql.join(conditions, sql` AND `)}` : sql``}
-      GROUP BY d.status
-    `);
-    
-    const statusCounts: Record<string, number> = {};
-    statusResults.rows.forEach((row: any) => {
-      statusCounts[row.status || 'unknown'] = parseInt(row.count);
-    });
-    
-    // Tempo médio de verificação (em horas)
-    const [timeResult] = await db.execute(sql`
-      SELECT AVG(EXTRACT(EPOCH FROM (verified_at - created_at)) / 3600) as avg_hours
-      FROM documents d
-      JOIN enrollments e ON d.enrollment_id = e.id
-      WHERE d.verified_at IS NOT NULL
-      ${conditions.length > 0 ? sql`AND ${sql.join(conditions, sql` AND `)}` : sql``}
-    `);
-    
-    // Documentos por tipo
-    const typeResults = await db.execute(sql`
-      SELECT 
-        d.document_type,
-        COUNT(*) as count,
-        SUM(CASE WHEN d.status = 'verified' THEN 1 ELSE 0 END) as verified_count
-      FROM documents d
-      JOIN enrollments e ON d.enrollment_id = e.id
-      ${conditions.length > 0 ? sql`WHERE ${sql.join(conditions, sql` AND `)}` : sql``}
-      GROUP BY d.document_type
-    `);
-    
-    const byType: Record<string, {
-      count: number;
-      verifiedCount: number;
-      verificationRate: number;
-    }> = {};
-    
-    typeResults.rows.forEach((row: any) => {
-      const count = parseInt(row.count);
-      const verifiedCount = parseInt(row.verified_count);
-      byType[row.document_type] = {
-        count,
-        verifiedCount,
-        verificationRate: count > 0 ? (verifiedCount / count) * 100 : 0
+export class AnalyticsService {
+  /**
+   * Obtém estatísticas gerais do sistema
+   * @returns Estatísticas globais
+   */
+  async getSystemStats(): Promise<any> {
+    try {
+      // Contar usuários por papel
+      const userStats = await storage.countUsersByRole();
+      
+      // Contar escolas
+      const schoolCount = await storage.countSchools();
+      
+      // Contar matrículas por status
+      const enrollmentsByStatus = await db
+        .select({
+          status: 'status',
+          count: sql<number>`count(*)`
+        })
+        .from('enrollments')
+        .groupBy('status');
+      
+      // Contar cursos
+      const courseCount = await db
+        .select({ count: sql<number>`count(*)` })
+        .from('courses')
+        .then(result => Number(result[0]?.count || 0));
+      
+      // Contar documentos processados por OCR
+      const ocrCount = await db
+        .select({ count: sql<number>`count(*)` })
+        .from('ocr_documents')
+        .then(result => Number(result[0]?.count || 0));
+      
+      // Obter total de pagamentos
+      const [paymentStats] = await db
+        .select({
+          count: sql<number>`count(*)`,
+          totalAmount: sql<number>`sum(amount)`,
+          completedAmount: sql<number>`sum(case when status = 'completed' then amount else 0 end)`
+        })
+        .from('payments');
+      
+      // Contar mensagens de WhatsApp
+      const whatsappCount = await db
+        .select({ count: sql<number>`count(*)` })
+        .from('whatsapp_messages')
+        .then(result => Number(result[0]?.count || 0));
+      
+      return {
+        users: {
+          total: Object.values(userStats).reduce((sum, count) => sum + count, 0),
+          byRole: userStats
+        },
+        schools: schoolCount,
+        enrollments: {
+          total: enrollmentsByStatus.reduce((sum, item) => sum + Number(item.count), 0),
+          byStatus: enrollmentsByStatus.reduce((acc, item) => {
+            acc[item.status || 'unknown'] = Number(item.count);
+            return acc;
+          }, {})
+        },
+        courses: courseCount,
+        ocr: {
+          documentsProcessed: ocrCount
+        },
+        payments: {
+          count: Number(paymentStats.count || 0),
+          totalAmount: (Number(paymentStats.totalAmount || 0)) / 100,
+          completedAmount: (Number(paymentStats.completedAmount || 0)) / 100
+        },
+        whatsapp: {
+          messageCount: whatsappCount
+        }
       };
-    });
-    
-    // Calcular taxa de verificação geral
-    const totalCount = parseInt(totalResult.count);
-    const verifiedCount = statusCounts['verified'] || 0;
-    const verificationRate = totalCount > 0 ? (verifiedCount / totalCount) * 100 : 0;
-    
-    return {
-      totalDocuments: totalCount,
-      verifiedDocuments: verifiedCount,
-      pendingDocuments: statusCounts['pending'] || 0,
-      rejectedDocuments: statusCounts['rejected'] || 0,
-      verificationRate,
-      averageVerificationTime: parseFloat(timeResult.avg_hours || '0'),
-      byType
-    };
-  } catch (error) {
-    console.error('Error generating document metrics:', error);
-    throw error;
+    } catch (error) {
+      console.error('Erro ao obter estatísticas do sistema:', error);
+      throw new Error(`Falha ao obter estatísticas: ${error.message}`);
+    }
   }
-}
 
-/**
- * Obtém métricas globais da plataforma
- */
-export async function getPlatformMetrics(): Promise<PlatformMetrics> {
-  try {
-    // Total de escolas
-    const [schoolsResult] = await db.execute(sql`
-      SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN active = true THEN 1 ELSE 0 END) as active_count
-      FROM schools
-    `);
-    
-    // Total de cursos
-    const [coursesResult] = await db.execute(sql`
-      SELECT COUNT(*) as count
-      FROM courses
-    `);
-    
-    // Total de estudantes
-    const [studentsResult] = await db.execute(sql`
-      SELECT COUNT(*) as count
-      FROM users
-      WHERE role = 'student'
-    `);
-    
-    // Total de matrículas
-    const [enrollmentsResult] = await db.execute(sql`
-      SELECT COUNT(*) as count
-      FROM enrollments
-    `);
-    
-    // Receita total
-    const [revenueResult] = await db.execute(sql`
-      SELECT SUM(amount) as total
-      FROM payments
-      WHERE status = 'succeeded'
-    `);
-    
-    // Matrículas por mês
-    const enrollmentsByMonthResult = await db.execute(sql`
-      SELECT 
-        TO_CHAR(created_at, 'YYYY-MM') as month,
-        COUNT(*) as count
-      FROM enrollments
-      GROUP BY TO_CHAR(created_at, 'YYYY-MM')
-      ORDER BY month
-    `);
-    
-    const enrollmentsByMonth: Record<string, number> = {};
-    enrollmentsByMonthResult.rows.forEach((row: any) => {
-      enrollmentsByMonth[row.month] = parseInt(row.count);
-    });
-    
-    // Receita por mês
-    const revenueByMonthResult = await db.execute(sql`
-      SELECT 
-        TO_CHAR(created_at, 'YYYY-MM') as month,
-        SUM(amount) as total
-      FROM payments
-      WHERE status = 'succeeded'
-      GROUP BY TO_CHAR(created_at, 'YYYY-MM')
-      ORDER BY month
-    `);
-    
-    const revenueByMonth: Record<string, number> = {};
-    revenueByMonthResult.rows.forEach((row: any) => {
-      revenueByMonth[row.month] = parseFloat(row.total);
-    });
-    
-    // Top escolas
-    const topSchoolsResult = await db.execute(sql`
-      SELECT 
-        s.id as school_id,
-        s.name as school_name,
-        COUNT(e.id) as enrollment_count,
-        SUM(CASE WHEN p.status = 'succeeded' THEN p.amount ELSE 0 END) as revenue
-      FROM schools s
-      LEFT JOIN enrollments e ON s.id = e.school_id
-      LEFT JOIN payments p ON e.id = p.enrollment_id
-      GROUP BY s.id, s.name
-      ORDER BY enrollment_count DESC
-      LIMIT 10
-    `);
-    
-    const topSchools = topSchoolsResult.rows.map((row: any) => ({
-      schoolId: row.school_id,
-      schoolName: row.school_name,
-      enrollmentCount: parseInt(row.enrollment_count),
-      revenue: parseFloat(row.revenue || 0)
-    }));
-    
-    // Top cursos
-    const topCoursesResult = await db.execute(sql`
-      SELECT 
-        c.id as course_id,
-        c.name as course_name,
-        COUNT(e.id) as enrollment_count,
-        SUM(CASE WHEN p.status = 'succeeded' THEN p.amount ELSE 0 END) as revenue
-      FROM courses c
-      LEFT JOIN enrollments e ON c.id = e.course_id
-      LEFT JOIN payments p ON e.id = p.enrollment_id
-      GROUP BY c.id, c.name
-      ORDER BY enrollment_count DESC
-      LIMIT 10
-    `);
-    
-    const topCourses = topCoursesResult.rows.map((row: any) => ({
-      courseId: row.course_id,
-      courseName: row.course_name,
-      enrollmentCount: parseInt(row.enrollment_count),
-      revenue: parseFloat(row.revenue || 0)
-    }));
-    
-    // Taxa de verificação de documentos
-    const [docVerificationResult] = await db.execute(sql`
-      SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) as verified_count
-      FROM documents
-    `);
-    
-    const docTotal = parseInt(docVerificationResult.total);
-    const docVerified = parseInt(docVerificationResult.verified_count);
-    const documentVerificationRate = docTotal > 0 ? (docVerified / docTotal) * 100 : 0;
-    
-    // Taxa de sucesso de pagamentos
-    const [paymentSuccessResult] = await db.execute(sql`
-      SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) as success_count
-      FROM payments
-    `);
-    
-    const paymentTotal = parseInt(paymentSuccessResult.total);
-    const paymentSuccess = parseInt(paymentSuccessResult.success_count);
-    const paymentSuccessRate = paymentTotal > 0 ? (paymentSuccess / paymentTotal) * 100 : 0;
-    
-    return {
-      totalSchools: parseInt(schoolsResult.total),
-      activeSchools: parseInt(schoolsResult.active_count),
-      totalCourses: parseInt(coursesResult.count),
-      totalStudents: parseInt(studentsResult.count),
-      totalEnrollments: parseInt(enrollmentsResult.count),
-      totalRevenue: parseFloat(revenueResult.total || '0'),
-      enrollmentsByMonth,
-      revenueByMonth,
-      topSchools,
-      topCourses,
-      documentVerificationRate,
-      paymentSuccessRate
-    };
-  } catch (error) {
-    console.error('Error generating platform metrics:', error);
-    throw error;
-  }
-}
-
-/**
- * Executa processo ETL (Extract, Transform, Load) para uma configuração
- */
-export async function runETL(config: ETLConfig): Promise<{
-  success: boolean;
-  rowsProcessed: number;
-  error?: string;
-}> {
-  try {
-    console.log(`Starting ETL process: ${config.sourceTable} -> ${config.targetTable}`);
-    
-    // Construir query de seleção (Extract)
-    const selectFields = config.transformations.map(t => {
-      if (t.transformation) {
-        return `${t.transformation} AS ${t.targetField}`;
-      }
-      return `${t.sourceField} AS ${t.targetField}`;
-    }).join(', ');
-    
-    let queryStr = `SELECT ${selectFields} FROM ${config.sourceTable}`;
-    
-    // Adicionar filtros se fornecidos
-    if (config.filters) {
-      queryStr += ` WHERE ${config.filters}`;
-    }
-    
-    // Adicionar agrupamento se fornecido
-    if (config.groupBy) {
-      queryStr += ` GROUP BY ${config.groupBy}`;
-    }
-    
-    // Executar consulta (Extract + Transform)
-    console.log(`Executing ETL query: ${queryStr}`);
-    const result = await db.execute(sql([queryStr]));
-    const rows = result.rows;
-    
-    // Se não houver dados, retornar sucesso sem fazer nada
-    if (rows.length === 0) {
-      console.log('No data to process in ETL job');
-      return { success: true, rowsProcessed: 0 };
-    }
-    
-    // Preparar dados para inserção (Load)
-    const targetFields = config.transformations.map(t => t.targetField).join(', ');
-    const placeholders = config.transformations.map((_, i) => `$${i + 1}`).join(', ');
-    
-    // Construir query de inserção
-    const insertQueryStr = `
-      INSERT INTO ${config.targetTable} (${targetFields})
-      VALUES (${placeholders})
-    `;
-    
-    // Inserir dados em lotes para melhor performance
-    const BATCH_SIZE = 100;
-    let processed = 0;
-    
-    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-      const batch = rows.slice(i, i + BATCH_SIZE);
-      
-      // Inserir cada linha do lote
-      for (const row of batch) {
-        const values = config.transformations.map(t => row[t.targetField]);
-        await db.execute(sql([insertQueryStr, ...values]));
-        processed++;
+  /**
+   * Obtém estatísticas de uma escola específica
+   * @param schoolId ID da escola
+   * @returns Estatísticas da escola
+   */
+  async getSchoolStats(schoolId: number): Promise<any> {
+    try {
+      // Obter informações básicas da escola
+      const school = await storage.getSchool(schoolId);
+      if (!school) {
+        throw new Error(`Escola não encontrada: ${schoolId}`);
       }
       
-      console.log(`Processed ${processed}/${rows.length} rows`);
+      // Contagem de estudantes
+      const studentCount = await db
+        .select({ count: sql<number>`count(*)` })
+        .from('students')
+        .where(eq('school_id', schoolId))
+        .then(result => Number(result[0]?.count || 0));
+      
+      // Contagem de atendentes
+      const attendantCount = await db
+        .select({ count: sql<number>`count(*)` })
+        .from('users')
+        .where(
+          and(
+            eq('role', 'attendant'),
+            eq('school_id', schoolId)
+          )
+        )
+        .then(result => Number(result[0]?.count || a0));
+      
+      // Contar matrículas por status
+      const enrollmentsByStatus = await db
+        .select({
+          status: 'status',
+          count: sql<number>`count(*)`
+        })
+        .from('enrollments')
+        .where(eq('school_id', schoolId))
+        .groupBy('status');
+      
+      // Contar cursos
+      const courseCount = await db
+        .select({ count: sql<number>`count(*)` })
+        .from('courses')
+        .where(eq('school_id', schoolId))
+        .then(result => Number(result[0]?.count || 0));
+      
+      // Obter total de pagamentos
+      const [paymentStats] = await db
+        .select({
+          count: sql<number>`count(*)`,
+          totalAmount: sql<number>`sum(amount)`,
+          completedAmount: sql<number>`sum(case when status = 'completed' then amount else 0 end)`
+        })
+        .from('payments')
+        .where(eq('school_id', schoolId));
+      
+      // Contagem de mensagens de WhatsApp
+      // Primeiro precisamos pegar as instâncias da escola
+      const instances = await db
+        .select()
+        .from('whatsapp_instances')
+        .where(eq('school_id', schoolId));
+      
+      const instanceIds = instances.map(i => i.id);
+      
+      let whatsappMessageCount = 0;
+      if (instanceIds.length > 0) {
+        const [messageCount] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from('whatsapp_messages')
+          .where(sql`instance_id = ANY(${instanceIds})`)
+          .then(result => Number(result[0]?.count || 0));
+        
+        whatsappMessageCount = Number(messageCount.count || 0);
+      }
+      
+      // Calcular taxa de conversão
+      const completedEnrollments = enrollmentsByStatus.find(e => e.status === 'completed');
+      const completedCount = completedEnrollments ? Number(completedEnrollments.count) : 0;
+      const totalEnrollments = enrollmentsByStatus.reduce((sum, item) => sum + Number(item.count), 0);
+      const conversionRate = totalEnrollments > 0 ? (completedCount / totalEnrollments) * 100 : 0;
+      
+      return {
+        school: {
+          id: school.id,
+          name: school.name,
+          createdAt: school.createdAt
+        },
+        students: {
+          count: studentCount
+        },
+        attendants: {
+          count: attendantCount
+        },
+        enrollments: {
+          total: totalEnrollments,
+          byStatus: enrollmentsByStatus.reduce((acc, item) => {
+            acc[item.status || 'unknown'] = Number(item.count);
+            return acc;
+          }, {}),
+          conversionRate: conversionRate.toFixed(2) + '%'
+        },
+        courses: {
+          count: courseCount
+        },
+        payments: {
+          count: Number(paymentStats.count || 0),
+          totalAmount: (Number(paymentStats.totalAmount || 0)) / 100,
+          completedAmount: (Number(paymentStats.completedAmount || 0)) / 100
+        },
+        whatsapp: {
+          instanceCount: instanceIds.length,
+          messageCount: whatsappMessageCount
+        }
+      };
+    } catch (error) {
+      console.error(`Erro ao obter estatísticas da escola ${schoolId}:`, error);
+      throw new Error(`Falha ao obter estatísticas da escola: ${error.message}`);
     }
-    
-    console.log(`ETL process completed: ${processed} rows processed`);
-    
-    return {
-      success: true,
-      rowsProcessed: processed
-    };
-  } catch (error) {
-    console.error('Error running ETL process:', error);
-    return {
-      success: false,
-      rowsProcessed: 0,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    };
   }
-}
 
-/**
- * Agendamento automático de jobs ETL
- */
-export function scheduleETLJobs(configs: ETLConfig[]): NodeJS.Timeout[] {
-  console.log(`Scheduling ${configs.length} ETL jobs...`);
-  
-  const timers: NodeJS.Timeout[] = [];
-  
-  for (const config of configs) {
-    // Calcular tempo para a próxima execução
-    const now = new Date();
-    let nextRun: Date;
-    
-    switch (config.schedule.frequency) {
-      case 'hourly':
-        // Próxima execução no minuto especificado da próxima hora
-        nextRun = new Date(
-          now.getFullYear(),
-          now.getMonth(),
-          now.getDate(),
-          now.getHours() + (now.getMinutes() >= config.schedule.minute ? 1 : 0),
-          config.schedule.minute
-        );
-        break;
+  /**
+   * Obtém dados para gráfico de matrícula ao longo do tempo
+   * @param schoolId ID da escola (opcional, se não fornecido retorna dados globais)
+   * @param period Período ('day', 'week', 'month', 'year')
+   * @param startDate Data inicial
+   * @param endDate Data final
+   * @returns Dados para gráfico
+   */
+  async getEnrollmentTrends(
+    period: 'day' | 'week' | 'month' | 'year' = 'day',
+    startDate?: Date,
+    endDate?: Date,
+    schoolId?: number
+  ): Promise<any> {
+    try {
+      // Determinar formato de data com base no período
+      let dateFormat;
+      switch (period) {
+        case 'day':
+          dateFormat = 'YYYY-MM-DD';
+          break;
+        case 'week':
+          dateFormat = 'YYYY-WW';
+          break;
+        case 'month':
+          dateFormat = 'YYYY-MM';
+          break;
+        case 'year':
+          dateFormat = 'YYYY';
+          break;
+      }
+      
+      // Construir consulta base
+      let query = db
+        .select({
+          period: sql<string>`to_char(created_at, ${dateFormat})`,
+          count: sql<number>`count(*)`,
+          completed: sql<number>`count(CASE WHEN status = 'completed' THEN 1 END)`,
+          started: sql<number>`count(CASE WHEN status = 'started' THEN 1 END)`,
+          personal_info: sql<number>`count(CASE WHEN status = 'personal_info' THEN 1 END)`,
+          course_info: sql<number>`count(CASE WHEN status = 'course_info' THEN 1 END)`,
+          payment: sql<number>`count(CASE WHEN status = 'payment' THEN 1 END)`,
+          abandoned: sql<number>`count(CASE WHEN status = 'abandoned' THEN 1 END)`
+        })
+        .from('enrollments');
+      
+      // Aplicar filtros
+      const filters = [];
+      
+      if (schoolId) {
+        filters.push(eq('school_id', schoolId));
+      }
+      
+      if (startDate && endDate) {
+        filters.push(between('created_at', startDate, endDate));
+      } else if (startDate) {
+        filters.push(gte('created_at', startDate));
+      } else if (endDate) {
+        filters.push(lte('created_at', endDate));
+      }
+      
+      if (filters.length > 0) {
+        const filterCondition = filters.length === 1 
+          ? filters[0] 
+          : and(...filters);
         
-      case 'daily':
-        // Próxima execução na hora/minuto especificado de hoje ou amanhã
-        nextRun = new Date(
-          now.getFullYear(),
-          now.getMonth(),
-          now.getDate() + ((now.getHours() > config.schedule.hour || 
-                         (now.getHours() === config.schedule.hour && 
-                          now.getMinutes() >= config.schedule.minute)) ? 1 : 0),
-          config.schedule.hour,
-          config.schedule.minute
-        );
-        break;
+        query = query.where(filterCondition);
+      }
+      
+      // Agrupar e ordenar
+      const results = await query
+        .groupBy(sql`to_char(created_at, ${dateFormat})`)
+        .orderBy(sql`to_char(created_at, ${dateFormat})`);
+      
+      // Calcular taxas de conversão
+      const trendsWithRates = results.map(item => {
+        const totalCount = Number(item.count);
+        const completedCount = Number(item.completed);
+        const conversionRate = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
         
-      case 'weekly':
-        // Próxima execução no dia da semana especificado
-        const dayOfWeek = config.schedule.dayOfWeek || 0; // Domingo por padrão
-        const daysUntilNext = (dayOfWeek - now.getDay() + 7) % 7;
-        nextRun = new Date(
-          now.getFullYear(),
-          now.getMonth(),
-          now.getDate() + (daysUntilNext === 0 && 
-                         (now.getHours() > config.schedule.hour || 
-                          (now.getHours() === config.schedule.hour && 
-                           now.getMinutes() >= config.schedule.minute)) ? 7 : daysUntilNext),
-          config.schedule.hour,
-          config.schedule.minute
-        );
-        break;
+        return {
+          period: item.period,
+          total: totalCount,
+          completed: completedCount,
+          started: Number(item.started),
+          personal_info: Number(item.personal_info),
+          course_info: Number(item.course_info),
+          payment: Number(item.payment),
+          abandoned: Number(item.abandoned),
+          conversionRate: parseFloat(conversionRate.toFixed(2))
+        };
+      });
+      
+      return trendsWithRates;
+    } catch (error) {
+      console.error('Erro ao obter tendências de matrícula:', error);
+      throw new Error(`Falha ao obter tendências: ${error.message}`);
+    }
+  }
+
+  /**
+   * Obtém estatísticas de funil de conversão
+   * @param schoolId ID da escola (opcional)
+   * @param startDate Data inicial (opcional)
+   * @param endDate Data final (opcional)
+   * @returns Dados do funil
+   */
+  async getConversionFunnel(
+    schoolId?: number,
+    startDate?: Date,
+    endDate?: Date
+  ): Promise<any> {
+    try {
+      // Construir consulta base para contagem de matrículas por status
+      let query = db
+        .select({
+          total: sql<number>`count(*)`,
+          started: sql<number>`count(CASE WHEN status = 'started' THEN 1 END)`,
+          personal_info: sql<number>`count(CASE WHEN status = 'personal_info' THEN 1 END)`,
+          course_info: sql<number>`count(CASE WHEN status = 'course_info' THEN 1 END)`,
+          payment: sql<number>`count(CASE WHEN status = 'payment' THEN 1 END)`,
+          completed: sql<number>`count(CASE WHEN status = 'completed' THEN 1 END)`,
+          abandoned: sql<number>`count(CASE WHEN status = 'abandoned' THEN 1 END)`,
+          document_verification: sql<number>`count(CASE WHEN status = 'document_verification' THEN 1 END)`,
+          document_pending: sql<number>`count(CASE WHEN status = 'document_pending' THEN 1 END)`,
+          document_approved: sql<number>`count(CASE WHEN status = 'document_approved' THEN 1 END)`
+        })
+        .from('enrollments');
+      
+      // Aplicar filtros
+      const filters = [];
+      
+      if (schoolId) {
+        filters.push(eq('school_id', schoolId));
+      }
+      
+      if (startDate && endDate) {
+        filters.push(between('created_at', startDate, endDate));
+      } else if (startDate) {
+        filters.push(gte('created_at', startDate));
+      } else if (endDate) {
+        filters.push(lte('created_at', endDate));
+      }
+      
+      if (filters.length > 0) {
+        const filterCondition = filters.length === 1 
+          ? filters[0] 
+          : and(...filters);
         
-      case 'monthly':
-        // Próxima execução no dia do mês especificado
-        const dayOfMonth = config.schedule.dayOfMonth || 1; // Primeiro dia por padrão
-        let nextMonth = now.getMonth();
-        let nextYear = now.getFullYear();
+        query = query.where(filterCondition);
+      }
+      
+      // Executar consulta
+      const [counts] = await query;
+      
+      // Calcular taxas de conversão entre etapas
+      const total = Number(counts.total || 0);
+      const started = Number(counts.started || 0);
+      const personalInfo = Number(counts.personal_info || 0);
+      const courseInfo = Number(counts.course_info || 0);
+      const payment = Number(counts.payment || 0);
+      const completed = Number(counts.completed || 0);
+      const abandoned = Number(counts.abandoned || 0);
+      const documentVerification = Number(counts.document_verification || 0);
+      const documentPending = Number(counts.document_pending || 0);
+      const documentApproved = Number(counts.document_approved || 0);
+      
+      // Calcular taxas de conversão entre etapas
+      const funnel = [
+        {
+          stage: 'started',
+          count: started,
+          percentage: total > 0 ? (started / total) * 100 : 0,
+          dropOff: total > 0 ? ((total - started) / total) * 100 : 0,
+        },
+        {
+          stage: 'personal_info',
+          count: personalInfo,
+          percentage: started > 0 ? (personalInfo / started) * 100 : 0,
+          dropOff: started > 0 ? ((started - personalInfo) / started) * 100 : 0,
+        },
+        {
+          stage: 'course_info',
+          count: courseInfo,
+          percentage: personalInfo > 0 ? (courseInfo / personalInfo) * 100 : 0,
+          dropOff: personalInfo > 0 ? ((personalInfo - courseInfo) / personalInfo) * 100 : 0,
+        },
+        {
+          stage: 'document_verification',
+          count: documentVerification,
+          percentage: courseInfo > 0 ? (documentVerification / courseInfo) * 100 : 0,
+          dropOff: courseInfo > 0 ? ((courseInfo - documentVerification) / courseInfo) * 100 : 0,
+        },
+        {
+          stage: 'document_pending',
+          count: documentPending,
+          percentage: documentVerification > 0 ? (documentPending / documentVerification) * 100 : 0,
+          dropOff: documentVerification > 0 ? ((documentVerification - documentPending) / documentVerification) * 100 : 0,
+        },
+        {
+          stage: 'document_approved',
+          count: documentApproved,
+          percentage: documentPending > 0 ? (documentApproved / documentPending) * 100 : 0,
+          dropOff: documentPending > 0 ? ((documentPending - documentApproved) / documentPending) * 100 : 0,
+        },
+        {
+          stage: 'payment',
+          count: payment,
+          percentage: documentApproved > 0 ? (payment / documentApproved) * 100 : 0,
+          dropOff: documentApproved > 0 ? ((documentApproved - payment) / documentApproved) * 100 : 0,
+        },
+        {
+          stage: 'completed',
+          count: completed,
+          percentage: payment > 0 ? (completed / payment) * 100 : 0,
+          dropOff: payment > 0 ? ((payment - completed) / payment) * 100 : 0,
+        }
+      ];
+      
+      // Formatar percentuais
+      const formattedFunnel = funnel.map(stage => ({
+        ...stage,
+        percentage: parseFloat(stage.percentage.toFixed(2)),
+        dropOff: parseFloat(stage.dropOff.toFixed(2))
+      }));
+      
+      // Calcular taxa de conversão total
+      const overallConversionRate = started > 0 ? (completed / started) * 100 : 0;
+      const abandonmentRate = total > 0 ? (abandoned / total) * 100 : 0;
+      
+      return {
+        total,
+        stages: formattedFunnel,
+        conversionRate: parseFloat(overallConversionRate.toFixed(2)),
+        abandonmentRate: parseFloat(abandonmentRate.toFixed(2)),
+        abandoned
+      };
+    } catch (error) {
+      console.error('Erro ao obter funil de conversão:', error);
+      throw new Error(`Falha ao obter funil: ${error.message}`);
+    }
+  }
+
+  /**
+   * Obtém estatísticas de desempenho por curso
+   * @param schoolId ID da escola (opcional)
+   * @returns Estatísticas de desempenho por curso
+   */
+  async getCoursePerformance(schoolId?: number): Promise<any> {
+    try {
+      // Construir consulta base para buscar cursos
+      let coursesQuery = db.select().from('courses');
+      
+      if (schoolId) {
+        coursesQuery = coursesQuery.where(eq('school_id', schoolId));
+      }
+      
+      const courses = await coursesQuery;
+      
+      // Para cada curso, buscar estatísticas de matrículas
+      const courseStats = await Promise.all(courses.map(async (course) => {
+        // Contar matrículas por status
+        const [counts] = await db
+          .select({
+            total: sql<number>`count(*)`,
+            completed: sql<number>`count(CASE WHEN status = 'completed' THEN 1 END)`,
+            payment: sql<number>`count(CASE WHEN status = 'payment' THEN 1 END)`,
+            started: sql<number>`count(CASE WHEN status = 'started' THEN 1 END)`,
+            abandoned: sql<number>`count(CASE WHEN status = 'abandoned' THEN 1 END)`
+          })
+          .from('enrollments')
+          .where(eq('course_id', course.id));
         
-        // Se já passou do dia deste mês, avançar para o próximo mês
-        if (now.getDate() > dayOfMonth || 
-           (now.getDate() === dayOfMonth && 
-            (now.getHours() > config.schedule.hour || 
-             (now.getHours() === config.schedule.hour && 
-              now.getMinutes() >= config.schedule.minute)))) {
-          nextMonth++;
-          if (nextMonth > 11) {
-            nextMonth = 0;
-            nextYear++;
+        // Calcular taxa de conversão
+        const total = Number(counts.total || 0);
+        const completed = Number(counts.completed || 0);
+        const conversionRate = total > 0 ? (completed / total) * 100 : 0;
+        
+        // Buscar valor médio dos pagamentos
+        const [paymentStats] = await db
+          .select({
+            count: sql<number>`count(*)`,
+            avgAmount: sql<number>`avg(amount)`,
+            totalAmount: sql<number>`sum(amount)`
+          })
+          .from('payments')
+          .where(
+            and(
+              eq('status', 'completed'),
+              eq('course_id', course.id)
+            )
+          );
+        
+        return {
+          id: course.id,
+          name: course.name,
+          enrollments: {
+            total,
+            completed,
+            inProgress: total - completed - Number(counts.abandoned || 0),
+            abandoned: Number(counts.abandoned || 0)
+          },
+          conversionRate: parseFloat(conversionRate.toFixed(2)),
+          revenue: {
+            total: (Number(paymentStats.totalAmount || 0)) / 100,
+            average: (Number(paymentStats.avgAmount || 0)) / 100,
+            count: Number(paymentStats.count || 0)
+          }
+        };
+      }));
+      
+      // Ordenar cursos por número total de matrículas
+      return courseStats.sort((a, b) => b.enrollments.total - a.enrollments.total);
+    } catch (error) {
+      console.error('Erro ao obter desempenho de cursos:', error);
+      throw new Error(`Falha ao obter desempenho de cursos: ${error.message}`);
+    }
+  }
+
+  /**
+   * Obtém estatísticas de uso do WhatsApp
+   * @param schoolId ID da escola (opcional)
+   * @returns Estatísticas de uso do WhatsApp
+   */
+  async getWhatsAppStats(schoolId?: number): Promise<any> {
+    try {
+      // Buscar instâncias
+      let instancesQuery = db.select().from('whatsapp_instances');
+      
+      if (schoolId) {
+        instancesQuery = instancesQuery.where(eq('school_id', schoolId));
+      }
+      
+      const instances = await instancesQuery;
+      const instanceIds = instances.map(i => i.id);
+      
+      if (instanceIds.length === 0) {
+        return {
+          instances: [],
+          totalMessages: 0,
+          averageResponseTime: 0,
+          messagesByDirection: {
+            inbound: 0,
+            outbound: 0
+          }
+        };
+      }
+      
+      // Estatísticas por instância
+      const instanceStats = await Promise.all(instances.map(async (instance) => {
+        // Contar mensagens
+        const [messageCounts] = await db
+          .select({
+            total: sql<number>`count(*)`,
+            inbound: sql<number>`count(CASE WHEN direction = 'inbound' THEN 1 END)`,
+            outbound: sql<number>`count(CASE WHEN direction = 'outbound' THEN 1 END)`
+          })
+          .from('whatsapp_messages')
+          .where(eq('instance_id', instance.id));
+        
+        // Calcular tempo médio de resposta
+        // Para cada mensagem recebida, procurar a próxima mensagem enviada
+        const inboundMessages = await db
+          .select()
+          .from('whatsapp_messages')
+          .where(
+            and(
+              eq('instance_id', instance.id),
+              eq('direction', 'inbound')
+            )
+          )
+          .orderBy('created_at');
+        
+        let totalResponseTime = 0;
+        let responsesCount = 0;
+        
+        for (const inbound of inboundMessages) {
+          const [outboundResponse] = await db
+            .select()
+            .from('whatsapp_messages')
+            .where(
+              and(
+                eq('instance_id', instance.id),
+                eq('contact_id', inbound.contact_id),
+                eq('direction', 'outbound'),
+                gt('created_at', inbound.created_at)
+              )
+            )
+            .orderBy('created_at')
+            .limit(1);
+          
+          if (outboundResponse && inbound.createdAt && outboundResponse.createdAt) {
+            const responseTime = new Date(outboundResponse.createdAt).getTime() - new Date(inbound.createdAt).getTime();
+            totalResponseTime += responseTime;
+            responsesCount++;
           }
         }
         
-        nextRun = new Date(
-          nextYear,
-          nextMonth,
-          dayOfMonth,
-          config.schedule.hour,
-          config.schedule.minute
-        );
-        break;
+        const averageResponseTime = responsesCount > 0 ? totalResponseTime / responsesCount : 0;
         
-      default:
-        throw new Error(`Unknown ETL frequency: ${config.schedule.frequency}`);
+        // Contar contatos únicos
+        const [contactCount] = await db
+          .select({ count: sql<number>`count(DISTINCT contact_id)` })
+          .from('whatsapp_messages')
+          .where(eq('instance_id', instance.id));
+        
+        return {
+          id: instance.id,
+          name: instance.name,
+          messages: {
+            total: Number(messageCounts.total || 0),
+            inbound: Number(messageCounts.inbound || 0),
+            outbound: Number(messageCounts.outbound || 0)
+          },
+          contacts: Number(contactCount.count || 0),
+          averageResponseTimeMs: averageResponseTime,
+          averageResponseTimeFormatted: this.formatMilliseconds(averageResponseTime)
+        };
+      }));
+      
+      // Estatísticas globais
+      const [globalMessageCounts] = await db
+        .select({
+          total: sql<number>`count(*)`,
+          inbound: sql<number>`count(CASE WHEN direction = 'inbound' THEN 1 END)`,
+          outbound: sql<number>`count(CASE WHEN direction = 'outbound' THEN 1 END)`
+        })
+        .from('whatsapp_messages')
+        .where(sql`instance_id = ANY(${instanceIds})`);
+      
+      // Calcular tempo médio global
+      const totalResponseTimeMs = instanceStats.reduce((sum, instance) => {
+        return sum + (instance.averageResponseTimeMs * instance.messages.inbound);
+      }, 0);
+      
+      const totalInboundMessages = instanceStats.reduce((sum, instance) => {
+        return sum + instance.messages.inbound;
+      }, 0);
+      
+      const globalAverageResponseTime = totalInboundMessages > 0 
+        ? totalResponseTimeMs / totalInboundMessages 
+        : 0;
+      
+      return {
+        instances: instanceStats,
+        totalMessages: Number(globalMessageCounts.total || 0),
+        messagesByDirection: {
+          inbound: Number(globalMessageCounts.inbound || 0),
+          outbound: Number(globalMessageCounts.outbound || 0)
+        },
+        averageResponseTimeMs: globalAverageResponseTime,
+        averageResponseTimeFormatted: this.formatMilliseconds(globalAverageResponseTime)
+      };
+    } catch (error) {
+      console.error('Erro ao obter estatísticas do WhatsApp:', error);
+      throw new Error(`Falha ao obter estatísticas do WhatsApp: ${error.message}`);
+    }
+  }
+
+  /**
+   * Formata milissegundos em um formato legível
+   * @param ms Tempo em milissegundos
+   * @returns Tempo formatado
+   */
+  private formatMilliseconds(ms: number): string {
+    if (ms < 1000) {
+      return `${Math.round(ms)}ms`;
     }
     
-    // Tempo até a próxima execução em ms
-    const msUntilNext = nextRun.getTime() - now.getTime();
+    if (ms < 60000) {
+      return `${(ms / 1000).toFixed(1)}s`;
+    }
     
-    console.log(`ETL job for ${config.sourceTable}->${config.targetTable} scheduled for ${nextRun.toLocaleString()}`);
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.round((ms % 60000) / 1000);
     
-    // Agendar primeira execução
-    const timer = setTimeout(() => {
-      // Executar ETL
-      runETL(config)
-        .catch(err => console.error(`ETL job failed for ${config.sourceTable}->${config.targetTable}:`, err));
+    return `${minutes}m ${seconds}s`;
+  }
+
+  /**
+   * Obtém estatísticas de conversão por origem (source) dos leads
+   * @param schoolId ID da escola (opcional)
+   * @returns Estatísticas de conversão por origem
+   */
+  async getConversionBySource(schoolId?: number): Promise<any> {
+    try {
+      // Buscar todas as origens únicas
+      let sourcesQuery = db
+        .select({ source: 'source' })
+        .from('leads')
+        .groupBy('source');
       
-      // Configurar execuções posteriores
-      let interval: number;
-      switch (config.schedule.frequency) {
-        case 'hourly':
-          interval = 60 * 60 * 1000; // 1 hora
-          break;
-          
-        case 'daily':
-          interval = 24 * 60 * 60 * 1000; // 24 horas
-          break;
-          
-        case 'weekly':
-          interval = 7 * 24 * 60 * 60 * 1000; // 7 dias
-          break;
-          
-        case 'monthly':
-          // Para mensal, reagendamos manualmente a cada execução
-          // devido à variação de dias em cada mês
-          interval = 28 * 24 * 60 * 60 * 1000; // ~28 dias
-          break;
+      if (schoolId) {
+        sourcesQuery = sourcesQuery.where(eq('school_id', schoolId));
       }
       
-      // Agendar execuções posteriores
-      setInterval(() => {
-        runETL(config)
-          .catch(err => console.error(`ETL job failed for ${config.sourceTable}->${config.targetTable}:`, err));
-      }, interval);
+      const sources = await sourcesQuery;
       
-    }, msUntilNext);
-    
-    timers.push(timer);
+      // Para cada origem, calcular taxas de conversão
+      const sourceStats = await Promise.all(sources.map(async ({ source }) => {
+        if (!source) return null;
+        
+        // Contar leads por origem
+        let leadsQuery = db
+          .select({ count: sql<number>`count(*)` })
+          .from('leads')
+          .where(eq('source', source));
+        
+        if (schoolId) {
+          leadsQuery = leadsQuery.where(eq('school_id', schoolId));
+        }
+        
+        const [leadCount] = await leadsQuery;
+        
+        // Contar matrículas iniciadas a partir desses leads
+        let enrollmentsQuery = db
+          .select({
+            total: sql<number>`count(*)`,
+            completed: sql<number>`count(CASE WHEN status = 'completed' THEN 1 END)`
+          })
+          .from('enrollments')
+          .innerJoin(
+            'leads',
+            eq('leads.id', 'enrollments.lead_id')
+          )
+          .where(eq('leads.source', source));
+        
+        if (schoolId) {
+          enrollmentsQuery = enrollmentsQuery.where(eq('enrollments.school_id', schoolId));
+        }
+        
+        const [enrollmentCounts] = await enrollmentsQuery;
+        
+        // Calcular taxas de conversão
+        const totalLeads = Number(leadCount.count || 0);
+        const startedEnrollments = Number(enrollmentCounts.total || 0);
+        const completedEnrollments = Number(enrollmentCounts.completed || 0);
+        
+        const leadToEnrollmentRate = totalLeads > 0 ? (startedEnrollments / totalLeads) * 100 : 0;
+        const enrollmentCompletionRate = startedEnrollments > 0 ? (completedEnrollments / startedEnrollments) * 100 : 0;
+        const overallConversionRate = totalLeads > 0 ? (completedEnrollments / totalLeads) * 100 : 0;
+        
+        return {
+          source,
+          leads: totalLeads,
+          enrollments: {
+            started: startedEnrollments,
+            completed: completedEnrollments
+          },
+          conversionRates: {
+            leadToEnrollment: parseFloat(leadToEnrollmentRate.toFixed(2)),
+            enrollmentCompletion: parseFloat(enrollmentCompletionRate.toFixed(2)),
+            overall: parseFloat(overallConversionRate.toFixed(2))
+          }
+        };
+      }));
+      
+      // Remover entradas nulas e ordenar por taxa de conversão geral
+      return sourceStats
+        .filter(Boolean)
+        .sort((a, b) => b.conversionRates.overall - a.conversionRates.overall);
+    } catch (error) {
+      console.error('Erro ao obter conversão por origem:', error);
+      throw new Error(`Falha ao obter conversão por origem: ${error.message}`);
+    }
   }
-  
-  return timers;
+
+  /**
+   * Obtém estatísticas de processamento OCR
+   * @param schoolId ID da escola (opcional)
+   * @returns Estatísticas de processamento OCR
+   */
+  async getOcrStats(schoolId?: number): Promise<any> {
+    try {
+      // Contar documentos processados por tipo
+      let documentsByTypeQuery = db
+        .select({
+          documentType: 'document_type',
+          count: sql<number>`count(*)`,
+          avgConfidence: sql<number>`avg(overall_confidence)`,
+          avgProcessingTime: sql<number>`avg(processing_time_ms)`
+        })
+        .from('ocr_documents')
+        .groupBy('document_type');
+      
+      if (schoolId) {
+        // Precisa unir com enrollments para filtrar por escola
+        documentsByTypeQuery = db
+          .select({
+            documentType: 'ocr_documents.document_type',
+            count: sql<number>`count(*)`,
+            avgConfidence: sql<number>`avg(ocr_documents.overall_confidence)`,
+            avgProcessingTime: sql<number>`avg(ocr_documents.processing_time_ms)`
+          })
+          .from('ocr_documents')
+          .innerJoin(
+            'enrollments',
+            eq('ocr_documents.enrollment_id', 'enrollments.id')
+          )
+          .where(eq('enrollments.school_id', schoolId))
+          .groupBy('ocr_documents.document_type');
+      }
+      
+      const documentsByType = await documentsByTypeQuery;
+      
+      // Contar validações por resultado
+      let validationsQuery = db
+        .select({
+          isValid: 'is_valid',
+          count: sql<number>`count(*)`,
+          avgScore: sql<number>`avg(score)`
+        })
+        .from('ocr_validations')
+        .groupBy('is_valid');
+      
+      if (schoolId) {
+        // Precisa unir com enrollments para filtrar por escola
+        validationsQuery = db
+          .select({
+            isValid: 'ocr_validations.is_valid',
+            count: sql<number>`count(*)`,
+            avgScore: sql<number>`avg(ocr_validations.score)`
+          })
+          .from('ocr_validations')
+          .innerJoin(
+            'enrollments',
+            eq('ocr_validations.enrollment_id', 'enrollments.id')
+          )
+          .where(eq('enrollments.school_id', schoolId))
+          .groupBy('ocr_validations.is_valid');
+      }
+      
+      const validations = await validationsQuery;
+      
+      // Calcular totais
+      const totalDocuments = documentsByType.reduce((sum, item) => sum + Number(item.count), 0);
+      const totalValidValidations = validations.find(v => v.isValid === true);
+      const totalInvalidValidations = validations.find(v => v.isValid === false);
+      
+      const validCount = totalValidValidations ? Number(totalValidValidations.count) : 0;
+      const invalidCount = totalInvalidValidations ? Number(totalInvalidValidations.count) : 0;
+      const totalValidations = validCount + invalidCount;
+      
+      // Calcular tempo médio global de processamento
+      const totalProcessingTime = documentsByType.reduce((sum, item) => {
+        return sum + (Number(item.avgProcessingTime) * Number(item.count));
+      }, 0);
+      
+      const globalAvgProcessingTime = totalDocuments > 0 
+        ? totalProcessingTime / totalDocuments 
+        : 0;
+      
+      return {
+        totalDocuments,
+        documentsByType: documentsByType.map(item => ({
+          type: item.documentType,
+          count: Number(item.count),
+          avgConfidence: parseFloat(Number(item.avgConfidence).toFixed(2)),
+          avgProcessingTimeMs: Math.round(Number(item.avgProcessingTime))
+        })),
+        validations: {
+          total: totalValidations,
+          valid: validCount,
+          invalid: invalidCount,
+          validRate: totalValidations > 0 ? parseFloat(((validCount / totalValidations) * 100).toFixed(2)) : 0,
+          averageScore: {
+            valid: totalValidValidations ? parseFloat(Number(totalValidValidations.avgScore).toFixed(2)) : 0,
+            invalid: totalInvalidValidations ? parseFloat(Number(totalInvalidValidations.avgScore).toFixed(2)) : 0,
+            overall: totalValidations > 0 ? 
+              parseFloat(((
+                (totalValidValidations ? Number(totalValidValidations.avgScore) * validCount : 0) + 
+                (totalInvalidValidations ? Number(totalInvalidValidations.avgScore) * invalidCount : 0)
+              ) / totalValidations).toFixed(2)) : 0
+          }
+        },
+        performance: {
+          avgProcessingTimeMs: Math.round(globalAvgProcessingTime),
+          avgConfidence: parseFloat(
+            (documentsByType.reduce((sum, item) => sum + (Number(item.avgConfidence) * Number(item.count)), 0) / totalDocuments).toFixed(2)
+          )
+        }
+      };
+    } catch (error) {
+      console.error('Erro ao obter estatísticas OCR:', error);
+      throw new Error(`Falha ao obter estatísticas OCR: ${error.message}`);
+    }
+  }
 }
 
-/**
- * Exporta dados em vários formatos
- */
-export async function exportData(options: ExportOptions): Promise<string> {
-  try {
-    // Criar diretório de exportação se não existir
-    const exportDir = './exports';
-    if (!fs.existsSync(exportDir)) {
-      fs.mkdirSync(exportDir, { recursive: true });
-    }
-    
-    // Caminho completo do arquivo
-    const filePath = path.join(exportDir, options.filename);
-    
-    // Exportar no formato solicitado
-    switch (options.format) {
-      case 'csv':
-        const csv = json2csv(options.data, { fields: options.columns });
-        fs.writeFileSync(filePath, csv);
-        break;
-        
-      case 'json':
-        fs.writeFileSync(filePath, JSON.stringify(options.data, null, 2));
-        break;
-        
-      case 'excel':
-        // Para Excel, é mais simples gerar CSV e deixar o cliente converter
-        // Se precisar de Excel nativo, usar biblioteca como xlsx ou exceljs
-        const csvForExcel = json2csv(options.data, { fields: options.columns });
-        fs.writeFileSync(filePath, csvForExcel);
-        break;
-        
-      case 'pdf':
-        // Para PDF, precisaria de biblioteca específica como PDFKit
-        // Esta implementação é simplificada
-        const jsonForPdf = JSON.stringify(options.data, null, 2);
-        fs.writeFileSync(filePath, jsonForPdf);
-        break;
-        
-      default:
-        throw new Error(`Unsupported export format: ${options.format}`);
-    }
-    
-    console.log(`Data exported to ${filePath}`);
-    return filePath;
-  } catch (error) {
-    console.error('Error exporting data:', error);
-    throw error;
-  }
-}
-
-// SQL para criar tabelas de analytics
-export const getAnalyticsTablesSQL = () => `
-CREATE TABLE IF NOT EXISTS analytics_enrollment_daily (
-  id SERIAL PRIMARY KEY,
-  date DATE NOT NULL,
-  school_id INTEGER REFERENCES schools(id),
-  total_count INTEGER NOT NULL,
-  completed_count INTEGER NOT NULL,
-  abandoned_count INTEGER NOT NULL,
-  conversion_rate DECIMAL(5,2) NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS analytics_payment_daily (
-  id SERIAL PRIMARY KEY,
-  date DATE NOT NULL,
-  school_id INTEGER REFERENCES schools(id),
-  total_amount DECIMAL(10,2) NOT NULL,
-  transaction_count INTEGER NOT NULL,
-  success_count INTEGER NOT NULL,
-  success_rate DECIMAL(5,2) NOT NULL,
-  average_value DECIMAL(10,2) NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS analytics_document_daily (
-  id SERIAL PRIMARY KEY,
-  date DATE NOT NULL,
-  school_id INTEGER REFERENCES schools(id),
-  document_type VARCHAR(50),
-  total_count INTEGER NOT NULL,
-  verified_count INTEGER NOT NULL,
-  rejected_count INTEGER NOT NULL,
-  verification_rate DECIMAL(5,2) NOT NULL,
-  average_verification_time DECIMAL(10,2),
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS analytics_school_performance (
-  id SERIAL PRIMARY KEY,
-  date DATE NOT NULL,
-  school_id INTEGER REFERENCES schools(id) NOT NULL,
-  school_name VARCHAR(255) NOT NULL,
-  enrollment_count INTEGER NOT NULL,
-  student_count INTEGER NOT NULL,
-  revenue DECIMAL(10,2) NOT NULL,
-  document_verification_rate DECIMAL(5,2) NOT NULL,
-  payment_success_rate DECIMAL(5,2) NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS analytics_course_performance (
-  id SERIAL PRIMARY KEY,
-  date DATE NOT NULL,
-  course_id INTEGER REFERENCES courses(id) NOT NULL,
-  course_name VARCHAR(255) NOT NULL,
-  school_id INTEGER REFERENCES schools(id) NOT NULL,
-  enrollment_count INTEGER NOT NULL,
-  completion_rate DECIMAL(5,2) NOT NULL,
-  revenue DECIMAL(10,2) NOT NULL,
-  average_completion_time DECIMAL(10,2),
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Índices para optimizar queries
-CREATE INDEX IF NOT EXISTS idx_analytics_enrollment_daily_date ON analytics_enrollment_daily(date);
-CREATE INDEX IF NOT EXISTS idx_analytics_enrollment_daily_school ON analytics_enrollment_daily(school_id);
-CREATE INDEX IF NOT EXISTS idx_analytics_payment_daily_date ON analytics_payment_daily(date);
-CREATE INDEX IF NOT EXISTS idx_analytics_payment_daily_school ON analytics_payment_daily(school_id);
-CREATE INDEX IF NOT EXISTS idx_analytics_document_daily_date ON analytics_document_daily(date);
-CREATE INDEX IF NOT EXISTS idx_analytics_document_daily_school ON analytics_document_daily(school_id);
-CREATE INDEX IF NOT EXISTS idx_analytics_school_performance_date ON analytics_school_performance(date);
-CREATE INDEX IF NOT EXISTS idx_analytics_school_performance_school ON analytics_school_performance(school_id);
-CREATE INDEX IF NOT EXISTS idx_analytics_course_performance_date ON analytics_course_performance(date);
-CREATE INDEX IF NOT EXISTS idx_analytics_course_performance_course ON analytics_course_performance(course_id);
-CREATE INDEX IF NOT EXISTS idx_analytics_course_performance_school ON analytics_course_performance(school_id);
-`;
+// Exportar instância única do serviço
+const analyticsService = new AnalyticsService();
+export default analyticsService;
