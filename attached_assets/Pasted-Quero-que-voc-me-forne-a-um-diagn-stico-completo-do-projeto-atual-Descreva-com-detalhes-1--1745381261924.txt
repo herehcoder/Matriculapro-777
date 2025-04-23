@@ -1,0 +1,74 @@
+Quero que você me forneça um diagnóstico completo do projeto atual.
+
+Descreva com detalhes:
+
+1. **O que é o projeto?**
+   - Qual a proposta, o propósito e o funcionamento geral?
+
+2. **O que ele faz hoje?**
+   - Liste todas as funcionalidades reais que já estão implementadas (com backend, banco de dados e front funcionando 100%)
+   - Indique quais dessas funcionalidades estão apenas como simulação ou demonstração
+
+3. **O que está incompleto ou ausente?**
+   - Detalhe o que ainda não foi feito ou que está feito apenas parcialmente
+   - Me diga a porcentagem aproximada do sistema que já tem **lógica real, algoritmos verdadeiros, código funcional e usabilidade de verdade**
+
+**Não quero nenhum código de demonstração, nem tela fake ou função simulada.**  
+O objetivo do projeto é ser uma aplicação real, funcional, com lógica e estrutura para uso no dia a dia.
+
+---
+
+Depois disso, implemente os seguintes pontos:
+
+✅ **1. Sistema de cadastro de escolas**  
+- Criar formulário completo no front  
+- Conectar com o backend e salvar os dados no banco  
+- Mostrar no dashboard do admin
+
+✅ **2. Módulo de matrícula de alunos**  
+Deve conter 4 etapas:
+
+➡️ *Passo 1 - Informações do aluno:*  
+- Nome completo  
+- E-mail  
+- Telefone / WhatsApp  
+- Curso desejado (lista dinâmica)
+
+➡️ *Passo 2 - Envio de Documentos:*  
+- RG (frente e verso)  
+- CPF  
+- Comprovante de residência  
+- Histórico escolar  
+
+➡️ *Passo 3 - Revisão dos dados e arquivos enviados*
+
+➡️ *Passo 4 - Matrícula concluída:*  
+- Exibir mensagem de parabéns  
+- Mostrar próximos passos  
+- Dois botões:
+  - "Falar no WhatsApp" → Direciona para o WhatsApp da escola
+  - "Realizar pagamento" → Vai para o link de pagamento do curso escolhido
+
+✅ **3. Sistema de chat em tempo real entre usuários**  
+- Utilizar o Pusher (já tenho as APP KEYS)  
+- Permitir troca de mensagens entre os papéis do sistema (admin, escola, atendente, aluno)  
+- As mensagens devem ser armazenadas no banco de dados  
+- Mostrar no front em tempo real  
+- Autenticação nos canais privados (via ID do usuário e role)
+
+✅ **4. Dashboard de métricas para administradores**  
+- Gráficos de número de alunos, escolas, atendimentos, matrículas, etc.  
+- Exibir KPIs principais com dados reais do banco  
+- Exibir eventos em tempo real se possível
+
+✅ **5. Fluxo de cadastro de cursos**  
+- Criar tela e formulário para cadastro de cursos  
+- Associar cursos a escolas (relacional no banco)  
+- Permitir visualização e edição dos cursos cadastrados  
+- Usar lógica real com backend e banco
+
+---
+
+Reforce que todas essas funcionalidades devem ser **completamente reais**, com **código funcional**, **banco de dados integrado**, **rotas protegidas por role**, e **sem nenhuma função fake ou de demonstração**.
+
+Me entregue tudo funcionando e explique o que foi feito e o que mais pode ser melhorado para que o sistema fique **100% pronto para uso real em produção**.
