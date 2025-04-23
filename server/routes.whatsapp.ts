@@ -1,14 +1,20 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction, Express } from 'express';
 import { z } from 'zod';
 import { storage } from './storage';
 import { insertWhatsappInstanceSchema, insertWhatsappContactSchema, insertWhatsappMessageSchema } from '../shared/whatsapp.schema';
 import { EvolutionApiClient } from './utils/evolution-api';
-import { ensureAuthenticated, ensureSchoolOrAdmin } from './auth';
 
-const router = Router();
+// Função principal para registrar as rotas do WhatsApp
+export function registerWhatsAppRoutes(app: Express) {
+  const router = Router();
+
+// Adicionar interface para estender o Request
+interface ExtendedRequest extends Request {
+  whatsappInstance?: any;
+}
 
 // Middleware para verificar se a escola tem permissão para acessar uma instância de WhatsApp
-const ensureWhatsappInstanceAccess = async (req, res, next) => {
+const ensureWhatsappInstanceAccess = async (req: ExtendedRequest, res: Response, next: NextFunction) => {
   if (!req.isAuthenticated()) {
     return res.status(401).json({ message: 'Não autenticado' });
   }
@@ -27,7 +33,7 @@ const ensureWhatsappInstanceAccess = async (req, res, next) => {
     }
 
     // Permitir acesso se for admin ou se pertencer à escola
-    if (req.user.role === 'admin' || (req.user.role === 'school' && req.user.schoolId === instance.schoolId)) {
+    if (req.user?.role === 'admin' || (req.user?.role === 'school' && req.user?.schoolId === instance.schoolId)) {
       req.whatsappInstance = instance;
       return next();
     }
@@ -46,6 +52,29 @@ const createEvolutionClient = (instance) => {
     instance.apiKey,
     `edumatrik_${instance.schoolId}`
   );
+};
+
+// Middleware para verificar permissão escola ou admin
+const ensureSchoolOrAdmin = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ message: "Unauthorized - Please log in" });
+  }
+  
+  const user = req.user as any;
+  if (user.role === 'admin' || user.role === 'school') {
+    return next();
+  }
+  
+  res.status(403).json({ message: "Forbidden - Insufficient permissions" });
+};
+
+// Middleware para verificar autenticação
+const ensureAuthenticated = (req: Request, res: Response, next: NextFunction) => {
+  if (req.isAuthenticated()) {
+    return next();
+  }
+  
+  res.status(401).json({ message: "Unauthorized - Please log in" });
 };
 
 // Listar todas as instâncias de WhatsApp (admin) ou apenas da escola (school)
@@ -67,7 +96,7 @@ router.get('/instances', ensureAuthenticated, async (req, res) => {
 });
 
 // Obter uma instância específica
-router.get('/instances/:instanceId', ensureWhatsappInstanceAccess, async (req, res) => {
+router.get('/instances/:instanceId', ensureWhatsappInstanceAccess, async (req: ExtendedRequest, res: Response) => {
   return res.json(req.whatsappInstance);
 });
 
@@ -134,7 +163,7 @@ router.post('/instances', ensureSchoolOrAdmin, async (req, res) => {
 });
 
 // Atualizar uma instância
-router.put('/instances/:instanceId', ensureWhatsappInstanceAccess, async (req, res) => {
+router.put('/instances/:instanceId', ensureWhatsappInstanceAccess, async (req: ExtendedRequest, res: Response) => {
   try {
     const instanceId = parseInt(req.params.instanceId);
     const instance = req.whatsappInstance;
@@ -485,123 +514,11 @@ router.post('/webhook', async (req, res) => {
   }
 });
 
-// Processar webhook de mensagem
-async function processMessageWebhook(instance, data) {
+// Lista de conversas
+router.get('/instances/:instanceId/conversations', ensureWhatsappInstanceAccess, async (req: ExtendedRequest, res: Response) => {
   try {
-    const message = data.message;
-    
-    // Ignorar mensagens enviadas pelo próprio número
-    if (message.fromMe) {
-      return;
-    }
-    
-    // Extrair número de telefone do remetente
-    const phone = message.from.split('@')[0];
-    
-    // Buscar ou criar contato
-    let contact = await storage.getWhatsappContactByPhone(instance.id, phone);
-    if (!contact) {
-      contact = await storage.createWhatsappContact({
-        instanceId: instance.id,
-        phone,
-        name: message.sender?.name || message.sender?.pushname || null,
-        isGroup: message.isGroup || false,
-        profilePic: null,
-      });
-    }
-    
-    // Salvar a mensagem
-    const messageContent = message.body || message.caption || '';
-    const messageType = message.type; // text, image, video, etc.
-    
-    await storage.createWhatsappMessage({
-      instanceId: instance.id,
-      contactId: contact.id,
-      externalId: message.id,
-      direction: 'inbound',
-      content: messageContent,
-      mediaType: messageType !== 'text' ? messageType : null,
-      mediaUrl: message.mediaUrl || null,
-      status: 'received',
-      metadata: {
-        raw: message
-      }
-    });
-    
-    // TODO: Verificar se é uma mensagem relacionada a algum estudante ou lead
-    // e integrar com o sistema de matrículas e chatbot
-    
-  } catch (error) {
-    console.error('Erro ao processar mensagem webhook:', error);
-  }
-}
-
-// Processar webhook de status
-async function processStatusWebhook(instance, data) {
-  try {
-    const status = data.status;
-    const messageId = data.id;
-    
-    if (!messageId) return;
-    
-    // Atualizar status da mensagem no banco de dados
-    let newStatus = 'sent';
-    
-    if (status === 'delivered') {
-      newStatus = 'delivered';
-    } else if (status === 'read') {
-      newStatus = 'read';
-    } else if (status === 'failed') {
-      newStatus = 'failed';
-    }
-    
-    await storage.updateWhatsappMessageStatusByExternalId(messageId, newStatus, new Date());
-    
-  } catch (error) {
-    console.error('Erro ao processar status webhook:', error);
-  }
-}
-
-// Processar webhook de conexão
-async function processConnectionWebhook(instance, data) {
-  try {
-    const connectionStatus = data.status;
-    let status = 'disconnected';
-    
-    if (connectionStatus === 'open') {
-      status = 'connected';
-    } else if (connectionStatus === 'connecting') {
-      status = 'connecting';
-    }
-    
-    await storage.updateWhatsappInstanceStatus(instance.id, status);
-    
-  } catch (error) {
-    console.error('Erro ao processar conexão webhook:', error);
-  }
-}
-
-// Processar webhook de QR code
-async function processQrcodeWebhook(instance, data) {
-  try {
-    const qrcode = data.qrcode;
-    
-    if (qrcode && qrcode.base64) {
-      await storage.updateWhatsappInstanceStatus(instance.id, 'qrcode', qrcode.base64);
-    }
-    
-  } catch (error) {
-    console.error('Erro ao processar QR code webhook:', error);
-  }
-}
-
-// Listar conversas recentes
-router.get('/instances/:instanceId/conversations', ensureWhatsappInstanceAccess, async (req, res) => {
-  try {
-    const instanceId = req.whatsappInstance.id;
-    const limit = parseInt(req.query.limit?.toString() || '20');
-    
-    const conversations = await storage.getWhatsappRecentConversations(instanceId, limit);
+    const instanceId = parseInt(req.params.instanceId);
+    const conversations = await storage.listWhatsappConversations(instanceId);
     return res.json(conversations);
   } catch (error) {
     console.error('Erro ao listar conversas:', error);
@@ -609,4 +526,150 @@ router.get('/instances/:instanceId/conversations', ensureWhatsappInstanceAccess,
   }
 });
 
-export default router;
+  // Registrar o router com o app principal
+  app.use('/api/whatsapp', router);
+
+  // Implementar funções de processamento de webhooks
+  // Estas funções são chamadas pelo endpoint /api/whatsapp/webhook
+  
+  // Função para processar mensagens recebidas
+  function processMessageWebhook(instance: any, data: any) {
+    try {
+      // Verificar se não é uma mensagem de status
+      if (data.typeMessage === 'status') {
+        return processStatusWebhook(instance, data);
+      }
+
+      // Ignorar mensagens enviadas pelo próprio sistema
+      if (data.fromMe) {
+        console.log('Ignorando mensagem enviada pelo próprio sistema');
+        return;
+      }
+
+      // Extrair número de telefone e normalizar
+      let phone = data.from || data.sender || '';
+      if (phone.includes('@')) {
+        phone = phone.split('@')[0];
+      }
+      
+      if (!phone) {
+        console.error('Telefone não encontrado na mensagem:', data);
+        return;
+      }
+
+      // Obter ou criar contato
+      const getOrCreateContact = async () => {
+        let contact = await storage.getWhatsappContactByPhone(instance.id, phone);
+        if (!contact) {
+          const name = data.pushName || data.notifyName || data.sender || phone;
+          contact = await storage.createWhatsappContact({
+            instanceId: instance.id,
+            phone,
+            name,
+            isGroup: phone.includes('-') // Grupos geralmente têm '-' no id
+          });
+        }
+        return contact;
+      };
+
+      // Armazenar mensagem no banco de dados
+      getOrCreateContact().then(contact => {
+        const messageData: any = {
+          instanceId: instance.id,
+          contactId: contact.id,
+          externalId: data.key?.id || data.id,
+          direction: 'inbound',
+          status: 'received',
+          receivedAt: new Date(),
+          metadata: {}
+        };
+
+        // Extrair conteúdo baseado no tipo de mensagem
+        if (data.hasMedia) {
+          messageData.mediaType = data.type;
+          messageData.mediaUrl = data.mediaUrl || null;
+          messageData.content = data.caption || data.text || null;
+          messageData.metadata.fileName = data.fileName || null;
+        } else {
+          messageData.content = data.body || data.text || null;
+        }
+        
+        return storage.createWhatsappMessage(messageData);
+      })
+      .then(() => {
+        console.log(`Mensagem recebida de ${phone} armazenada`);
+      })
+      .catch(error => {
+        console.error('Erro ao salvar mensagem:', error);
+      });
+    } catch (error) {
+      console.error('Erro ao processar mensagem do webhook:', error);
+    }
+  }
+
+  // Função para processar status de mensagens
+  function processStatusWebhook(instance: any, data: any) {
+    try {
+      // Atualizar status de mensagem enviada
+      const externalId = data.key?.id || data.id;
+      if (!externalId) {
+        console.error('ID externo não encontrado para atualização de status:', data);
+        return;
+      }
+
+      // Mapear status para nosso formato interno
+      let status = 'sent';
+      if (data.status === 'DELIVERY_ACK') {
+        status = 'delivered';
+      } else if (data.status === 'READ') {
+        status = 'read';
+      } else if (data.status === 'FAIL') {
+        status = 'failed';
+      }
+
+      // Atualizar no banco de dados
+      storage.updateWhatsappMessageStatus(externalId, status)
+        .then(() => {
+          console.log(`Status da mensagem ${externalId} atualizado para ${status}`);
+        })
+        .catch(error => {
+          console.error('Erro ao atualizar status:', error);
+        });
+    } catch (error) {
+      console.error('Erro ao processar status do webhook:', error);
+    }
+  }
+
+  // Função para processar status de conexão
+  function processConnectionWebhook(instance: any, data: any) {
+    try {
+      // Atualizar status da conexão no banco de dados
+      const status = data.state === 'open' ? 'connected' : 'disconnected';
+      storage.updateWhatsappInstanceStatus(instance.id, status)
+        .then(() => {
+          console.log(`Status da instância ${instance.id} atualizado para ${status}`);
+        })
+        .catch(error => {
+          console.error('Erro ao atualizar status de conexão:', error);
+        });
+    } catch (error) {
+      console.error('Erro ao processar status de conexão do webhook:', error);
+    }
+  }
+
+  // Função para processar QR codes
+  function processQrcodeWebhook(instance: any, data: any) {
+    try {
+      // Atualizar QR code no banco de dados
+      storage.updateWhatsappInstanceStatus(instance.id, 'qrcode', data.qrcode)
+        .then(() => {
+          console.log(`QR code atualizado para instância ${instance.id}`);
+        })
+        .catch(error => {
+          console.error('Erro ao atualizar QR code:', error);
+        });
+    } catch (error) {
+      console.error('Erro ao processar QR code do webhook:', error);
+    }
+  }
+}

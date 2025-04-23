@@ -36,7 +36,7 @@ import SettingsPage from "@/pages/settings";
 import UsersList from "./pages/users/list";
 import NewUser from "./pages/users/new";
 import EditUserWithId from "./pages/users/edit/[id]";
-import { useAuth, AuthProvider } from "./lib/auth";
+import { useAuth, AuthProvider } from "@/hooks/use-auth";
 import MainLayout from "./components/Layout/MainLayout";
 import { Loader2 } from "lucide-react";
 

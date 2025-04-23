@@ -13,6 +13,7 @@ import { registerDocumentRoutes } from "./routes.document";
 import { registerMessageRoutes } from "./routes.message";
 import { registerUserRoutes } from "./routes.user";
 import { registerPaymentRoutes } from "./routes.payment";
+import { registerWhatsAppRoutes } from "./routes.whatsapp";
 import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
@@ -126,6 +127,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerStudentDocumentsRoutes(app);
   registerUserRoutes(app, isAuthenticated);
   registerPaymentRoutes(app, isAuthenticated);
+  
+  // Registrar rotas do WhatsApp (Evolution API)
+  registerWhatsAppRoutes(app);
 
   // Middleware for error handling
   const handleZodError = (
