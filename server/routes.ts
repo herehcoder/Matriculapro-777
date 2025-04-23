@@ -1638,6 +1638,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // Rotas para gerenciar configurações de usuário
+  app.get('/api/settings/user/:userId', isAuthenticated, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      
+      // Verificar se o usuário está tentando acessar suas próprias configurações
+      if (req.user.id !== userId && req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Acesso negado. Você só pode acessar suas próprias configurações.' });
+      }
+      
+      const userSettings = await storage.getUserSettings(userId);
+      
+      if (!userSettings) {
+        // Configurações não encontradas, criar configurações padrão
+        const defaultSettings = {
+          userId,
+          notifications: {
+            email: true,
+            push: false,
+            sms: true,
+            whatsapp: true
+          },
+          appearance: {
+            darkMode: false,
+            compactMode: false
+          },
+          security: {
+            twoFactorEnabled: false
+          }
+        };
+        
+        const newSettings = await storage.createUserSettings(defaultSettings);
+        return res.status(200).json(newSettings);
+      }
+      
+      return res.status(200).json(userSettings);
+    } catch (error) {
+      console.error('Erro ao buscar configurações do usuário:', error);
+      return res.status(500).json({ message: 'Erro ao buscar configurações do usuário' });
+    }
+  });
+
+  app.post('/api/settings/user/:userId', isAuthenticated, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      
+      // Verificar se o usuário está tentando modificar suas próprias configurações
+      if (req.user.id !== userId && req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Acesso negado. Você só pode modificar suas próprias configurações.' });
+      }
+      
+      const { notifications, appearance, security } = req.body;
+      
+      // Verificar se o usuário já possui configurações
+      const existingSettings = await storage.getUserSettings(userId);
+      
+      if (!existingSettings) {
+        // Criar novas configurações
+        const newSettings = {
+          userId,
+          notifications: notifications || {
+            email: true,
+            push: false,
+            sms: true,
+            whatsapp: true
+          },
+          appearance: appearance || {
+            darkMode: false,
+            compactMode: false
+          },
+          security: security || {
+            twoFactorEnabled: false
+          }
+        };
+        
+        const createdSettings = await storage.createUserSettings(newSettings);
+        return res.status(201).json(createdSettings);
+      } else {
+        // Atualizar configurações existentes
+        const updatedSettings = await storage.updateUserSettings(userId, {
+          notifications: notifications || existingSettings.notifications,
+          appearance: appearance || existingSettings.appearance,
+          security: security || existingSettings.security,
+          updatedAt: new Date()
+        });
+        
+        return res.status(200).json(updatedSettings);
+      }
+    } catch (error) {
+      console.error('Erro ao atualizar configurações do usuário:', error);
+      return res.status(500).json({ message: 'Erro ao atualizar configurações do usuário' });
+    }
+  });
+
   return httpServer;
 }
 

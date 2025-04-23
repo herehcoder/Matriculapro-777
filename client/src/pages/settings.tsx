@@ -41,12 +41,34 @@ const passwordFormSchema = z.object({
 
 type PasswordFormValues = z.infer<typeof passwordFormSchema>;
 
+// Interface para as configurações do usuário
+interface UserSettings {
+  id: number;
+  userId: number;
+  notifications: {
+    email: boolean;
+    push: boolean;
+    sms: boolean;
+    whatsapp: boolean;
+  };
+  appearance: {
+    darkMode: boolean;
+    compactMode: boolean;
+  };
+  security: {
+    twoFactorEnabled: boolean;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
 export default function SettingsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   
-  // Estado para as configurações de notificação (simulação)
+  // Estado para as configurações de notificação
   const [notificationSettings, setNotificationSettings] = useState({
     email: true,
     push: false,
@@ -54,8 +76,16 @@ export default function SettingsPage() {
     whatsapp: true,
   });
   
-  // Estado para o tema (simulação)
-  const [darkMode, setDarkMode] = useState(false);
+  // Estado para as configurações de aparência
+  const [appearanceSettings, setAppearanceSettings] = useState({
+    darkMode: false,
+    compactMode: false,
+  });
+  
+  // Estado para as configurações de segurança
+  const [securitySettings, setSecuritySettings] = useState({
+    twoFactorEnabled: false,
+  });
 
   // Form para alteração de senha
   const form = useForm<PasswordFormValues>({
@@ -64,6 +94,64 @@ export default function SettingsPage() {
       currentPassword: "",
       newPassword: "",
       confirmPassword: "",
+    },
+  });
+
+  // Consulta para obter as configurações do usuário
+  const userSettingsQuery = useQuery({
+    queryKey: ['/api/settings/user', user?.id],
+    queryFn: async () => {
+      if (!user) return null;
+      return apiRequest(`/api/settings/user/${user.id}`, {
+        method: 'GET',
+      });
+    },
+    enabled: !!user,
+    onSuccess: (data: UserSettings | null) => {
+      if (data) {
+        setNotificationSettings(data.notifications);
+        setAppearanceSettings(data.appearance);
+        setSecuritySettings(data.security);
+      }
+      setIsLoadingSettings(false);
+    },
+    onError: (error) => {
+      console.error('Erro ao carregar configurações:', error);
+      setIsLoadingSettings(false);
+      toast({
+        title: 'Erro',
+        description: 'Não foi possível carregar suas configurações. Tente novamente.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Mutação para atualizar configurações do usuário
+  const updateSettingsMutation = useMutation({
+    mutationFn: async (settings: {
+      notifications?: typeof notificationSettings;
+      appearance?: typeof appearanceSettings;
+      security?: typeof securitySettings;
+    }) => {
+      if (!user) throw new Error("Usuário não autenticado");
+      return apiRequest(`/api/settings/user/${user.id}`, {
+        method: 'POST',
+        body: JSON.stringify(settings),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/settings/user', user?.id] });
+      toast({
+        title: "Configurações atualizadas",
+        description: "Suas configurações foram salvas com sucesso.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro ao salvar configurações",
+        description: error.message || "Ocorreu um erro ao salvar suas configurações. Tente novamente.",
+        variant: "destructive",
+      });
     },
   });
 
@@ -102,27 +190,37 @@ export default function SettingsPage() {
     }
   };
 
-  // Handler para notificações (simulação)
+  // Handler para notificações
   const handleNotificationChange = (key: string, value: boolean) => {
-    setNotificationSettings(prev => ({
-      ...prev,
+    const updatedSettings = {
+      ...notificationSettings,
       [key]: value,
-    }));
+    };
     
-    toast({
-      title: "Configurações atualizadas",
-      description: "Suas preferências de notificação foram salvas.",
-    });
+    setNotificationSettings(updatedSettings);
+    updateSettingsMutation.mutate({ notifications: updatedSettings });
   };
 
-  // Handler para alteração de tema (simulação)
-  const handleThemeChange = (value: boolean) => {
-    setDarkMode(value);
+  // Handler para alteração de tema
+  const handleAppearanceChange = (key: string, value: boolean) => {
+    const updatedSettings = {
+      ...appearanceSettings,
+      [key]: value,
+    };
     
-    toast({
-      title: "Tema alterado",
-      description: `Tema ${value ? "escuro" : "claro"} ativado.`,
-    });
+    setAppearanceSettings(updatedSettings);
+    updateSettingsMutation.mutate({ appearance: updatedSettings });
+  };
+  
+  // Handler para configurações de segurança
+  const handleSecurityChange = (key: string, value: boolean) => {
+    const updatedSettings = {
+      ...securitySettings,
+      [key]: value,
+    };
+    
+    setSecuritySettings(updatedSettings);
+    updateSettingsMutation.mutate({ security: updatedSettings });
   };
 
   return (
@@ -230,7 +328,12 @@ export default function SettingsPage() {
                       Proteja sua conta com um código adicional ao fazer login.
                     </p>
                   </div>
-                  <Switch id="verificacao-2fa" />
+                  <Switch 
+                    id="verificacao-2fa" 
+                    checked={securitySettings.twoFactorEnabled}
+                    onCheckedChange={(value) => handleSecurityChange('twoFactorEnabled', value)}
+                    disabled={updateSettingsMutation.isPending}
+                  />
                 </div>
                 
                 <div className="flex items-center justify-between">
@@ -259,7 +362,7 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
-                  {darkMode ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+                  {appearanceSettings.darkMode ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
                   <div>
                     <Label htmlFor="dark-mode">Tema Escuro</Label>
                     <p className="text-sm text-muted-foreground">
@@ -269,8 +372,9 @@ export default function SettingsPage() {
                 </div>
                 <Switch 
                   id="dark-mode" 
-                  checked={darkMode} 
-                  onCheckedChange={handleThemeChange} 
+                  checked={appearanceSettings.darkMode} 
+                  onCheckedChange={(value) => handleAppearanceChange('darkMode', value)}
+                  disabled={updateSettingsMutation.isPending}
                 />
               </div>
               
@@ -284,7 +388,12 @@ export default function SettingsPage() {
                     </p>
                   </div>
                 </div>
-                <Switch id="compact-mode" />
+                <Switch 
+                  id="compact-mode"
+                  checked={appearanceSettings.compactMode}
+                  onCheckedChange={(value) => handleAppearanceChange('compactMode', value)}
+                  disabled={updateSettingsMutation.isPending}
+                />
               </div>
             </CardContent>
           </Card>
