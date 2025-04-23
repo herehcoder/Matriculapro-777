@@ -52,26 +52,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     data: user,
     error,
     isLoading,
+    refetch
   } = useQuery<User | null, Error>({
     queryKey: ["/api/user"],
     queryFn: getQueryFn({ on401: "returnNull" }),
+    retry: false
   });
 
   const loginMutation = useMutation<User, Error, LoginData>({
     mutationFn: async (credentials: LoginData) => {
       const res = await apiRequest("POST", "/api/login", credentials);
+      
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.message || "Erro ao fazer login");
+        let errorMessage = "Erro ao fazer login";
+        
+        try {
+          const errorData = await res.json();
+          if (errorData && errorData.message) {
+            errorMessage = errorData.message;
+          }
+        } catch (e) {
+          console.error("Erro ao processar resposta de erro:", e);
+        }
+        
+        throw new Error(errorMessage);
       }
-      return await res.json();
+      
+      const userData = await res.json();
+      return userData;
     },
     onSuccess: (user: User) => {
+      // Atualizar o cache com os dados do usuário
       queryClient.setQueryData(["/api/user"], user);
+      
+      // Forçar uma refetch para garantir que os dados estejam atualizados
+      refetch();
+      
       toast({
         title: "Login realizado com sucesso",
         description: `Bem-vindo(a), ${user.fullName}!`,
       });
+      
+      // Redirecionar para a página inicial (será feito automaticamente pelo Router)
     },
     onError: (error: Error) => {
       toast({
@@ -85,14 +107,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const registerMutation = useMutation<User, Error, RegisterData>({
     mutationFn: async (userData: RegisterData) => {
       const res = await apiRequest("POST", "/api/register", userData);
+      
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.message || "Erro ao registrar usuário");
+        let errorMessage = "Erro ao registrar usuário";
+        
+        try {
+          const errorData = await res.json();
+          if (errorData && errorData.message) {
+            errorMessage = errorData.message;
+          }
+        } catch (e) {
+          console.error("Erro ao processar resposta de erro:", e);
+        }
+        
+        throw new Error(errorMessage);
       }
+      
       return await res.json();
     },
     onSuccess: (user: User) => {
       queryClient.setQueryData(["/api/user"], user);
+      refetch();
+      
       toast({
         title: "Registro realizado com sucesso",
         description: `Bem-vindo(a), ${user.fullName}!`,
@@ -110,16 +146,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logoutMutation = useMutation<void, Error, void>({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/logout");
+      
       if (!res.ok) {
         throw new Error("Erro ao fazer logout");
       }
     },
     onSuccess: () => {
       queryClient.setQueryData(["/api/user"], null);
+      refetch();
+      
       toast({
         title: "Logout realizado com sucesso",
         description: "Você foi desconectado do sistema",
       });
+      
+      // Redirecionar para a página de login (será feito automaticamente pelo Router)
     },
     onError: (error: Error) => {
       toast({
