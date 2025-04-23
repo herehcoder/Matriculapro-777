@@ -1,4 +1,5 @@
-const { Pool } = require('pg');
+import pg from 'pg';
+const { Pool } = pg;
 
 // Conexão com o banco externo
 const externalPool = new Pool({
@@ -7,62 +8,70 @@ const externalPool = new Pool({
 
 // Conexão com o banco local
 const localPool = new Pool({
-  connectionString: process.env.DATABASE_URL
+  connectionString: process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_gxio9mv7utlP@ep-delicate-glade-a6uygypx.us-west-2.aws.neon.tech/neondb?sslmode=require'
 });
+
+// Função genérica para importar uma tabela
+async function importTable(tableName) {
+  console.log(`Importando tabela ${tableName}...`);
+  const { rows: data } = await externalPool.query(`SELECT * FROM ${tableName}`);
+  
+  if (data.length > 0) {
+    for (const item of data) {
+      const columns = Object.keys(item).join(', ');
+      const placeholders = Object.keys(item).map((_, i) => `$${i + 1}`).join(', ');
+      const values = Object.values(item);
+      
+      try {
+        await localPool.query(
+          `INSERT INTO ${tableName} (${columns}) VALUES (${placeholders}) ON CONFLICT (id) DO NOTHING`,
+          values
+        );
+      } catch (err) {
+        console.error(`Erro ao inserir em ${tableName} id=${item.id || 'unknown'}:`, err.message);
+      }
+    }
+    console.log(`${data.length} registros importados para ${tableName}.`);
+  } else {
+    console.log(`Nenhum registro encontrado para importar na tabela ${tableName}.`);
+  }
+  
+  return data.length;
+}
 
 async function importData() {
   try {
     console.log('Iniciando importação de dados...');
     
-    // Importando tabela de users
-    console.log('Importando usuários...');
-    const { rows: users } = await externalPool.query('SELECT * FROM users');
+    // Ordem de importação para respeitar as chaves estrangeiras
+    const tabelas = [
+      'users',
+      'schools',
+      'attendants',
+      'students',
+      'leads',
+      'courses',
+      'questions',
+      'answers',
+      'chat_history',
+      'enrollments',
+      'whatsapp_messages',
+      'metrics'
+    ];
     
-    if (users.length > 0) {
-      for (const user of users) {
-        const columns = Object.keys(user).join(', ');
-        const placeholders = Object.keys(user).map((_, i) => `$${i + 1}`).join(', ');
-        const values = Object.values(user);
-        
-        try {
-          await localPool.query(
-            `INSERT INTO users (${columns}) VALUES (${placeholders}) ON CONFLICT (id) DO NOTHING`,
-            values
-          );
-        } catch (err) {
-          console.error(`Erro ao inserir usuário ${user.id}:`, err.message);
-        }
-      }
-      console.log(`${users.length} usuários importados.`);
-    } else {
-      console.log('Nenhum usuário encontrado para importar.');
+    const resultados = {};
+    
+    for (const tabela of tabelas) {
+      const count = await importTable(tabela);
+      resultados[tabela] = count;
     }
     
-    // Importando tabela de schools
-    console.log('Importando escolas...');
-    const { rows: schools } = await externalPool.query('SELECT * FROM schools');
-    
-    if (schools.length > 0) {
-      for (const school of schools) {
-        const columns = Object.keys(school).join(', ');
-        const placeholders = Object.keys(school).map((_, i) => `$${i + 1}`).join(', ');
-        const values = Object.values(school);
-        
-        try {
-          await localPool.query(
-            `INSERT INTO schools (${columns}) VALUES (${placeholders}) ON CONFLICT (id) DO NOTHING`,
-            values
-          );
-        } catch (err) {
-          console.error(`Erro ao inserir escola ${school.id}:`, err.message);
-        }
-      }
-      console.log(`${schools.length} escolas importadas.`);
-    } else {
-      console.log('Nenhuma escola encontrada para importar.');
+    console.log('\nResumo da importação:');
+    for (const [tabela, count] of Object.entries(resultados)) {
+      console.log(`- ${tabela}: ${count} registros`);
     }
-
-    console.log('Importação concluída com sucesso!');
+    
+    console.log('\nImportação concluída com sucesso!');
   } catch (err) {
     console.error('Erro durante a importação:', err);
   } finally {
