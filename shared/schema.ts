@@ -313,41 +313,8 @@ export const insertMessageSchema = createInsertSchema(messages).omit({
 });
 
 // Types for Drizzle ORM
-export type User = typeof users.$inferSelect;
-export type InsertUser = z.infer<typeof insertUserSchema>;
-
-export type School = typeof schools.$inferSelect;
-export type InsertSchool = z.infer<typeof insertSchoolSchema>;
-
-export type Student = typeof students.$inferSelect;
-export type InsertStudent = z.infer<typeof insertStudentSchema>;
-
-export type Lead = typeof leads.$inferSelect;
-export type InsertLead = z.infer<typeof insertLeadSchema>;
-
-export type Enrollment = typeof enrollments.$inferSelect;
-export type InsertEnrollment = z.infer<typeof insertEnrollmentSchema>;
-
-export type Course = typeof courses.$inferSelect;
-export type InsertCourse = z.infer<typeof insertCourseSchema>;
-
-export type Question = typeof questions.$inferSelect;
-export type InsertQuestion = z.infer<typeof insertQuestionSchema>;
-
-export type Answer = typeof answers.$inferSelect;
-export type InsertAnswer = z.infer<typeof insertAnswerSchema>;
-
-export type Document = typeof documents.$inferSelect;
-export type InsertDocument = z.infer<typeof insertDocumentSchema>;
-
-export type ChatMessage = typeof chatHistory.$inferSelect;
-export type InsertChatMessage = z.infer<typeof insertChatHistorySchema>;
-
-export type WhatsappMessage = typeof whatsappMessages.$inferSelect;
-export type InsertWhatsappMessage = z.infer<typeof insertWhatsappMessageSchema>;
-
-export type Notification = typeof notifications.$inferSelect;
-export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Message = typeof messages.$inferSelect;
+export type InsertMessage = z.infer<typeof insertMessageSchema>;
 
 // Schema for inserting a new metric
 export const insertMetricSchema = createInsertSchema(metrics).omit({

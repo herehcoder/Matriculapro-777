@@ -5,9 +5,12 @@ import * as schema from "@shared/schema";
 
 neonConfig.webSocketConstructor = ws;
 
-// Use the provided external Neon database URL
-const DATABASE_URL = "postgresql://neondb_owner:npg_8rIJGtmLk4TE@ep-jolly-credit-a5mjf3h0.us-east-2.aws.neon.tech/neondb?sslmode=require";
+if (!process.env.DATABASE_URL) {
+  throw new Error(
+    "DATABASE_URL must be set. Did you forget to provision a database?",
+  );
+}
 
 // Create PostgreSQL pool and Drizzle ORM instance for database operations
-export const pool = new Pool({ connectionString: DATABASE_URL });
+export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 export const db = drizzle(pool, { schema });
