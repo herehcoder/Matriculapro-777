@@ -5,8 +5,9 @@ import { v4 as uuidv4 } from "uuid";
 import fs from "fs";
 import { db } from "./db";
 import { documents, enrollments } from "../shared/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { analyzeDocument, verifyDocument, validateDocumentAgainstForm } from "./utils/ocr";
+import { sendUserNotification } from "./pusher";
 
 // Set up multer for handling file uploads
 const storage = multer.diskStorage({
@@ -56,6 +57,106 @@ const upload = multer({
   limits: { fileSize },
   fileFilter
 });
+
+/**
+ * Função auxiliar para verificar o estado dos documentos de uma matrícula e atualizar seu status
+ * @param enrollmentId ID da matrícula
+ */
+async function checkAndUpdateEnrollmentDocumentStatus(enrollmentId: number) {
+  try {
+    // 1. Buscar todos os documentos da matrícula
+    const enrollmentDocuments = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.enrollmentId, enrollmentId));
+    
+    // Se não houver documentos, não fazer nada
+    if (!enrollmentDocuments || enrollmentDocuments.length === 0) {
+      return;
+    }
+    
+    // 2. Verificar o status de cada documento
+    const totalDocuments = enrollmentDocuments.length;
+    const verifiedDocuments = enrollmentDocuments.filter(doc => doc.status === 'verified').length;
+    const pendingDocuments = enrollmentDocuments.filter(doc => 
+      doc.status === 'needs_review' || doc.status === 'uploaded').length;
+    
+    // 3. Buscar a matrícula atual
+    const enrollment = await db.query.enrollments.findFirst({
+      where: eq(enrollments.id, enrollmentId)
+    });
+    
+    if (!enrollment) {
+      console.error(`Matrícula #${enrollmentId} não encontrada durante verificação de documentos`);
+      return;
+    }
+    
+    // 4. Determinar o novo status da matrícula
+    let newEnrollmentStatus = enrollment.status;
+    let shouldUpdateStatus = false;
+    
+    // Se todos os documentos foram verificados, avançar para a próxima etapa
+    if (verifiedDocuments === totalDocuments && totalDocuments > 0) {
+      // Se a matrícula está em análise de documentos, avançar para próxima etapa
+      if (enrollment.status === 'document_verification') {
+        newEnrollmentStatus = 'document_approved';
+        shouldUpdateStatus = true;
+      }
+    } 
+    // Se pelo menos um documento foi rejeitado, voltar para documento pendente
+    else if (pendingDocuments > 0 && enrollment.status === 'document_verification') {
+      newEnrollmentStatus = 'document_pending';
+      shouldUpdateStatus = true;
+    }
+    
+    // 5. Atualizar o status da matrícula se necessário
+    if (shouldUpdateStatus) {
+      await db
+        .update(enrollments)
+        .set({
+          status: newEnrollmentStatus,
+          updatedAt: new Date()
+        })
+        .where(eq(enrollments.id, enrollmentId));
+      
+      // 6. Enviar notificação sobre a atualização do status
+      if (enrollment.studentId) {
+        // Se o status for aprovado, notificar que os documentos foram aprovados
+        if (newEnrollmentStatus === 'document_approved') {
+          await sendUserNotification(enrollment.studentId, {
+            title: 'Documentos aprovados',
+            message: 'Seus documentos foram verificados e aprovados com sucesso.',
+            type: 'enrollment',
+            relatedId: enrollmentId,
+            relatedType: 'enrollment'
+          });
+        } 
+        // Se o status for pendente, notificar que precisa corrigir documentos
+        else if (newEnrollmentStatus === 'document_pending') {
+          await sendUserNotification(enrollment.studentId, {
+            title: 'Documentos precisam de revisão',
+            message: 'Alguns de seus documentos precisam ser atualizados. Por favor, verifique sua área de documentos.',
+            type: 'enrollment',
+            relatedId: enrollmentId,
+            relatedType: 'enrollment'
+          });
+        }
+      }
+    }
+    
+    return { 
+      enrollment, 
+      totalDocuments, 
+      verifiedDocuments, 
+      pendingDocuments, 
+      newStatus: newEnrollmentStatus,
+      updated: shouldUpdateStatus 
+    };
+  } catch (error) {
+    console.error('Erro ao atualizar status da matrícula baseado em documentos:', error);
+    return null;
+  }
+}
 
 export function registerDocumentRoutes(app: Express) {
   // Rota para análise OCR de documentos
@@ -291,6 +392,9 @@ export function registerDocumentRoutes(app: Express) {
         })
         .where(eq(documents.id, document.id))
         .returning();
+        
+      // Atualizar o status da matrícula com base nos resultados da verificação
+      const statusUpdate = await checkAndUpdateEnrollmentDocumentStatus(document.enrollmentId);
       
       return res.status(200).json({
         success: true,
@@ -386,6 +490,88 @@ export function registerDocumentRoutes(app: Express) {
           .returning();
       }
 
+      // Para imagens, realizar análise OCR automática
+      if (req.file.mimetype.startsWith('image/')) {
+        try {
+          // Preparar dados do formulário para validação cruzada
+          let formFields: Record<string, string> = {};
+          
+          if (enrollment) {
+            // Extrair dados do formulário com base no tipo de documento
+            if (documentType === 'rg' || documentType === 'identity') {
+              formFields = {
+                name: enrollment.studentName || '',
+                rg: enrollment.studentRg || enrollment.studentDocumentId || '',
+                birthDate: enrollment.studentBirthdate ? new Date(enrollment.studentBirthdate).toLocaleDateString('pt-BR') : ''
+              };
+            } else if (documentType === 'cpf') {
+              formFields = {
+                name: enrollment.studentName || '',
+                cpf: enrollment.studentCpf || '',
+                birthDate: enrollment.studentBirthdate ? new Date(enrollment.studentBirthdate).toLocaleDateString('pt-BR') : ''
+              };
+            } else if (documentType === 'address_proof' || documentType === 'comprovante_residencia') {
+              formFields = {
+                name: enrollment.studentName || '',
+                address: [
+                  enrollment.studentAddress || '',
+                  enrollment.studentNumber || enrollment.studentAddressNumber || '',
+                  enrollment.studentComplement || enrollment.studentAddressComplement || ''
+                ].filter(Boolean).join(', '),
+                zipCode: enrollment.studentZipCode || ''
+              };
+            }
+          }
+          
+          // Executar OCR automaticamente
+          const ocrResult = await analyzeDocument(req.file.path, formFields);
+          
+          if (ocrResult.success && ocrResult.data) {
+            // Atualizar o documento com os dados do OCR
+            [document] = await db
+              .update(documents)
+              .set({
+                ocrData: JSON.stringify(ocrResult.data),
+                ocrQuality: ocrResult.data.confidence || 0,
+                status: (ocrResult.data.confidence || 0) > 50 ? 'verified' : 'needs_review',
+                updatedAt: new Date()
+              })
+              .where(eq(documents.id, document.id))
+              .returning();
+              
+            // Se foi realizada validação cruzada, guardar também os resultados
+            if (ocrResult.data.validationResults) {
+              const validationResult = {
+                isValid: ocrResult.data.validationResults.isValid,
+                documentType: ocrResult.data.documentType || "unknown",
+                fieldsFound: Object.keys(ocrResult.data.fields || {}).length,
+                fieldsVerified: Object.keys(ocrResult.data.validationResults.fieldValidations).filter(key => 
+                  ocrResult.data.validationResults.fieldValidations[key].isValid).length,
+                score: ocrResult.data.validationResults.score,
+                fieldValidations: ocrResult.data.validationResults.fieldValidations || {},
+                verifiedAt: new Date().toISOString()
+              };
+              
+              [document] = await db
+                .update(documents)
+                .set({
+                  verificationResult: JSON.stringify(validationResult),
+                  status: validationResult.isValid ? 'verified' : 'needs_review',
+                  updatedAt: new Date()
+                })
+                .where(eq(documents.id, document.id))
+                .returning();
+                
+              // Atualizar o status da matrícula com base nos resultados da verificação de documento
+              await checkAndUpdateEnrollmentDocumentStatus(document.enrollmentId);
+            }
+          }
+        } catch (error) {
+          console.error('Erro na análise automática de OCR:', error);
+          // Continuar mesmo se houver erro na análise OCR
+        }
+      }
+      
       // Return success response with document info
       return res.status(200).json({
         success: true,
@@ -543,8 +729,16 @@ export function registerDocumentRoutes(app: Express) {
         fs.unlinkSync(document.filePath);
       }
 
+      // Guardar o ID da matrícula antes de deletar o documento
+      const enrollmentId = document.enrollmentId;
+      
       // Delete the document record
       await db.delete(documents).where(eq(documents.id, docId));
+      
+      // Atualizar o status da matrícula após a exclusão do documento
+      if (enrollmentId) {
+        await checkAndUpdateEnrollmentDocumentStatus(enrollmentId);
+      }
 
       return res.status(200).json({
         success: true,
