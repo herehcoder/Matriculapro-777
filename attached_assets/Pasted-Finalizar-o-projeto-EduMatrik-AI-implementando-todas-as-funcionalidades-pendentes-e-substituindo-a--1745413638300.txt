@@ -1,0 +1,94 @@
+Finalizar o projeto EduMatrik AI, implementando todas as funcionalidades pendentes e substituindo a integração com a API oficial do WhatsApp pela Evolution API.
+
+✅ TAREFAS PRINCIPAIS
+1. 🔌 Integrações com APIs Externas
+WhatsApp API:
+
+Substituir completamente a API oficial do WhatsApp pela Evolution API.
+
+Configurar instância com token permanente.
+
+Criar webhook para receber mensagens e eventos.
+
+Integrar com o sistema de mensagens existente.
+
+OpenAI API:
+
+Implementar conexão completa com a API da OpenAI.
+
+Integrar com o chatbot para fornecer respostas contextuais.
+
+Usar a mesma API para análise inteligente de documentos.
+
+Gateway de Pagamentos:
+
+Adicionar integração com Stripe para permitir pagamento real no fluxo de matrícula.
+
+2. 💾 Melhorias na Infraestrutura
+Armazenamento de Documentos:
+
+Implementar armazenamento robusto com Amazon S3 ou solução similar.
+
+Escalabilidade:
+
+Otimizar o backend (Node.js + Express) para alto volume de acessos.
+
+Segurança:
+
+Adicionar verificação em duas etapas (2FA).
+
+Implementar auditoria de acessos para admins e usuários.
+
+3. 🧠 Funcionalidades Específicas
+OCR e Análise de Documentos:
+
+Implementar OCR (pode usar Tesseract.js ou uma API) para extrair dados dos documentos.
+
+Aplicar verificação inteligente desses dados.
+
+Automação de Email:
+
+Melhorar templates dos emails transacionais e adicionar fluxos automáticos de comunicação.
+
+Relatórios Customizáveis:
+
+Permitir que escolas gerem relatórios personalizados (PDF, Excel etc.).
+
+Calendário Acadêmico:
+
+Criar sistema de eventos e calendário integrado por escola.
+
+4. 💡 Melhorias de UX/UI
+Responsividade Avançada:
+
+Garantir que a plataforma funcione perfeitamente em qualquer dispositivo.
+
+Acessibilidade:
+
+Seguir o padrão WCAG 2.1 para acessibilidade (teclado, leitura de tela etc.).
+
+Modo Offline:
+
+Adicionar modo offline para operações básicas com fallback local.
+
+🛠 Observações Técnicas
+Utilizar React + TypeScript no frontend.
+
+Backend com Node.js + Express.
+
+Banco de dados já configurado: PostgreSQL.
+
+Toda nova funcionalidade deve ser testada e documentada.
+
+Manter a estrutura SaaS multiusuário com perfis (admin, escola, atendente, aluno).
+
+📚 Documentação Útil
+Evolution API: https://doc.evolution-api.com/v2/pt/integrations/cloudapi
+
+OpenAI API: https://platform.openai.com/docs
+
+Stripe API: https://stripe.com/docs/api
+
+AWS S3: https://docs.aws.amazon.com/s3/index.html
+
+OCR (Tesseract.js): https://tesseract.projectnaptha.com/

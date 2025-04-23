@@ -10,6 +10,8 @@ export const leadStatusEnum = pgEnum('lead_status', ['new', 'contacted', 'intere
 export const chatStatusEnum = pgEnum('chat_status', ['active', 'closed']);
 export const notificationTypeEnum = pgEnum('notification_type', ['message', 'enrollment', 'lead', 'system', 'payment']);
 export const messageStatusEnum = pgEnum('message_status', ['sent', 'delivered', 'read']);
+export const paymentStatusEnum = pgEnum('payment_status', ['pending', 'completed', 'failed', 'refunded', 'canceled']);
+export const paymentMethodEnum = pgEnum('payment_method', ['credit-card', 'debit-card', 'pix', 'bank-transfer', 'other']);
 
 // Users table
 export const users = pgTable('users', {
@@ -162,6 +164,7 @@ export const enrollments = pgTable('enrollments', {
   paymentAmount: integer('payment_amount'), // stored in cents
   paymentMethod: text('payment_method'),
   paymentReference: text('payment_reference'),
+  paymentStatus: text('payment_status').default('pending'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -341,6 +344,8 @@ export const insertPasswordResetTokenSchema = createInsertSchema(passwordResetTo
   createdAt: true
 });
 
+
+
 // Types for Drizzle ORM - All types consolidated in one place
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -388,6 +393,29 @@ export type InsertDocument = z.infer<typeof insertDocumentSchema>;
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type InsertPasswordResetToken = z.infer<typeof insertPasswordResetTokenSchema>;
 
+// Payments table
+export const payments = pgTable('payments', {
+  id: serial('id').primaryKey(),
+  enrollmentId: integer('enrollment_id').notNull().references(() => enrollments.id),
+  amount: integer('amount').notNull(), // stored in cents
+  status: paymentStatusEnum('status').default('pending'),
+  paymentMethod: paymentMethodEnum('payment_method').default('credit-card'),
+  stripePaymentIntentId: text('stripe_payment_intent_id'),
+  stripeCustomerId: text('stripe_customer_id'),
+  completedAt: timestamp('completed_at'),
+  failureReason: text('failure_reason'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Schema for inserting a new payment
+export const insertPaymentSchema = createInsertSchema(payments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  completedAt: true
+});
+
 // User settings table
 export const userSettings = pgTable('user_settings', {
   id: serial('id').primaryKey(),
@@ -418,3 +446,6 @@ export const insertUserSettingsSchema = createInsertSchema(userSettings).omit({
 
 export type UserSettings = typeof userSettings.$inferSelect;
 export type InsertUserSettings = z.infer<typeof insertUserSettingsSchema>;
+
+export type Payment = typeof payments.$inferSelect;
+export type InsertPayment = z.infer<typeof insertPaymentSchema>;
