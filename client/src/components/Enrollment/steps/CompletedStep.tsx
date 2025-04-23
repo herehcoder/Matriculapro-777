@@ -1,149 +1,179 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, Download, Copy, Share2 } from 'lucide-react';
-import { toast } from '@/hooks/use-toast';
+import { CheckCircle, Download, FileText, Loader2 } from 'lucide-react';
+import { getEnrollment } from '@/lib/api';
+import { Link } from 'wouter';
 
 interface CompletedStepProps {
   enrollmentId: number | null;
 }
 
 const CompletedStep: React.FC<CompletedStepProps> = ({ enrollmentId }) => {
-  // Função para copiar o protocolo para a área de transferência
-  const copyProtocolToClipboard = () => {
-    const protocol = `MAT-${enrollmentId?.toString().padStart(6, '0')}`;
-    navigator.clipboard.writeText(protocol).then(() => {
-      toast({
-        title: 'Copiado!',
-        description: 'Protocolo copiado para a área de transferência.',
-      });
-    });
-  };
+  const [isLoading, setIsLoading] = useState(true);
+  const [enrollment, setEnrollment] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // Função para compartilhar via whatsapp
-  const shareViaWhatsApp = () => {
-    const protocol = `MAT-${enrollmentId?.toString().padStart(6, '0')}`;
-    const text = `Olá! Realizei minha matrícula na EduMatrik. Meu protocolo de matrícula é: ${protocol}`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-  };
+  useEffect(() => {
+    const fetchEnrollment = async () => {
+      if (!enrollmentId) {
+        setError('ID de matrícula inválido');
+        setIsLoading(false);
+        return;
+      }
 
-  // Protocolo formatado
-  const formattedProtocol = `MAT-${enrollmentId?.toString().padStart(6, '0')}`;
-  
-  // Data e hora atual formatada
-  const currentDate = new Date();
-  const formattedDate = currentDate.toLocaleDateString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  });
-  const formattedTime = currentDate.toLocaleTimeString('pt-BR', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+      try {
+        setIsLoading(true);
+        const data = await getEnrollment(enrollmentId);
+        setEnrollment(data);
+      } catch (err) {
+        console.error('Error fetching enrollment:', err);
+        setError('Não foi possível carregar os dados da matrícula');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchEnrollment();
+  }, [enrollmentId]);
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 space-y-4">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="text-neutral-600 dark:text-neutral-300">Carregando dados da matrícula...</p>
+      </div>
+    );
+  }
+
+  if (error || !enrollment) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 space-y-4">
+        <div className="h-16 w-16 rounded-full bg-red-100 dark:bg-red-900 flex items-center justify-center text-red-600 dark:text-red-300">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="h-8 w-8">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        <h3 className="text-lg font-medium text-neutral-900 dark:text-neutral-100">Ocorreu um erro</h3>
+        <p className="text-neutral-600 dark:text-neutral-300">{error || 'Não foi possível carregar os dados da matrícula'}</p>
+        <Button variant="outline" asChild>
+          <Link href="/">Voltar para a página inicial</Link>
+        </Button>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col items-center justify-center text-center p-4">
-        <div className="h-20 w-20 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center mb-4">
-          <CheckCircle2 className="h-10 w-10 text-green-600 dark:text-green-400" />
+    <div className="space-y-8">
+      <div className="text-center space-y-3">
+        <div className="inline-flex h-20 w-20 items-center justify-center rounded-full bg-green-100 dark:bg-green-900 mx-auto">
+          <CheckCircle className="h-10 w-10 text-green-600 dark:text-green-300" />
         </div>
-        <h2 className="text-2xl font-bold text-neutral-800 dark:text-neutral-200">
-          Matrícula Concluída com Sucesso!
-        </h2>
-        <p className="text-neutral-600 dark:text-neutral-400 mt-2 max-w-md">
-          Sua matrícula foi registrada com sucesso. Guarde seu protocolo de matrícula para acompanhamento.
+        <h3 className="text-xl font-medium">Matrícula enviada com sucesso!</h3>
+        <p className="text-neutral-600 dark:text-neutral-300 max-w-xl mx-auto">
+          Sua solicitação de matrícula foi recebida e está em processo de análise. 
+          Você receberá um e-mail com os próximos passos. Guarde o número de protocolo abaixo.
         </p>
       </div>
 
-      <Card className="bg-neutral-50 dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800">
-        <CardContent className="pt-6">
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <div className="space-y-1">
-                <h3 className="text-lg font-medium">Protocolo de Matrícula</h3>
-                <p className="text-neutral-500 dark:text-neutral-400 text-sm">
-                  {formattedDate} às {formattedTime}
-                </p>
-              </div>
-              <div className="flex space-x-2">
-                <Button variant="outline" size="icon" onClick={copyProtocolToClipboard} title="Copiar protocolo">
-                  <Copy className="h-4 w-4" />
-                  <span className="sr-only">Copiar</span>
-                </Button>
-                <Button variant="outline" size="icon" onClick={shareViaWhatsApp} title="Compartilhar">
-                  <Share2 className="h-4 w-4" />
-                  <span className="sr-only">Compartilhar</span>
-                </Button>
-              </div>
+      <Card className="border-2 border-dashed">
+        <CardContent className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <h4 className="text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1">
+                Número de protocolo
+              </h4>
+              <p className="text-lg font-mono font-semibold">{enrollment.id.toString().padStart(8, '0')}</p>
             </div>
-            
-            <div className="bg-white dark:bg-neutral-800 p-4 rounded-lg border border-neutral-200 dark:border-neutral-700 text-center">
-              <p className="text-2xl font-mono font-bold tracking-wider">{formattedProtocol}</p>
-            </div>
-            
-            <div className="space-y-1 pt-2">
-              <p className="text-sm text-neutral-600 dark:text-neutral-400">
-                Este é o seu número de protocolo. Guarde-o para consultas futuras sobre o andamento da sua matrícula.
-              </p>
-              <p className="text-sm text-neutral-600 dark:text-neutral-400">
-                Você receberá um e-mail de confirmação com essas informações.
+            <div>
+              <h4 className="text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1">
+                Data da solicitação
+              </h4>
+              <p className="text-lg">
+                {new Date(enrollment.createdAt).toLocaleDateString('pt-BR')}
               </p>
             </div>
-
-            <div className="pt-2">
-              <Button variant="outline" className="w-full" onClick={() => {
-                toast({
-                  title: 'Comprovante',
-                  description: 'O comprovante será gerado e enviado para seu e-mail.',
-                });
-              }}>
-                <Download className="mr-2 h-4 w-4" />
-                Gerar Comprovante de Matrícula
-              </Button>
+            <div>
+              <h4 className="text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1">
+                Nome do estudante
+              </h4>
+              <p className="text-lg">{enrollment.studentName}</p>
+            </div>
+            <div>
+              <h4 className="text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1">
+                Status atual
+              </h4>
+              <div className="flex items-center">
+                <div className="h-2.5 w-2.5 rounded-full bg-amber-500 mr-2" />
+                <p className="text-lg">Em análise</p>
+              </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="space-y-3">
-        <h3 className="font-medium">Próximos passos:</h3>
-        <ul className="space-y-2 list-disc list-inside text-neutral-700 dark:text-neutral-300 text-sm">
-          <li>Aguarde o contato da instituição para confirmação de sua matrícula.</li>
-          <li>Confirme seu e-mail clicando no link enviado para sua caixa de entrada.</li>
-          <li>Verifique se a documentação enviada está correta e legível.</li>
-          <li>Prepare-se para o processo de avaliação, caso necessário.</li>
-          <li>Aguarde informações sobre o início das aulas e possíveis atividades introdutórias.</li>
-        </ul>
+      <div className="space-y-4">
+        <h4 className="text-base font-medium">Próximos passos</h4>
+        <ol className="space-y-4">
+          <li className="flex gap-3">
+            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900 text-primary">
+              1
+            </div>
+            <p className="text-neutral-700 dark:text-neutral-300">
+              A instituição irá analisar seus documentos e informações fornecidas.
+            </p>
+          </li>
+          <li className="flex gap-3">
+            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900 text-primary">
+              2
+            </div>
+            <p className="text-neutral-700 dark:text-neutral-300">
+              Você receberá um e-mail com a confirmação de aprovação ou solicitação de documentos adicionais.
+            </p>
+          </li>
+          <li className="flex gap-3">
+            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900 text-primary">
+              3
+            </div>
+            <p className="text-neutral-700 dark:text-neutral-300">
+              Após a aprovação, você receberá as instruções para pagamento e início das aulas.
+            </p>
+          </li>
+        </ol>
       </div>
 
-      <Card className="bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
-        <CardContent className="flex items-start space-x-4 pt-6">
-          <div className="bg-blue-100 dark:bg-blue-800 p-2 rounded-full">
-            <CheckCircle2 className="h-5 w-5 text-blue-600 dark:text-blue-300" />
+      <div className="flex flex-col sm:flex-row justify-center gap-4 pt-4">
+        <Button variant="outline" className="sm:flex-1 max-w-xs" asChild>
+          <a href="#">
+            <FileText className="h-4 w-4 mr-2" />
+            Comprovante de matrícula
+          </a>
+        </Button>
+        <Button variant="secondary" className="sm:flex-1 max-w-xs" asChild>
+          <Link href="/">
+            Voltar para a página inicial
+          </Link>
+        </Button>
+      </div>
+
+      <div className="bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-md p-4 mt-6">
+        <div className="flex">
+          <div className="flex-shrink-0">
+            <svg className="h-5 w-5 text-amber-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
           </div>
-          <div>
-            <h3 className="font-medium text-blue-800 dark:text-blue-300">Precisa de Ajuda?</h3>
-            <p className="text-sm text-blue-700 dark:text-blue-400 mt-1">
-              Nossa equipe de atendimento está disponível para ajudar em caso de dúvidas.
-              Entre em contato pelo nosso chat, e-mail ou telefone.
-            </p>
-            <Button
-              variant="link"
-              className="px-0 h-auto font-medium text-blue-600 dark:text-blue-400"
-              onClick={() => {
-                // Abrir o chat ou redirecionar para a página de contato
-                toast({
-                  title: 'Chat de Atendimento',
-                  description: 'Redirecionando para o chat de atendimento...',
-                });
-              }}
-            >
-              Abrir Chat de Atendimento
-            </Button>
+          <div className="ml-3">
+            <h3 className="text-sm font-medium text-amber-800 dark:text-amber-200">Atenção</h3>
+            <div className="mt-2 text-sm text-amber-700 dark:text-amber-300">
+              <p>
+                Guarde seu número de protocolo para futuras consultas. Para acompanhar o processo, 
+                faça login no portal do aluno ou entre em contato com a equipe de suporte.
+              </p>
+            </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 };

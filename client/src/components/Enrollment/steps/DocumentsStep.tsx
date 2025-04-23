@@ -1,10 +1,24 @@
-import React, { useState, useCallback } from 'react';
-import { useDropzone } from 'react-dropzone';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import React, { useState } from 'react';
+import { 
+  Form, 
+  FormControl, 
+  FormDescription, 
+  FormField, 
+  FormItem, 
+  FormLabel, 
+  FormMessage 
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useForm } from 'react-hook-form';
+import * as z from 'zod';
 import { toast } from '@/hooks/use-toast';
-import { Upload, FileText, X, CheckCircle, AlertCircle } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import { uploadDocument } from '@/lib/api';
+import { FileUp, X, Check, FileText, Image, IdCard, File } from 'lucide-react';
+import { useDropzone } from 'react-dropzone';
+import { cn } from '@/lib/utils';
 
 interface DocumentsStepProps {
   formData: any;
@@ -13,423 +27,270 @@ interface DocumentsStepProps {
   questions: any[];
 }
 
-interface FileWithPreview extends File {
-  preview?: string;
-}
-
-const DocumentsStep: React.FC<DocumentsStepProps> = ({ formData, updateFormData, enrollmentId, questions }) => {
-  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({
-    identityDocument: 0,
-    proofOfAddress: 0,
-    photo: 0,
-    schoolRecords: 0,
-  });
-  
-  const [uploading, setUploading] = useState<Record<string, boolean>>({
+const DocumentsStep: React.FC<DocumentsStepProps> = ({ 
+  formData, 
+  updateFormData,
+  enrollmentId,
+  questions
+}) => {
+  const [isUploading, setIsUploading] = useState<Record<string, boolean>>({
     identityDocument: false,
     proofOfAddress: false,
     photo: false,
     schoolRecords: false,
   });
 
-  // Simular upload de arquivo
-  const simulateUpload = (fieldName: string, file: File) => {
-    setUploading(prev => ({ ...prev, [fieldName]: true }));
-    setUploadProgress(prev => ({ ...prev, [fieldName]: 0 }));
-    
-    const interval = setInterval(() => {
-      setUploadProgress(prev => {
-        const newProgress = Math.min(prev[fieldName] + 10, 100);
-        if (newProgress === 100) {
-          clearInterval(interval);
-          setTimeout(() => {
-            setUploading(prev => ({ ...prev, [fieldName]: false }));
-            
-            // Simular que o arquivo foi salvo no servidor e retornou um URL
-            const fileUrl = URL.createObjectURL(file);
-            updateFormData({ [fieldName]: { name: file.name, size: file.size, type: file.type, url: fileUrl } });
-            
-            toast({
-              title: 'Arquivo enviado com sucesso',
-              description: `${file.name} foi enviado com sucesso!`,
-            });
-          }, 500);
-        }
-        return { ...prev, [fieldName]: newProgress };
-      });
-    }, 300);
+  const formSchema = z.object({
+    identityDocument: z.any().optional(),
+    proofOfAddress: z.any().optional(),
+    photo: z.any().optional(),
+    schoolRecords: z.any().optional(),
+  });
+
+  const form = useForm<z.infer<typeof formSchema>>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      identityDocument: formData.identityDocument || null,
+      proofOfAddress: formData.proofOfAddress || null,
+      photo: formData.photo || null,
+      schoolRecords: formData.schoolRecords || null,
+    },
+  });
+
+  const onSubmit = (data: z.infer<typeof formSchema>) => {
+    updateFormData(data);
+    toast({
+      title: 'Documentos salvos',
+      description: 'Seus documentos foram salvos com sucesso!',
+    });
   };
 
-  // Configuração do Dropzone
-  const createDropzone = (fieldName: string) => {
-    const onDrop = useCallback((acceptedFiles: File[]) => {
-      if (acceptedFiles.length > 0) {
-        const file = acceptedFiles[0];
-        simulateUpload(fieldName, file);
-      }
-    }, [fieldName]);
+  const handleFileUpload = async (files: File[], fieldName: string) => {
+    if (!files || files.length === 0 || !enrollmentId) {
+      toast({
+        title: 'Erro',
+        description: 'Nenhum arquivo selecionado ou matrícula inválida',
+        variant: 'destructive',
+      });
+      return;
+    }
 
-    return useDropzone({
-      onDrop,
-      maxFiles: 1,
+    try {
+      setIsUploading(prev => ({ ...prev, [fieldName]: true }));
+      
+      const file = files[0];
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('documentType', fieldName);
+      formData.append('enrollmentId', enrollmentId.toString());
+
+      const result = await uploadDocument(formData);
+      
+      form.setValue(fieldName as any, {
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        fileUrl: result.fileUrl,
+      }, { shouldValidate: true });
+
+      updateFormData({
+        [fieldName]: {
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type,
+          fileUrl: result.fileUrl,
+        }
+      });
+
+      toast({
+        title: 'Upload concluído',
+        description: `${file.name} foi enviado com sucesso!`,
+      });
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      toast({
+        title: 'Erro no upload',
+        description: 'Não foi possível enviar o arquivo. Tente novamente.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUploading(prev => ({ ...prev, [fieldName]: false }));
+    }
+  };
+
+  const renderDocumentUploader = (fieldName: string, title: string, description: string, icon: React.ReactNode) => {
+    const fieldValue = form.watch(fieldName as any);
+    const isCurrentlyUploading = isUploading[fieldName];
+    
+    const { getRootProps, getInputProps, isDragActive } = useDropzone({
+      onDrop: (files) => handleFileUpload(files, fieldName),
       accept: {
         'image/*': ['.jpeg', '.jpg', '.png'],
         'application/pdf': ['.pdf'],
       },
+      disabled: isCurrentlyUploading,
+      maxSize: 5 * 1024 * 1024, // 5MB
+      maxFiles: 1,
     });
-  };
 
-  // Criar Dropzones para cada campo
-  const identityDocumentDropzone = createDropzone('identityDocument');
-  const proofOfAddressDropzone = createDropzone('proofOfAddress');
-  const photoDropzone = createDropzone('photo');
-  const schoolRecordsDropzone = createDropzone('schoolRecords');
+    const handleRemove = () => {
+      form.setValue(fieldName as any, null, { shouldValidate: true });
+      updateFormData({ [fieldName]: null });
+    };
 
-  // Remover arquivo
-  const removeFile = (fieldName: string) => {
-    if (formData[fieldName] && formData[fieldName].url) {
-      URL.revokeObjectURL(formData[fieldName].url);
-    }
-    updateFormData({ [fieldName]: null });
+    return (
+      <FormField
+        control={form.control}
+        name={fieldName as any}
+        render={({ field }) => (
+          <FormItem className="col-span-full">
+            <FormLabel>{title}</FormLabel>
+            <FormDescription>
+              {description}
+            </FormDescription>
+            <FormControl>
+              {fieldValue ? (
+                <div className="border rounded-md p-4 bg-neutral-50 dark:bg-neutral-900 flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="h-10 w-10 rounded-md bg-primary-100 dark:bg-primary-900 flex items-center justify-center text-primary-600 dark:text-primary-300">
+                      {icon}
+                    </div>
+                    <div>
+                      <p className="font-medium truncate max-w-[200px]">{fieldValue.fileName}</p>
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                        {(fieldValue.fileSize / 1024).toFixed(1)} KB
+                      </p>
+                    </div>
+                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={handleRemove}
+                    className="text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950"
+                  >
+                    <X className="h-4 w-4" />
+                    <span className="sr-only">Remover</span>
+                  </Button>
+                </div>
+              ) : (
+                <div 
+                  {...getRootProps()} 
+                  className={cn(
+                    "border-2 border-dashed rounded-md p-6 flex flex-col items-center justify-center cursor-pointer transition-colors",
+                    isDragActive 
+                      ? "border-primary bg-primary-50 dark:bg-primary-950" 
+                      : "border-neutral-300 dark:border-neutral-700 hover:border-primary"
+                  )}
+                >
+                  <input {...getInputProps()} />
+                  <div className="flex flex-col items-center text-center space-y-2">
+                    <div className={cn(
+                      "p-2 rounded-full",
+                      isDragActive ? "bg-primary-100 dark:bg-primary-900" : "bg-neutral-100 dark:bg-neutral-800"
+                    )}>
+                      {isCurrentlyUploading ? (
+                        <svg className="animate-spin h-6 w-6 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                      ) : (
+                        <FileUp className={cn(
+                          "h-6 w-6",
+                          isDragActive ? "text-primary" : "text-neutral-400 dark:text-neutral-500"
+                        )} />
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">
+                        {isCurrentlyUploading ? "Enviando..." : "Arraste e solte ou clique para upload"}
+                      </p>
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                        JPG, PNG ou PDF (Máx. 5MB)
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+    );
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold text-neutral-800 dark:text-neutral-200">
-          Documentos Necessários
-        </h2>
-        <p className="text-sm text-neutral-600 dark:text-neutral-400">
-          Por favor, envie os documentos necessários para completar sua matrícula.
-        </p>
-      </div>
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)}>
+        <div className="space-y-8">
+          <div>
+            <h3 className="text-lg font-medium">Documentos</h3>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
+              Faça o upload dos documentos necessários para completar sua matrícula.
+            </p>
+          </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {/* Documento de Identidade */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Documento de Identidade</CardTitle>
-            <CardDescription>RG, CNH ou documento oficial com foto</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {formData.identityDocument ? (
-              <div className="border rounded-lg p-3 bg-neutral-50 dark:bg-neutral-900 relative">
-                <div className="flex items-center">
-                  <FileText className="h-10 w-10 text-neutral-500 mr-3" />
-                  <div className="overflow-hidden flex-1">
-                    <p className="font-medium truncate text-sm">{formData.identityDocument.name}</p>
-                    <p className="text-xs text-neutral-500">
-                      {Math.round(formData.identityDocument.size / 1024)} KB
-                    </p>
-                  </div>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-8 w-8 shrink-0" 
-                    onClick={() => removeFile('identityDocument')}
-                    title="Remover arquivo"
-                  >
-                    <X className="h-4 w-4" />
-                    <span className="sr-only">Remover arquivo</span>
-                  </Button>
-                </div>
-                <div className="absolute top-0 right-0 mt-2 mr-2">
-                  <CheckCircle className="h-5 w-5 text-green-500" />
-                </div>
-              </div>
-            ) : (
-              <div 
-                {...identityDocumentDropzone.getRootProps()} 
-                className="border-2 border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg p-8 text-center hover:border-primary dark:hover:border-primary transition cursor-pointer"
-              >
-                <input {...identityDocumentDropzone.getInputProps()} />
-                {uploading.identityDocument ? (
-                  <div className="space-y-3">
-                    <div className="flex justify-center">
-                      <Upload className="h-10 w-10 text-neutral-400 animate-pulse" />
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-sm text-neutral-500">Enviando arquivo...</p>
-                      <Progress value={uploadProgress.identityDocument} />
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex justify-center">
-                      <Upload className="h-10 w-10 text-neutral-400" />
-                    </div>
-                    <p className="mt-2 text-sm text-neutral-500">
-                      Arraste e solte seu documento aqui, ou clique para selecionar
-                    </p>
-                    <p className="text-xs text-neutral-400 mt-1">
-                      Formatos suportados: JPG, PNG, PDF
-                    </p>
-                  </>
-                )}
-              </div>
+          <div className="grid grid-cols-1 gap-8">
+            {renderDocumentUploader(
+              "identityDocument", 
+              "Documento de Identidade", 
+              "Envie uma cópia legível do seu RG, CNH ou outro documento de identidade oficial com foto.",
+              <IdCard className="h-5 w-5" />
             )}
-          </CardContent>
-        </Card>
 
-        {/* Comprovante de Residência */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Comprovante de Residência</CardTitle>
-            <CardDescription>Conta de luz, água ou telefone (últ. 3 meses)</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {formData.proofOfAddress ? (
-              <div className="border rounded-lg p-3 bg-neutral-50 dark:bg-neutral-900 relative">
-                <div className="flex items-center">
-                  <FileText className="h-10 w-10 text-neutral-500 mr-3" />
-                  <div className="overflow-hidden flex-1">
-                    <p className="font-medium truncate text-sm">{formData.proofOfAddress.name}</p>
-                    <p className="text-xs text-neutral-500">
-                      {Math.round(formData.proofOfAddress.size / 1024)} KB
-                    </p>
-                  </div>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-8 w-8 shrink-0" 
-                    onClick={() => removeFile('proofOfAddress')}
-                    title="Remover arquivo"
-                  >
-                    <X className="h-4 w-4" />
-                    <span className="sr-only">Remover arquivo</span>
-                  </Button>
-                </div>
-                <div className="absolute top-0 right-0 mt-2 mr-2">
-                  <CheckCircle className="h-5 w-5 text-green-500" />
-                </div>
-              </div>
-            ) : (
-              <div 
-                {...proofOfAddressDropzone.getRootProps()} 
-                className="border-2 border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg p-8 text-center hover:border-primary dark:hover:border-primary transition cursor-pointer"
-              >
-                <input {...proofOfAddressDropzone.getInputProps()} />
-                {uploading.proofOfAddress ? (
-                  <div className="space-y-3">
-                    <div className="flex justify-center">
-                      <Upload className="h-10 w-10 text-neutral-400 animate-pulse" />
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-sm text-neutral-500">Enviando arquivo...</p>
-                      <Progress value={uploadProgress.proofOfAddress} />
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex justify-center">
-                      <Upload className="h-10 w-10 text-neutral-400" />
-                    </div>
-                    <p className="mt-2 text-sm text-neutral-500">
-                      Arraste e solte seu comprovante aqui, ou clique para selecionar
-                    </p>
-                    <p className="text-xs text-neutral-400 mt-1">
-                      Formatos suportados: JPG, PNG, PDF
-                    </p>
-                  </>
-                )}
-              </div>
+            {renderDocumentUploader(
+              "proofOfAddress", 
+              "Comprovante de Endereço", 
+              "Envie um comprovante de endereço recente (conta de luz, água, telefone, etc.).",
+              <FileText className="h-5 w-5" />
             )}
-          </CardContent>
-        </Card>
 
-        {/* Foto */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Foto Recente</CardTitle>
-            <CardDescription>Foto 3x4 com fundo branco</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {formData.photo ? (
-              <div className="border rounded-lg bg-neutral-50 dark:bg-neutral-900 relative p-3">
-                {formData.photo.type.startsWith('image/') ? (
-                  <div className="flex flex-col items-center">
-                    <img 
-                      src={formData.photo.url} 
-                      alt="Foto do aluno"
-                      className="h-32 object-cover rounded mb-2" 
-                    />
-                    <div className="flex items-center w-full">
-                      <div className="overflow-hidden flex-1">
-                        <p className="font-medium truncate text-sm">{formData.photo.name}</p>
-                        <p className="text-xs text-neutral-500">
-                          {Math.round(formData.photo.size / 1024)} KB
-                        </p>
-                      </div>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-8 w-8 shrink-0" 
-                        onClick={() => removeFile('photo')}
-                        title="Remover arquivo"
-                      >
-                        <X className="h-4 w-4" />
-                        <span className="sr-only">Remover arquivo</span>
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center">
-                    <FileText className="h-10 w-10 text-neutral-500 mr-3" />
-                    <div className="overflow-hidden flex-1">
-                      <p className="font-medium truncate text-sm">{formData.photo.name}</p>
-                      <p className="text-xs text-neutral-500">
-                        {Math.round(formData.photo.size / 1024)} KB
-                      </p>
-                    </div>
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="h-8 w-8 shrink-0" 
-                      onClick={() => removeFile('photo')}
-                      title="Remover arquivo"
-                    >
-                      <X className="h-4 w-4" />
-                      <span className="sr-only">Remover arquivo</span>
-                    </Button>
-                  </div>
-                )}
-                <div className="absolute top-0 right-0 mt-2 mr-2">
-                  <CheckCircle className="h-5 w-5 text-green-500" />
-                </div>
-              </div>
-            ) : (
-              <div 
-                {...photoDropzone.getRootProps()} 
-                className="border-2 border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg p-8 text-center hover:border-primary dark:hover:border-primary transition cursor-pointer"
-              >
-                <input {...photoDropzone.getInputProps()} />
-                {uploading.photo ? (
-                  <div className="space-y-3">
-                    <div className="flex justify-center">
-                      <Upload className="h-10 w-10 text-neutral-400 animate-pulse" />
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-sm text-neutral-500">Enviando arquivo...</p>
-                      <Progress value={uploadProgress.photo} />
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex justify-center">
-                      <Upload className="h-10 w-10 text-neutral-400" />
-                    </div>
-                    <p className="mt-2 text-sm text-neutral-500">
-                      Arraste e solte sua foto aqui, ou clique para selecionar
-                    </p>
-                    <p className="text-xs text-neutral-400 mt-1">
-                      Formatos suportados: JPG, PNG
-                    </p>
-                  </>
-                )}
-              </div>
+            {renderDocumentUploader(
+              "photo", 
+              "Foto Recente", 
+              "Envie uma foto sua recente, estilo 3x4, com fundo claro.",
+              <Image className="h-5 w-5" />
             )}
-          </CardContent>
-        </Card>
 
-        {/* Histórico Escolar */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Histórico Escolar</CardTitle>
-            <CardDescription>Histórico escolar ou declaração de conclusão</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {formData.schoolRecords ? (
-              <div className="border rounded-lg p-3 bg-neutral-50 dark:bg-neutral-900 relative">
-                <div className="flex items-center">
-                  <FileText className="h-10 w-10 text-neutral-500 mr-3" />
-                  <div className="overflow-hidden flex-1">
-                    <p className="font-medium truncate text-sm">{formData.schoolRecords.name}</p>
-                    <p className="text-xs text-neutral-500">
-                      {Math.round(formData.schoolRecords.size / 1024)} KB
-                    </p>
-                  </div>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-8 w-8 shrink-0" 
-                    onClick={() => removeFile('schoolRecords')}
-                    title="Remover arquivo"
-                  >
-                    <X className="h-4 w-4" />
-                    <span className="sr-only">Remover arquivo</span>
-                  </Button>
-                </div>
-                <div className="absolute top-0 right-0 mt-2 mr-2">
-                  <CheckCircle className="h-5 w-5 text-green-500" />
-                </div>
-              </div>
-            ) : (
-              <div 
-                {...schoolRecordsDropzone.getRootProps()} 
-                className="border-2 border-dashed border-neutral-300 dark:border-neutral-700 rounded-lg p-8 text-center hover:border-primary dark:hover:border-primary transition cursor-pointer"
-              >
-                <input {...schoolRecordsDropzone.getInputProps()} />
-                {uploading.schoolRecords ? (
-                  <div className="space-y-3">
-                    <div className="flex justify-center">
-                      <Upload className="h-10 w-10 text-neutral-400 animate-pulse" />
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-sm text-neutral-500">Enviando arquivo...</p>
-                      <Progress value={uploadProgress.schoolRecords} />
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex justify-center">
-                      <Upload className="h-10 w-10 text-neutral-400" />
-                    </div>
-                    <p className="mt-2 text-sm text-neutral-500">
-                      Arraste e solte seu histórico aqui, ou clique para selecionar
-                    </p>
-                    <p className="text-xs text-neutral-400 mt-1">
-                      Formatos suportados: JPG, PNG, PDF
-                    </p>
-                  </>
-                )}
-              </div>
+            {renderDocumentUploader(
+              "schoolRecords", 
+              "Histórico Escolar", 
+              "Envie uma cópia do seu histórico escolar ou diploma anterior.",
+              <File className="h-5 w-5" />
             )}
-          </CardContent>
-        </Card>
-      </div>
+          </div>
 
-      {/* Perguntas personalizadas */}
-      {questions.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Informações Adicionais</CardTitle>
-            <CardDescription>Por favor, responda às seguintes perguntas</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {questions.map((question) => (
-              <div key={question.id} className="space-y-2">
-                <label className="text-sm font-medium">
-                  {question.text}
-                  {question.required && <span className="text-red-500 ml-1">*</span>}
-                </label>
-                {/* Implementar diferentes tipos de perguntas conforme necessário */}
+          {questions && questions.length > 0 && (
+            <>
+              <div>
+                <h3 className="text-lg font-medium">Perguntas Adicionais</h3>
+                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
+                  Por favor, responda às perguntas abaixo.
+                </p>
               </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
 
-      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 flex items-start">
-        <AlertCircle className="text-amber-500 h-5 w-5 mr-3 mt-0.5 shrink-0" />
-        <div>
-          <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300">Importante</h3>
-          <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
-            Certifique-se de que todos os documentos estão legíveis e dentro da validade. Documentos 
-            ilegíveis ou expirados podem atrasar seu processo de matrícula.
-          </p>
+              <Card className="border-dashed">
+                <CardContent className="p-6 space-y-4">
+                  {questions.map((question, index) => (
+                    <div key={question.id || index} className="space-y-2">
+                      <h4 className="font-medium">{question.text}</h4>
+                      <Input placeholder="Sua resposta" />
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </>
+          )}
+
+          <div className="flex justify-end">
+            <Button type="submit">
+              Salvar Documentos
+              <Check className="ml-2 h-4 w-4" />
+            </Button>
+          </div>
         </div>
-      </div>
-    </div>
+      </form>
+    </Form>
   );
 };
 

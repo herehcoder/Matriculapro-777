@@ -207,6 +207,18 @@ export const sendWhatsAppMessage = (data: any) => {
   return apiRequest("POST", "/api/whatsapp/webhook", data);
 };
 
+// Documents
+export const uploadDocument = (formData: FormData) => {
+  return fetch("/api/documents/upload", {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  }).then(res => {
+    if (!res.ok) throw new Error("Failed to upload document");
+    return res.json();
+  });
+};
+
 // Dashboard Metrics
 export const getDashboardMetrics = (schoolId?: number) => {
   const url = schoolId ? `/api/dashboard/metrics?schoolId=${schoolId}` : "/api/dashboard/metrics";

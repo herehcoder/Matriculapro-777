@@ -21,13 +21,19 @@ interface EnrollmentFormProps {
   onComplete?: () => void;
 }
 
-const EnrollmentForm: React.FC<EnrollmentFormProps> = ({ schoolId }) => {
-  const [activeStep, setActiveStep] = useState(0);
+const EnrollmentForm: React.FC<EnrollmentFormProps> = ({ 
+  schoolId, 
+  enrollmentId: initialEnrollmentId, 
+  schoolName,
+  initialStep = 0,
+  onComplete
+}) => {
+  const [activeStep, setActiveStep] = useState(initialStep);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [courses, setCourses] = useState<any[]>([]);
   const [questions, setQuestions] = useState<any[]>([]);
-  const [enrollmentId, setEnrollmentId] = useState<number | null>(null);
+  const [enrollmentId, setEnrollmentId] = useState<number | null>(initialEnrollmentId || null);
   const [formData, setFormData] = useState({
     personalInfo: {
       fullName: '',
@@ -120,8 +126,13 @@ const EnrollmentForm: React.FC<EnrollmentFormProps> = ({ schoolId }) => {
   };
 
   const handleComplete = () => {
-    // Navegar para a página de sucesso
-    navigate(`/enrollment/success/${enrollmentId}`);
+    if (onComplete) {
+      // Chamar o callback fornecido pela página pai
+      onComplete();
+    } else {
+      // Navegar para a página de sucesso
+      navigate(`/enrollment/success/${enrollmentId}`);
+    }
   };
 
   const updateFormData = (step: string, data: any) => {

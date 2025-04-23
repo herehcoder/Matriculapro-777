@@ -1,224 +1,205 @@
 import React, { useEffect, useState } from 'react';
 import { useRoute } from 'wouter';
-import { CheckCircle, ArrowLeft, Download, Calendar, Mail, Phone } from 'lucide-react';
+import { Link } from 'wouter';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { toast } from '@/hooks/use-toast';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { CheckCircle, Loader2, AlertCircle, ChevronLeft, Download, Calendar, User, FileText } from 'lucide-react';
 import { getEnrollment } from '@/lib/api';
 
 const EnrollmentSuccessPage: React.FC = () => {
-  const [, params] = useRoute<{ id: string }>('/enrollment/success/:id');
+  const [match, params] = useRoute<{ id: string }>('/enrollment/success/:id');
+  const [isLoading, setIsLoading] = useState(true);
   const [enrollment, setEnrollment] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchEnrollment = async () => {
-      if (params?.id) {
-        try {
-          setLoading(true);
-          const data = await getEnrollment(parseInt(params.id));
-          setEnrollment(data);
-        } catch (error) {
-          console.error('Error fetching enrollment:', error);
-          toast({
-            title: 'Erro',
-            description: 'Não foi possível carregar os dados da matrícula.',
-            variant: 'destructive',
-          });
-        } finally {
-          setLoading(false);
-        }
+      if (!params?.id) {
+        setError('ID de matrícula não encontrado na URL');
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        const enrollmentId = parseInt(params.id, 10);
+        const data = await getEnrollment(enrollmentId);
+        setEnrollment(data);
+      } catch (err) {
+        console.error('Error fetching enrollment:', err);
+        setError('Não foi possível carregar os dados da matrícula');
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    fetchEnrollment();
-  }, [params?.id]);
+    if (match) {
+      fetchEnrollment();
+    } else {
+      setError('URL inválida');
+      setIsLoading(false);
+    }
+  }, [match, params?.id]);
 
-  const handleDownloadCertificate = () => {
-    toast({
-      title: 'Comprovante',
-      description: 'O comprovante de matrícula será gerado e enviado para seu email.',
-    });
-  };
-
-  // Protocolo formatado
-  const formattedProtocol = enrollment ? `MAT-${enrollment.id.toString().padStart(6, '0')}` : 'Carregando...';
-
-  if (loading) {
+  if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-pulse flex flex-col items-center">
-          <div className="h-12 w-12 rounded-full bg-neutral-200 dark:bg-neutral-700 mb-4"></div>
-          <div className="h-6 w-48 bg-neutral-200 dark:bg-neutral-700 rounded mb-2"></div>
-          <div className="h-4 w-64 bg-neutral-200 dark:bg-neutral-700 rounded"></div>
+      <div className="flex flex-col items-center justify-center min-h-screen py-12 bg-gray-50 dark:bg-gray-900">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
+          <h1 className="text-2xl font-semibold">Carregando dados da matrícula...</h1>
+          <p className="text-gray-600 dark:text-gray-400">Aguarde enquanto buscamos as informações.</p>
         </div>
       </div>
     );
   }
 
-  if (!enrollment) {
+  if (error || !enrollment) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-4">
-        <div className="text-center max-w-md">
-          <div className="h-16 w-16 bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center mx-auto mb-6">
-            <span className="text-red-500 dark:text-red-300 text-2xl">!</span>
-          </div>
-          <h1 className="text-2xl font-bold mb-2">Matrícula não encontrada</h1>
-          <p className="text-neutral-600 dark:text-neutral-400 mb-6">
-            Não conseguimos encontrar os dados da matrícula solicitada. Por favor, verifique se o link está correto.
-          </p>
-          <Button variant="default" onClick={() => window.history.back()}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Voltar
-          </Button>
-        </div>
+      <div className="flex flex-col items-center justify-center min-h-screen py-12 bg-gray-50 dark:bg-gray-900">
+        <Card className="max-w-lg w-full">
+          <CardHeader className="text-center space-y-2">
+            <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900 flex items-center justify-center mx-auto">
+              <AlertCircle className="h-6 w-6 text-red-600 dark:text-red-300" />
+            </div>
+            <CardTitle className="text-2xl">Erro ao carregar matrícula</CardTitle>
+            <CardDescription>
+              {error || 'Não foi possível encontrar os dados da matrícula solicitada.'}
+            </CardDescription>
+          </CardHeader>
+          <CardFooter className="flex justify-center">
+            <Button variant="default" asChild>
+              <Link href="/">
+                <ChevronLeft className="h-4 w-4 mr-2" />
+                Voltar para a página inicial
+              </Link>
+            </Button>
+          </CardFooter>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 py-12 px-4">
-      <div className="container max-w-4xl mx-auto">
-        <div className="bg-white dark:bg-neutral-900 rounded-lg shadow-lg overflow-hidden">
-          <div className="bg-primary text-primary-foreground p-8 text-center">
-            <div className="h-20 w-20 bg-white bg-opacity-20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <CheckCircle className="h-10 w-10" />
-            </div>
-            <h1 className="text-3xl font-bold">Matrícula Concluída com Sucesso!</h1>
-            <p className="mt-2 text-primary-foreground/90">
-              Seu processo de matrícula foi finalizado e está em análise pela instituição.
-            </p>
+    <div className="flex flex-col items-center justify-center min-h-screen py-12 bg-gray-50 dark:bg-gray-900">
+      <Card className="max-w-4xl w-full">
+        <CardHeader className="text-center space-y-4 pb-0">
+          <div className="w-16 h-16 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center mx-auto">
+            <CheckCircle className="h-8 w-8 text-green-600 dark:text-green-300" />
           </div>
-
-          <div className="p-6 md:p-8">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8 p-4 bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800 rounded-lg">
-              <div>
-                <p className="text-sm font-medium text-green-800 dark:text-green-300">Protocolo de Matrícula</p>
-                <p className="text-2xl font-mono font-bold tracking-wider text-green-700 dark:text-green-400">{formattedProtocol}</p>
+          <div>
+            <CardTitle className="text-2xl sm:text-3xl">Matrícula enviada com sucesso!</CardTitle>
+            <CardDescription className="text-base mt-2">
+              Sua solicitação foi recebida e está sendo processada. Guarde o número de protocolo para consultas futuras.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-8 pt-6">
+          <Card className="border-2 border-dashed">
+            <CardContent className="p-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div>
+                  <h3 className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                    Número de protocolo
+                  </h3>
+                  <p className="text-lg font-mono font-semibold mt-1">
+                    {enrollment.id.toString().padStart(8, '0')}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                    Data da solicitação
+                  </h3>
+                  <p className="text-lg flex items-center mt-1">
+                    <Calendar className="h-4 w-4 mr-2 text-neutral-400" />
+                    {new Date(enrollment.createdAt).toLocaleDateString('pt-BR', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                    })}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                    Nome do estudante
+                  </h3>
+                  <p className="text-lg flex items-center mt-1">
+                    <User className="h-4 w-4 mr-2 text-neutral-400" />
+                    {enrollment.studentName}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                    Status atual
+                  </h3>
+                  <div className="flex items-center mt-1">
+                    <div className="h-2.5 w-2.5 rounded-full bg-amber-500 mr-2" />
+                    <p className="text-lg">{enrollment.status === 'pending' ? 'Em análise' : enrollment.status}</p>
+                  </div>
+                </div>
               </div>
-              <Button 
-                variant="outline" 
-                className="mt-4 md:mt-0 border-green-200 dark:border-green-700 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-800"
-                onClick={handleDownloadCertificate}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Baixar Comprovante
-              </Button>
+            </CardContent>
+          </Card>
+
+          <div className="space-y-6">
+            <h3 className="text-xl font-medium">Próximos passos</h3>
+            <div className="space-y-4">
+              <div className="flex">
+                <div className="mr-4 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <span className="text-lg font-semibold">1</span>
+                </div>
+                <div>
+                  <h4 className="text-base font-medium">Análise de documentos</h4>
+                  <p className="mt-1 text-neutral-600 dark:text-neutral-400">
+                    Nossa equipe irá analisar todos os documentos e informações enviadas para validação.
+                  </p>
+                </div>
+              </div>
+              <div className="flex">
+                <div className="mr-4 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <span className="text-lg font-semibold">2</span>
+                </div>
+                <div>
+                  <h4 className="text-base font-medium">Confirmação por e-mail</h4>
+                  <p className="mt-1 text-neutral-600 dark:text-neutral-400">
+                    Você receberá um e-mail em até 48 horas com a confirmação da sua matrícula ou solicitação de informações adicionais.
+                  </p>
+                </div>
+              </div>
+              <div className="flex">
+                <div className="mr-4 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <span className="text-lg font-semibold">3</span>
+                </div>
+                <div>
+                  <h4 className="text-base font-medium">Pagamento e início das aulas</h4>
+                  <p className="mt-1 text-neutral-600 dark:text-neutral-400">
+                    Após a aprovação, você receberá as instruções para pagamento e informações sobre o início das aulas.
+                  </p>
+                </div>
+              </div>
             </div>
+          </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">Informações do Aluno</CardTitle>
-                  <CardDescription>Dados pessoais fornecidos</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <p className="text-sm text-neutral-500 dark:text-neutral-400">Nome Completo</p>
-                        <p className="font-medium">{enrollment.studentName}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-neutral-500 dark:text-neutral-400">Email</p>
-                        <p className="font-medium">{enrollment.studentEmail}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-neutral-500 dark:text-neutral-400">Telefone</p>
-                        <p className="font-medium">{enrollment.studentPhone}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-neutral-500 dark:text-neutral-400">Status da Matrícula</p>
-                        <div className="flex items-center">
-                          <span className={`inline-block h-2 w-2 rounded-full mr-2 ${
-                            enrollment.status === 'completed' ? 'bg-green-500' : 
-                            enrollment.status === 'pending' ? 'bg-amber-500' : 
-                            enrollment.status === 'rejected' ? 'bg-red-500' : 'bg-blue-500'
-                          }`}></span>
-                          <p className="font-medium capitalize">{
-                            enrollment.status === 'completed' ? 'Concluída' : 
-                            enrollment.status === 'pending' ? 'Em análise' : 
-                            enrollment.status === 'rejected' ? 'Rejeitada' : 'Em processamento'
-                          }</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">Detalhes da Matrícula</CardTitle>
-                  <CardDescription>Informações sobre o curso e instituição</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    <div>
-                      <p className="text-sm text-neutral-500 dark:text-neutral-400">Curso</p>
-                      <p className="font-medium">{enrollment.courseName || 'Informação indisponível'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-neutral-500 dark:text-neutral-400">Instituição</p>
-                      <p className="font-medium">{enrollment.schoolName || 'Informação indisponível'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-neutral-500 dark:text-neutral-400">Data de Matrícula</p>
-                      <p className="font-medium">
-                        {enrollment.createdAt ? new Date(enrollment.createdAt).toLocaleDateString('pt-BR') : 'Informação indisponível'}
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-6 mt-8 border border-blue-200 dark:border-blue-800">
-              <h2 className="text-lg font-semibold text-blue-800 dark:text-blue-300 mb-3">Próximos Passos</h2>
-              <ol className="space-y-3 text-blue-700 dark:text-blue-400">
-                <li className="flex items-start">
-                  <span className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-300 text-sm font-medium mr-3 mt-0.5">1</span>
-                  <span>Aguarde a confirmação da sua matrícula por email ou SMS</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-300 text-sm font-medium mr-3 mt-0.5">2</span>
-                  <span>Você receberá as informações sobre o início das aulas e acesso aos materiais do curso</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-300 text-sm font-medium mr-3 mt-0.5">3</span>
-                  <span>Em caso de pendências, nossa equipe entrará em contato para regularização</span>
-                </li>
-              </ol>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
-              <Button variant="outline" className="flex items-center justify-center">
-                <Calendar className="mr-2 h-4 w-4" />
-                Calendário Acadêmico
-              </Button>
-              <Button variant="outline" className="flex items-center justify-center">
-                <Mail className="mr-2 h-4 w-4" />
-                Contatar Secretaria
-              </Button>
-              <Button variant="outline" className="flex items-center justify-center">
-                <Phone className="mr-2 h-4 w-4" />
-                Suporte ao Aluno
-              </Button>
-            </div>
-
-            <div className="text-center mt-10">
-              <Button variant="link" onClick={() => window.location.href = '/'}>
-                <ArrowLeft className="mr-2 h-4 w-4" />
+          <div className="flex flex-col sm:flex-row gap-4 pt-4">
+            <Button variant="outline" className="flex-1" asChild>
+              <a href="#" onClick={(e) => e.preventDefault()}>
+                <FileText className="h-4 w-4 mr-2" />
+                Imprimir comprovante
+              </a>
+            </Button>
+            <Button variant="secondary" className="flex-1" asChild>
+              <Link href="/">
+                <ChevronLeft className="h-4 w-4 mr-2" />
                 Voltar para a página inicial
-              </Button>
-            </div>
+              </Link>
+            </Button>
           </div>
-
-          <div className="bg-neutral-100 dark:bg-neutral-800 px-6 py-4 text-center text-sm text-neutral-500 dark:text-neutral-400">
-            <p>EduMatrik AI © 2025. Todos os direitos reservados.</p>
+        </CardContent>
+        <CardFooter className="border-t bg-neutral-50 dark:bg-neutral-900 p-6">
+          <div className="w-full text-center text-sm text-neutral-500 dark:text-neutral-400">
+            <p>Em caso de dúvidas, entre em contato pelo e-mail <a href="mailto:suporte@edumatrik.com" className="text-primary underline">suporte@edumatrik.com</a> ou pelo telefone (11) 5555-5555.</p>
           </div>
-        </div>
-      </div>
+        </CardFooter>
+      </Card>
     </div>
   );
 };
