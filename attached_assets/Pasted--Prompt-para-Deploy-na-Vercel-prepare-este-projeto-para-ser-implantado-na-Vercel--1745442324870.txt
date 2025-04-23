@@ -1,0 +1,107 @@
+
+
+🚀 **Prompt para Deploy na Vercel**
+
+ prepare este projeto para ser implantado na **Vercel**. O projeto é composto por um frontend em **React com TypeScript** e um backend em **Node.js com Express + TypeScript**. Ele está rodando no Replit, mas agora precisa estar 100% pronto para rodar com sucesso na infraestrutura da Vercel, com build automatizado, variáveis de ambiente, rotas protegidas e deploy contínuo via Git.
+
+---
+
+### ✅ Etapas para deixar o projeto pronto para deploy na Vercel:
+
+#### 📁 Organização de pastas
+- Estruturar o projeto em monorepo ou pastas separadas:
+  ```
+  /apps
+    /web     → frontend (React + TS)
+    /api     → backend (Express + TS)
+  ```
+
+#### ⚙️ Configurações essenciais
+
+##### 1. `vercel.json` na raiz:
+```json
+{
+  "version": 2,
+  "builds": [
+    { "src": "apps/api/index.ts", "use": "@vercel/node" },
+    { "src": "apps/web/package.json", "use": "@vercel/next" }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "apps/api/index.ts" },
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "apps/web/$1" }
+  ]
+}
+```
+
+##### 2. `tsconfig.json` separado para cada app:
+- Um na `apps/api/tsconfig.json` com:
+  ```json
+  {
+    "compilerOptions": {
+      "module": "commonjs",
+      "target": "es6",
+      "outDir": "dist",
+      "rootDir": ".",
+      "strict": true,
+      "esModuleInterop": true
+    }
+  }
+  ```
+
+##### 3. `start` script no `package.json` da API:
+```json
+"scripts": {
+  "start": "ts-node index.ts"
+}
+```
+
+##### 4. Backend com export padrão:
+No `apps/api/index.ts`:
+```ts
+import express from "express";
+const app = express();
+// middlewares e rotas
+export default app;
+```
+
+##### 5. Frontend compatível com Vercel:
+- Criar com Next.js (ou migrar React puro para Next.js)
+- Configurar rota `/dashboard`, `/login`, `/relatorios` etc. via `pages/` ou `app/` se for Next 13+
+- Garantir compatibilidade com `fetch("/api/...")` para chamadas ao backend interno
+
+---
+
+### 🔐 Variáveis de ambiente
+- Criar `.env.local` no frontend e `.env` na API
+- Adicionar no painel da Vercel:
+  ```
+  DATABASE_URL=
+  EVOLUTION_API_KEY=
+  STRIPE_SECRET_KEY=
+  JWT_SECRET=
+  PUSHER_APP_ID=
+  PUSHER_KEY=
+  PUSHER_SECRET=
+  ```
+
+---
+
+### 🧪 Testes antes do deploy
+- Rodar `npm run build` nas duas pastas para garantir builds locais
+- Garantir que rotas funcionam via `/api/...` e `/`
+- Verificar logs no painel Vercel ao subir pela primeira vez
+
+---
+
+### 🔄 CI/CD
+- Subir para GitHub/GitLab e conectar repositório no painel da Vercel
+- Habilitar deploy automático nos pushes para a `main`
+
+---
+
+### 📦 Extras (se quiser deixar top)
+- Adicionar badge de status de build no README.md
+- Adicionar script de preview local com `vercel dev`
+- Configurar fallback 404 e redirect (ex: `/painel` redireciona para `/login` se não autenticado)
+
