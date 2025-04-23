@@ -214,7 +214,7 @@ export default function AdminDashboard() {
     queryKey: ["/api/schools"],
     queryFn: async () => {
       const res = await apiRequest("GET", "/api/schools");
-      return res;
+      return await res.json();
     },
   });
 
@@ -223,7 +223,7 @@ export default function AdminDashboard() {
     queryKey: ["/api/metrics/platform"],
     queryFn: async () => {
       const res = await apiRequest("GET", "/api/metrics/platform");
-      return res;
+      return await res.json();
     },
   });
 
