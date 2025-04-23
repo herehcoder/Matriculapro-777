@@ -1,5 +1,6 @@
 import React from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -26,73 +27,106 @@ const ConversationList: React.FC<ConversationListProps> = ({
   onSelectConversation,
   isLoading
 }) => {
+  // Função para formatar o tempo da última mensagem
+  const formatMessageTime = (timeString: string) => {
+    try {
+      const date = new Date(timeString);
+      return formatDistanceToNow(date, { addSuffix: true, locale: ptBR });
+    } catch (error) {
+      return timeString;
+    }
+  };
+
+  // Função para obter as iniciais do nome
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(part => part[0])
+      .slice(0, 2)
+      .join('')
+      .toUpperCase();
+  };
+
+  // Função para obter a cor de fundo baseada no papel do usuário
+  const getRoleColor = (role: string) => {
+    switch (role) {
+      case 'admin':
+        return 'bg-red-100 text-red-800';
+      case 'school':
+        return 'bg-blue-100 text-blue-800';
+      case 'attendant':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'student':
+        return 'bg-green-100 text-green-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
   if (isLoading) {
     return (
-      <div className="divide-y">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="p-4 hover:bg-muted/50 transition-colors">
-            <div className="flex items-start">
-              <Skeleton className="h-10 w-10 rounded-full mr-3" />
+      <div className="p-4 space-y-4">
+        {Array(5)
+          .fill(0)
+          .map((_, index) => (
+            <div key={index} className="flex items-start gap-3">
+              <Skeleton className="h-10 w-10 rounded-full" />
               <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-3 w-full" />
               </div>
+              <Skeleton className="h-3 w-12" />
             </div>
-          </div>
-        ))}
+          ))}
       </div>
     );
   }
 
   if (conversations.length === 0) {
     return (
-      <div className="flex items-center justify-center h-40 text-center p-4">
-        <div>
-          <p className="text-muted-foreground">Nenhuma conversa encontrada</p>
-          <p className="text-sm text-muted-foreground">
-            Inicie uma nova conversa a partir da aba "Contatos"
-          </p>
-        </div>
+      <div className="p-6 text-center">
+        <p className="text-muted-foreground">Nenhuma conversa encontrada</p>
       </div>
     );
   }
 
   return (
     <div className="divide-y">
-      {conversations.map((conversation) => (
+      {conversations.map(conversation => (
         <div
           key={conversation.userId}
-          className={`p-4 hover:bg-muted/50 transition-colors cursor-pointer ${
-            activeId === conversation.userId ? 'bg-muted/80' : ''
+          className={`flex items-start gap-3 p-3 cursor-pointer hover:bg-muted/50 transition-colors ${
+            activeId === conversation.userId ? 'bg-muted' : ''
           }`}
           onClick={() => onSelectConversation(conversation.userId)}
         >
-          <div className="flex items-start">
-            <Avatar className="h-10 w-10 mr-3">
-              <AvatarFallback>{conversation.fullName.substring(0, 2).toUpperCase()}</AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <div className="flex justify-between items-start">
-                <h4 className="font-medium truncate">{conversation.fullName}</h4>
-                <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
-                  {formatDistanceToNow(new Date(conversation.lastMessageTime), {
-                    addSuffix: true,
-                    locale: ptBR
-                  })}
-                </span>
+          <Avatar>
+            <AvatarImage src={`/api/avatar/${conversation.userId}`} alt={conversation.fullName} />
+            <AvatarFallback>{getInitials(conversation.fullName)}</AvatarFallback>
+          </Avatar>
+          
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2 truncate">
+                <span className="font-medium truncate">{conversation.fullName}</span>
+                <Badge variant="outline" className={`text-xs px-1.5 py-0 ${getRoleColor(conversation.role)}`}>
+                  {conversation.role}
+                </Badge>
               </div>
-              <p className="text-sm text-muted-foreground capitalize">{conversation.role}</p>
-              <div className="flex justify-between items-center mt-1">
-                <p className="text-sm truncate text-muted-foreground max-w-[200px]">
-                  {conversation.lastMessage}
-                </p>
-                {conversation.unreadCount > 0 && (
-                  <span className="bg-primary text-white text-xs rounded-full h-5 w-5 flex items-center justify-center ml-2">
-                    {conversation.unreadCount}
-                  </span>
-                )}
-              </div>
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                {formatMessageTime(conversation.lastMessageTime)}
+              </span>
+            </div>
+            
+            <div className="flex justify-between items-center mt-1">
+              <p className="text-sm text-muted-foreground truncate pr-2">
+                {conversation.lastMessage}
+              </p>
+              {conversation.unreadCount > 0 && (
+                <Badge className="bg-primary text-white text-xs ml-auto" variant="default">
+                  {conversation.unreadCount}
+                </Badge>
+              )}
             </div>
           </div>
         </div>
