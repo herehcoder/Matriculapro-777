@@ -851,6 +851,20 @@ export class MemStorage implements IStorage {
     return Array.from(this.enrollmentsMap.values())
       .filter(enrollment => enrollment.studentId === studentId);
   }
+  
+  async getEnrollmentsByStudentId(userId: number): Promise<Enrollment[]> {
+    // First, find the student with this userId
+    const student = Array.from(this.studentsMap.values()).find(
+      student => student.userId === userId
+    );
+    
+    if (!student) {
+      return [];
+    }
+    
+    // Then get enrollments for this student
+    return this.getEnrollmentsByStudent(student.id);
+  }
 
   async createEnrollment(enrollment: InsertEnrollment): Promise<Enrollment> {
     const id = this.enrollmentIdCounter++;
@@ -1320,6 +1334,21 @@ export class DatabaseStorage implements IStorage {
 
   async getEnrollmentsByStudent(studentId: number): Promise<Enrollment[]> {
     return await db.select().from(enrollments).where(eq(enrollments.studentId, studentId));
+  }
+  
+  async getEnrollmentsByStudentId(userId: number): Promise<Enrollment[]> {
+    // First, find the student with this userId
+    const [student] = await db
+      .select()
+      .from(students)
+      .where(eq(students.userId, userId));
+    
+    if (!student) {
+      return [];
+    }
+    
+    // Then get enrollments for this student
+    return this.getEnrollmentsByStudent(student.id);
   }
 
   async createEnrollment(enrollment: InsertEnrollment): Promise<Enrollment> {
