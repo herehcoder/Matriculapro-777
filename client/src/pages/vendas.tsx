@@ -179,8 +179,8 @@ const PricingCard: React.FC<{ plan: PricingPlan }> = ({ plan }) => {
   
   const handleSubscribe = async () => {
     if (plan.id === 'premium') {
-      // O plano premium direciona para o contato de vendas
-      window.location.href = '/contato?plano=premium';
+      // O plano premium direciona para o WhatsApp com mensagem predefinida
+      window.location.href = 'https://wa.me/5519982816001?text=Vim%20pelo%20matricula.pro%2C%20gostaria%20do%20plano%20premium';
       return;
     }
     
