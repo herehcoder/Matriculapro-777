@@ -6,6 +6,7 @@ import { setupAuth } from "./auth";
 import { registerNotificationRoutes } from "./routes.notification";
 import { registerEnrollmentRoutes } from "./routes.enrollment";
 import { registerCourseRoutes } from "./routes.course";
+import { registerStudentRoutes } from "./routes.student";
 import { registerQuestionRoutes } from "./routes.question";
 import { registerDocumentRoutes } from "./routes.document";
 import { registerMessageRoutes } from "./routes.message";
@@ -63,6 +64,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerQuestionRoutes(app, isAuthenticated);
   registerDocumentRoutes(app);
   registerMessageRoutes(app, isAuthenticated);
+  registerStudentRoutes(app, isAuthenticated);
 
   // Middleware for error handling
   const handleZodError = (

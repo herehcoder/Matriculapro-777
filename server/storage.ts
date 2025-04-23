@@ -90,6 +90,7 @@ export interface IStorage {
   getEnrollment(id: number): Promise<Enrollment | undefined>;
   getEnrollmentsBySchool(schoolId: number, status?: string): Promise<Enrollment[]>;
   getEnrollmentsByStudent(studentId: number): Promise<Enrollment[]>;
+  getEnrollmentsByStudentId(userId: number): Promise<Enrollment[]>;
   createEnrollment(enrollment: InsertEnrollment): Promise<Enrollment>;
   updateEnrollment(id: number, enrollment: Partial<Enrollment>): Promise<Enrollment | undefined>;
   listEnrollments(limit?: number, offset?: number): Promise<Enrollment[]>;
