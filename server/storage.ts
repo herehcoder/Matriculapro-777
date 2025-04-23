@@ -30,6 +30,22 @@ export interface IStorage {
   deleteSchool(id: number): Promise<boolean>;
   listSchools(limit?: number, offset?: number): Promise<School[]>;
   
+  // Notification management
+  getNotification(id: number): Promise<Notification | undefined>;
+  getNotificationsByUser(userId: number, read?: boolean): Promise<Notification[]>;
+  getNotificationsBySchool(schoolId: number): Promise<Notification[]>;
+  createNotification(notification: InsertNotification): Promise<Notification>;
+  updateNotification(id: number, notificationData: Partial<Notification>): Promise<Notification | undefined>;
+  markNotificationAsRead(id: number): Promise<Notification | undefined>;
+  markAllNotificationsAsRead(userId: number): Promise<boolean>;
+  
+  // Message management
+  getMessage(id: number): Promise<Message | undefined>;
+  getMessagesByUser(userId: number, asReceiver?: boolean): Promise<Message[]>;
+  getConversation(user1Id: number, user2Id: number): Promise<Message[]>;
+  createMessage(message: InsertMessage): Promise<Message>;
+  updateMessageStatus(id: number, status: 'sent' | 'delivered' | 'read'): Promise<Message | undefined>;
+  
   // Attendant management
   getAttendant(id: number): Promise<Attendant | undefined>;
   getAttendantsBySchool(schoolId: number): Promise<Attendant[]>;
