@@ -30,8 +30,9 @@ type AuthContextType = {
 };
 
 type LoginData = {
-  username: string;
+  email: string;
   password: string;
+  role?: string;
 };
 
 type RegisterData = {

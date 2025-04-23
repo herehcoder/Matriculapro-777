@@ -47,8 +47,9 @@ export default function Login() {
     setError(null);
     try {
       await loginMutation.mutateAsync({
-        username: values.email,
-        password: values.password
+        email: values.email,
+        password: values.password,
+        role: values.role
       });
     } catch (err) {
       setError("Email ou senha incorretos. Tente novamente.");

@@ -6,7 +6,7 @@ import fs from "fs";
 import { db } from "./db";
 import { documents, enrollments } from "../shared/schema";
 import { eq } from "drizzle-orm";
-import { recognizeText, assessImageQuality, compareUserDataWithExtracted } from "./utils/ocr";
+import { analyzeDocument, verifyDocument } from "./utils/ocr";
 
 // Set up multer for handling file uploads
 const storage = multer.diskStorage({
@@ -61,7 +61,7 @@ export function registerDocumentRoutes(app: Express) {
   // Rota para análise OCR de documentos
   app.post('/api/documents/analyze', async (req: Request, res: Response) => {
     try {
-      const { documentId, documentType } = req.body;
+      const { documentId } = req.body;
       
       if (!documentId) {
         return res.status(400).json({
@@ -100,22 +100,23 @@ export function registerDocumentRoutes(app: Express) {
         });
       }
       
-      // Avalia a qualidade da imagem para OCR
-      const imageQuality = await assessImageQuality(document.filePath);
+      // Executa OCR no documento usando Tesseract.js
+      const ocrResult = await analyzeDocument(document.filePath);
       
-      // Executa OCR com base no tipo de documento
-      const ocrResult = await recognizeText(document.filePath, {
-        documentType: documentType || 'generic',
-        language: 'por'
-      });
+      if (!ocrResult.success) {
+        return res.status(500).json({
+          success: false,
+          error: ocrResult.error || 'Erro ao processar a análise OCR'
+        });
+      }
       
       // Atualiza o documento com os dados extraídos
       const [updatedDocument] = await db
         .update(documents)
         .set({
-          ocrData: JSON.stringify(ocrResult),
-          ocrQuality: ocrResult.confidence,
-          status: ocrResult.confidence > 50 ? 'verified' : 'needs_review',
+          ocrData: JSON.stringify(ocrResult.data),
+          ocrQuality: ocrResult.data?.confidence || 0,
+          status: (ocrResult.data?.confidence || 0) > 50 ? 'verified' : 'needs_review',
           updatedAt: new Date()
         })
         .where(eq(documents.id, document.id))
@@ -124,15 +125,14 @@ export function registerDocumentRoutes(app: Express) {
       return res.status(200).json({
         success: true,
         message: 'Análise OCR realizada com sucesso',
-        ocrResult,
-        imageQuality,
+        ocrResult: ocrResult.data,
         document: updatedDocument
       });
     } catch (error) {
       console.error('Erro ao analisar documento com OCR:', error);
       return res.status(500).json({
         success: false,
-        error: 'Erro ao processar a análise OCR'
+        error: error instanceof Error ? error.message : 'Erro ao processar a análise OCR'
       });
     }
   });
@@ -172,27 +172,29 @@ export function registerDocumentRoutes(app: Express) {
       // Extrai os dados do OCR
       const ocrData = JSON.parse(document.ocrData);
       
-      // Compara os dados extraídos com os dados fornecidos pelo usuário
-      const comparisonResult = compareUserDataWithExtracted(
-        ocrData.extractedData || {},
-        userData
+      // Verifica os dados extraídos usando nossa função de verificação
+      const isValid = verifyDocument(
+        ocrData.documentType || "unknown",
+        ocrData.fields || {}
       );
       
-      // Atualiza o status do documento com base no resultado da comparação
-      let newStatus = 'needs_review';
-      if (comparisonResult.similarityIndex >= 90) {
-        newStatus = 'verified';
-      } else if (comparisonResult.similarityIndex >= 70) {
-        newStatus = 'partial_match';
-      } else {
-        newStatus = 'mismatch';
-      }
+      // Determinar o status baseado na verificação
+      const newStatus = isValid ? 'verified' : 'needs_review';
+      
+      // Criar um objeto simples de resultado de verificação
+      const verificationResult = {
+        isValid,
+        documentType: ocrData.documentType || "unknown",
+        fieldsFound: Object.keys(ocrData.fields || {}).length,
+        fieldsVerified: isValid ? Object.keys(ocrData.fields || {}).length : 0,
+        verifiedAt: new Date().toISOString()
+      };
       
       // Atualiza o documento com o resultado da verificação
       const [updatedDocument] = await db
         .update(documents)
         .set({
-          verificationResult: JSON.stringify(comparisonResult),
+          verificationResult: JSON.stringify(verificationResult),
           status: newStatus,
           updatedAt: new Date()
         })
@@ -202,7 +204,7 @@ export function registerDocumentRoutes(app: Express) {
       return res.status(200).json({
         success: true,
         message: 'Verificação de dados realizada com sucesso',
-        comparisonResult,
+        verificationResult,
         status: newStatus,
         document: updatedDocument
       });
@@ -210,7 +212,7 @@ export function registerDocumentRoutes(app: Express) {
       console.error('Erro ao verificar dados do documento:', error);
       return res.status(500).json({
         success: false,
-        error: 'Erro ao processar a verificação de dados'
+        error: error instanceof Error ? error.message : 'Erro ao processar a verificação de dados'
       });
     }
   });

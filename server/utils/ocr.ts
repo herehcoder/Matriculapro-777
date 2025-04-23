@@ -1,376 +1,379 @@
-import { createWorker, PSM } from 'tesseract.js';
+import { createWorker, createScheduler, OEM, PSM, Worker } from 'tesseract.js';
 import path from 'path';
 import fs from 'fs';
 
-/**
- * Interface para o resultado da análise OCR
- */
-export interface OcrResult {
-  text: string;
+// Interfaces para os resultados da análise
+export interface DocumentData {
+  documentType: string;
+  fields: Record<string, string>;
   confidence: number;
-  words: Array<{
-    text: string;
-    confidence: number;
-    bbox: {
-      x0: number;
-      y0: number;
-      x1: number;
-      y1: number;
-    };
-  }>;
-  documentType?: string;
-  extractedData?: Record<string, any>;
 }
 
-/**
- * Configurações para o processamento OCR
- */
-interface OcrOptions {
-  language?: string;
-  psm?: PSM;
-  documentType?: 'rg' | 'cpf' | 'comprovante_residencia' | 'historico_escolar' | 'generic';
+export interface OcrResult {
+  success: boolean;
+  data?: DocumentData;
+  error?: string;
 }
 
+// Cache para workers do Tesseract
+let workerCache: Worker | null = null;
+let initializationPromise: Promise<Worker> | null = null;
+
 /**
- * Reconhece texto em uma imagem usando OCR
- * @param imagePath Caminho do arquivo de imagem
- * @param options Opções de OCR
- * @returns Resultado da análise OCR
+ * Inicializa um worker do Tesseract.js para reconhecimento de texto
+ * @returns Worker inicializado
  */
-export async function recognizeText(
-  imagePath: string,
-  options: OcrOptions = { language: 'por', documentType: 'generic' }
-): Promise<OcrResult> {
-  // Verifica se o arquivo existe
-  if (!fs.existsSync(imagePath)) {
-    throw new Error(`Arquivo não encontrado: ${imagePath}`);
+async function initializeWorker(): Promise<Worker> {
+  if (workerCache) {
+    return workerCache;
   }
 
-  const worker = await createWorker({
-    logger: process.env.NODE_ENV === 'development' ? (m) => console.log(m) : undefined,
-  });
+  if (initializationPromise) {
+    return initializationPromise;
+  }
 
+  console.log('Inicializando worker do Tesseract.js...');
+  
+  // Armazenar a promessa para evitar inicializações paralelas
+  initializationPromise = (async () => {
+    try {
+      const worker = await createWorker({
+        logger: m => console.log(m),
+      });
+      
+      // Carregar idioma português
+      await worker.loadLanguage('por');
+      await worker.initialize('por');
+      
+      // Configurar para melhor reconhecimento de documentos
+      await worker.setParameters({
+        tessedit_ocr_engine_mode: OEM.LSTM_ONLY,
+        tessedit_pageseg_mode: PSM.AUTO,
+        preserve_interword_spaces: '1',
+      });
+      
+      console.log('Worker do Tesseract.js inicializado com sucesso');
+      workerCache = worker;
+      return worker;
+    } catch (error) {
+      console.error('Erro ao inicializar worker do Tesseract.js:', error);
+      throw error;
+    } finally {
+      initializationPromise = null;
+    }
+  })();
+  
+  return initializationPromise;
+}
+
+/**
+ * Extrai informações específicas de documentos de RG
+ * @param text Texto reconhecido do documento
+ * @returns Campos extraídos do RG
+ */
+function extractRGData(text: string): Record<string, string> {
+  const fields: Record<string, string> = {};
+  
+  // Expressões regulares para extrair dados do RG
+  const rgRegex = /RG[\s.:]*(\d[\d\s.-]*\d)/i;
+  const cpfRegex = /CPF[\s.:]*(\d{3}[\s.-]*\d{3}[\s.-]*\d{3}[\s.-]*\d{2})/i;
+  const nameRegex = /nome[\s.:]*([^\n\r]+)/i;
+  const birthDateRegex = /nascimento[\s.:]*(\d{2}[\s./-]*\d{2}[\s./-]*\d{4}|\d{2}[\s./-]*\d{2}[\s./-]*\d{2})/i;
+  const filiationRegex = /filia[çc][ãa]o[\s.:]*([^\n\r]+)/i;
+  
+  // Extrair dados utilizando regex
+  const rgMatch = text.match(rgRegex);
+  if (rgMatch && rgMatch[1]) {
+    fields.rg = rgMatch[1].replace(/\s+/g, '');
+  }
+  
+  const cpfMatch = text.match(cpfRegex);
+  if (cpfMatch && cpfMatch[1]) {
+    fields.cpf = cpfMatch[1].replace(/\s+/g, '');
+  }
+  
+  const nameMatch = text.match(nameRegex);
+  if (nameMatch && nameMatch[1]) {
+    fields.name = nameMatch[1].trim();
+  }
+  
+  const birthDateMatch = text.match(birthDateRegex);
+  if (birthDateMatch && birthDateMatch[1]) {
+    fields.birthDate = birthDateMatch[1].trim();
+  }
+  
+  const filiationMatch = text.match(filiationRegex);
+  if (filiationMatch && filiationMatch[1]) {
+    fields.filiation = filiationMatch[1].trim();
+  }
+  
+  return fields;
+}
+
+/**
+ * Extrai informações específicas de documentos de CPF
+ * @param text Texto reconhecido do documento
+ * @returns Campos extraídos do CPF
+ */
+function extractCPFData(text: string): Record<string, string> {
+  const fields: Record<string, string> = {};
+  
+  // Expressões regulares para extrair dados do CPF
+  const cpfRegex = /(\d{3}[\s.-]*\d{3}[\s.-]*\d{3}[\s.-]*\d{2})/i;
+  const nameRegex = /nome[\s.:]*([^\n\r]+)/i;
+  const birthDateRegex = /nascimento[\s.:]*(\d{2}[\s./-]*\d{2}[\s./-]*\d{4}|\d{2}[\s./-]*\d{2}[\s./-]*\d{2})/i;
+  
+  // Extrair dados utilizando regex
+  const cpfMatch = text.match(cpfRegex);
+  if (cpfMatch && cpfMatch[1]) {
+    fields.cpf = cpfMatch[1].replace(/\s+/g, '');
+  }
+  
+  const nameMatch = text.match(nameRegex);
+  if (nameMatch && nameMatch[1]) {
+    fields.name = nameMatch[1].trim();
+  }
+  
+  const birthDateMatch = text.match(birthDateRegex);
+  if (birthDateMatch && birthDateMatch[1]) {
+    fields.birthDate = birthDateMatch[1].trim();
+  }
+  
+  return fields;
+}
+
+/**
+ * Extrai informações específicas de comprovantes de residência
+ * @param text Texto reconhecido do documento
+ * @returns Campos extraídos do comprovante de residência
+ */
+function extractAddressProofData(text: string): Record<string, string> {
+  const fields: Record<string, string> = {};
+  
+  // Expressões regulares para extrair dados do comprovante de residência
+  const nameRegex = /nome[\s.:]*([^\n\r]+)|cliente[\s.:]*([^\n\r]+)/i;
+  const addressRegex = /endere[çc]o[\s.:]*([^\n\r]+)/i;
+  const addressLineRegex = /(rua|av|avenida|alameda|travessa)[\s.:]*([^\n\r,]+)/i;
+  const cityRegex = /(cidade|municipio)[\s.:]*([^\n\r,]+)/i;
+  const zipCodeRegex = /(cep)[\s.:]*(\d{5}[\s.-]*\d{3})/i;
+  
+  // Extrair dados utilizando regex
+  const nameMatch = text.match(nameRegex);
+  if (nameMatch && (nameMatch[1] || nameMatch[2])) {
+    fields.name = (nameMatch[1] || nameMatch[2]).trim();
+  }
+  
+  const addressMatch = text.match(addressRegex);
+  if (addressMatch && addressMatch[1]) {
+    fields.address = addressMatch[1].trim();
+  } else {
+    // Tentar extrair por linha de endereço se não encontrar o padrão completo
+    const addressLineMatch = text.match(addressLineRegex);
+    if (addressLineMatch && addressLineMatch[0]) {
+      fields.address = addressLineMatch[0].trim();
+    }
+  }
+  
+  const cityMatch = text.match(cityRegex);
+  if (cityMatch && cityMatch[2]) {
+    fields.city = cityMatch[2].trim();
+  }
+  
+  const zipCodeMatch = text.match(zipCodeRegex);
+  if (zipCodeMatch && zipCodeMatch[2]) {
+    fields.zipCode = zipCodeMatch[2].replace(/\s+/g, '');
+  }
+  
+  return fields;
+}
+
+/**
+ * Detecta o tipo de documento com base no texto reconhecido
+ * @param text Texto completo do documento
+ * @returns Tipo de documento detectado
+ */
+function detectDocumentType(text: string): string {
+  const textLower = text.toLowerCase();
+  
+  // Verificar padrões para RG
+  if (
+    (textLower.includes('identidade') || textLower.includes('rg')) &&
+    (textLower.includes('república federativa') || textLower.includes('brasil'))
+  ) {
+    return 'rg';
+  }
+  
+  // Verificar padrões para CPF
+  if (
+    textLower.includes('cpf') &&
+    (textLower.includes('receita federal') || textLower.includes('ministério da fazenda'))
+  ) {
+    return 'cpf';
+  }
+  
+  // Verificar padrões para comprovante de residência
+  if (
+    (textLower.includes('conta') || textLower.includes('fatura')) &&
+    (textLower.includes('energia') || textLower.includes('água') || 
+     textLower.includes('luz') || textLower.includes('telefone') ||
+     textLower.includes('internet'))
+  ) {
+    return 'address_proof';
+  }
+  
+  // Não foi possível determinar o tipo
+  return 'unknown';
+}
+
+/**
+ * Analisa um documento de identificação por OCR
+ * @param filePath Caminho para o arquivo do documento
+ * @returns Resultados da análise OCR
+ */
+export async function analyzeDocument(filePath: string): Promise<OcrResult> {
   try {
-    // Carrega o idioma (português por padrão)
-    await worker.loadLanguage(options.language || 'por');
-    await worker.initialize(options.language || 'por');
+    // Verificar se o arquivo existe
+    if (!fs.existsSync(filePath)) {
+      return {
+        success: false,
+        error: 'Arquivo não encontrado'
+      };
+    }
     
-    // Define o Page Segmentation Mode (PSM)
-    // 3 é o modo padrão para texto completo, 6 é para blocos de texto uniforme
-    await worker.setParameters({
-      tessedit_pageseg_mode: options.psm || PSM.AUTO,
-    });
-
-    // Realiza o reconhecimento de texto
-    const { data } = await worker.recognize(imagePath);
+    // Obter o worker do Tesseract
+    const worker = await initializeWorker();
     
-    // Extrai dados específicos com base no tipo de documento
-    const extractedData = await extractDocumentData(data.text, options.documentType);
-
-    const result: OcrResult = {
-      text: data.text,
-      confidence: data.confidence,
-      words: data.words.map(word => ({
-        text: word.text,
-        confidence: word.confidence,
-        bbox: word.bbox,
-      })),
-      documentType: options.documentType,
-      extractedData
+    // Realizar OCR no documento
+    const result = await worker.recognize(filePath);
+    const text = result.data.text;
+    
+    // Detectar o tipo de documento
+    const documentType = detectDocumentType(text);
+    
+    // Extrair campos específicos com base no tipo de documento
+    let fields: Record<string, string> = {};
+    
+    switch (documentType) {
+      case 'rg':
+        fields = extractRGData(text);
+        break;
+      case 'cpf':
+        fields = extractCPFData(text);
+        break;
+      case 'address_proof':
+        fields = extractAddressProofData(text);
+        break;
+      default:
+        // Para documentos desconhecidos, tentar extrair informações gerais
+        fields = {
+          fullText: text
+        };
+    }
+    
+    return {
+      success: true,
+      data: {
+        documentType,
+        fields,
+        confidence: result.data.confidence
+      }
     };
-
-    return result;
-  } finally {
-    // Libera os recursos do worker
-    await worker.terminate();
+    
+  } catch (error) {
+    console.error('Erro na análise do documento:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Erro desconhecido na análise do documento'
+    };
   }
 }
 
 /**
- * Extrai dados específicos de documentos com base no tipo
- * @param text Texto extraído pela OCR
+ * Verifica a validade de um documento com base em dados extraídos por OCR
  * @param documentType Tipo do documento
- * @returns Dados extraídos do documento
+ * @param fields Campos extraídos do documento
+ * @returns Resultado da verificação
  */
-async function extractDocumentData(
-  text: string, 
-  documentType?: string
-): Promise<Record<string, any>> {
-  const extractedData: Record<string, any> = {};
-
-  if (!text || !documentType) {
-    return extractedData;
-  }
-
-  // Remove espaços extras e normaliza o texto
-  const normalizedText = text.replace(/\s+/g, ' ').trim().toLowerCase();
-
+export function verifyDocument(documentType: string, fields: Record<string, string>): boolean {
   switch (documentType) {
-    case 'cpf':
-      // Extrai números do CPF: formato XXX.XXX.XXX-XX
-      const cpfRegex = /(\d{3}\.?\d{3}\.?\d{3}-?\d{2})/g;
-      const cpfMatch = normalizedText.match(cpfRegex);
-      if (cpfMatch) {
-        extractedData.cpf = cpfMatch[0].replace(/[^\d]/g, '');
-      }
-      break;
-
     case 'rg':
-      // Extrai números do RG
-      const rgRegex = /rg:?\s*(\d{1,2}\.?\d{3}\.?\d{3}-?[\dX])/i;
-      const rgMatch = normalizedText.match(rgRegex);
-      if (rgMatch) {
-        extractedData.rg = rgMatch[1];
-      }
-
-      // Tenta extrair nome
-      const nomeRegex = /nome:?\s*([^\n,\.]+)/i;
-      const nomeMatch = normalizedText.match(nomeRegex);
-      if (nomeMatch) {
-        extractedData.nome = nomeMatch[1].trim();
-      }
-
-      // Tenta extrair data de nascimento (formatos DD/MM/AAAA ou DD-MM-AAAA)
-      const nascimentoRegex = /nasc\.?:?\s*(\d{2}[\/\-]\d{2}[\/\-]\d{4})/i;
-      const nascimentoMatch = normalizedText.match(nascimentoRegex);
-      if (nascimentoMatch) {
-        extractedData.dataNascimento = nascimentoMatch[1];
-      }
-      break;
-
-    case 'comprovante_residencia':
-      // Busca pelo CEP
-      const cepRegex = /cep:?\s*(\d{5}-?\d{3})/i;
-      const cepMatch = normalizedText.match(cepRegex);
-      if (cepMatch) {
-        extractedData.cep = cepMatch[1];
-      }
-
-      // Busca por endereço
-      const enderecoRegex = /endereço:?\s*([^\n]+)/i;
-      const enderecoMatch = normalizedText.match(enderecoRegex);
-      if (enderecoMatch) {
-        extractedData.endereco = enderecoMatch[1].trim();
-      }
-
-      // Busca pela cidade
-      const cidadeRegex = /cidade:?\s*([^\n,\.]+)/i;
-      const cidadeMatch = normalizedText.match(cidadeRegex);
-      if (cidadeMatch) {
-        extractedData.cidade = cidadeMatch[1].trim();
-      }
-      break;
-
-    case 'historico_escolar':
-      // Busca por nome da instituição
-      const instituicaoRegex = /escola|colégio|instituto|universidade|faculdade/i;
-      const instituicaoMatch = normalizedText.match(instituicaoRegex);
-      if (instituicaoMatch) {
-        // Captura a linha completa onde aparece o nome da instituição
-        const linhas = normalizedText.split('\n');
-        for (const linha of linhas) {
-          if (linha.match(instituicaoRegex)) {
-            extractedData.instituicao = linha.trim();
-            break;
-          }
-        }
-      }
-
-      // Busca por média ou notas
-      const notasRegex = /média:?\s*(\d+[,\.]\d+)|nota:?\s*(\d+[,\.]\d+)/i;
-      const notasMatches = normalizedText.matchAll(notasRegex);
-      const notas = Array.from(notasMatches).map(match => match[1] || match[2]);
-      if (notas.length > 0) {
-        extractedData.notas = notas;
-      }
-      break;
+      // Verificar se tem os campos mínimos de um RG
+      return !!(fields.rg && fields.name);
+      
+    case 'cpf':
+      // Verificar se tem os campos mínimos de um CPF e se o número é válido
+      return !!(fields.cpf && fields.name && validateCPF(fields.cpf));
+      
+    case 'address_proof':
+      // Verificar se tem os campos mínimos de um comprovante de residência
+      return !!(fields.address);
       
     default:
-      // Para documentos genéricos, tenta extrair informações comuns
-      // CPF
-      const genericCpfRegex = /(\d{3}\.?\d{3}\.?\d{3}-?\d{2})/g;
-      const genericCpfMatch = normalizedText.match(genericCpfRegex);
-      if (genericCpfMatch) {
-        extractedData.possibleCpf = genericCpfMatch[0];
-      }
-
-      // Email
-      const emailRegex = /[\w.-]+@[\w.-]+\.\w+/g;
-      const emailMatch = normalizedText.match(emailRegex);
-      if (emailMatch) {
-        extractedData.possibleEmail = emailMatch[0];
-      }
-
-      // Telefone
-      const phoneRegex = /(\(\d{2}\)\s?\d{4,5}-?\d{4}|\d{2}\s?\d{4,5}-?\d{4})/g;
-      const phoneMatch = normalizedText.match(phoneRegex);
-      if (phoneMatch) {
-        extractedData.possiblePhone = phoneMatch[0];
-      }
-      break;
-  }
-
-  return extractedData;
-}
-
-/**
- * Avalia a qualidade da imagem para OCR
- * @param imagePath Caminho do arquivo de imagem
- * @returns Score de qualidade (0-100)
- */
-export async function assessImageQuality(imagePath: string): Promise<number> {
-  try {
-    const worker = await createWorker();
-    await worker.loadLanguage('por');
-    await worker.initialize('por');
-    
-    const result = await worker.recognize(imagePath);
-    await worker.terminate();
-    
-    // Avalia com base na confiança média da OCR
-    // Pode ser estendido com análises mais sofisticadas
-    return result.data.confidence;
-  } catch (error) {
-    console.error('Erro ao avaliar qualidade da imagem:', error);
-    return 0;
+      return false;
   }
 }
 
 /**
- * Verifica se um CPF é válido
- * @param cpf CPF a ser verificado (apenas números)
+ * Valida um número de CPF
+ * @param cpf Número do CPF a ser validado
  * @returns Verdadeiro se o CPF for válido
  */
-export function isCpfValid(cpf: string): boolean {
+function validateCPF(cpf: string): boolean {
+  // Remover caracteres não numéricos
   cpf = cpf.replace(/[^\d]/g, '');
   
-  if (cpf.length !== 11) return false;
+  // CPF deve ter 11 dígitos
+  if (cpf.length !== 11) {
+    return false;
+  }
   
-  // Verifica se todos os dígitos são iguais
-  if (/^(\d)\1+$/.test(cpf)) return false;
+  // Verificar se todos os dígitos são iguais (caso inválido)
+  if (/^(\d)\1+$/.test(cpf)) {
+    return false;
+  }
   
-  // Calcula o primeiro dígito verificador
+  // Validar os dígitos verificadores
   let sum = 0;
-  for (let i = 0; i < 9; i++) {
-    sum += parseInt(cpf.charAt(i)) * (10 - i);
-  }
-  let remainder = sum % 11;
-  let dv1 = remainder < 2 ? 0 : 11 - remainder;
+  let remainder;
   
-  // Calcula o segundo dígito verificador
+  // Primeiro dígito verificador
+  for (let i = 1; i <= 9; i++) {
+    sum += parseInt(cpf.charAt(i - 1)) * (11 - i);
+  }
+  
+  remainder = (sum * 10) % 11;
+  if (remainder === 10 || remainder === 11) {
+    remainder = 0;
+  }
+  
+  if (remainder !== parseInt(cpf.charAt(9))) {
+    return false;
+  }
+  
+  // Segundo dígito verificador
   sum = 0;
-  for (let i = 0; i < 10; i++) {
-    sum += parseInt(cpf.charAt(i)) * (11 - i);
+  for (let i = 1; i <= 10; i++) {
+    sum += parseInt(cpf.charAt(i - 1)) * (12 - i);
   }
-  remainder = sum % 11;
-  let dv2 = remainder < 2 ? 0 : 11 - remainder;
   
-  return parseInt(cpf.charAt(9)) === dv1 && parseInt(cpf.charAt(10)) === dv2;
+  remainder = (sum * 10) % 11;
+  if (remainder === 10 || remainder === 11) {
+    remainder = 0;
+  }
+  
+  if (remainder !== parseInt(cpf.charAt(10))) {
+    return false;
+  }
+  
+  return true;
 }
 
 /**
- * Compara dados extraídos com dados informados pelo usuário
- * @param extractedData Dados extraídos pela OCR
- * @param userData Dados informados pelo usuário
- * @returns Índice de similaridade (0-100) e discrepâncias
+ * Finaliza o worker do Tesseract quando não for mais necessário
  */
-export function compareUserDataWithExtracted(
-  extractedData: Record<string, any>,
-  userData: Record<string, any>
-): { similarityIndex: number; discrepancies: string[] } {
-  const discrepancies: string[] = [];
-  let matchCount = 0;
-  let totalFields = 0;
-  
-  // Lista de campos para comparar (pode ser ampliada)
-  const fieldsToCompare: Record<string, string> = {
-    cpf: 'cpf',
-    rg: 'rg',
-    nome: 'fullName',
-    dataNascimento: 'birthDate',
-    endereco: 'address',
-    cep: 'zipCode',
-    cidade: 'city',
-  };
-  
-  // Compara os campos disponíveis
-  for (const [extractedField, userField] of Object.entries(fieldsToCompare)) {
-    if (extractedData[extractedField] && userData[userField]) {
-      totalFields++;
-      
-      // Normaliza os valores para comparação
-      const extractedValue = normalizeValue(extractedData[extractedField]);
-      const userValue = normalizeValue(userData[userField]);
-      
-      // Calcula similaridade
-      const similarity = calculateStringSimilarity(extractedValue, userValue);
-      
-      if (similarity >= 0.8) {
-        // Considera como correspondência se similaridade >= 80%
-        matchCount++;
-      } else {
-        discrepancies.push(`${userField}: informado "${userData[userField]}" vs. extraído "${extractedData[extractedField]}"`);
-      }
-    }
+export async function terminateOCR(): Promise<void> {
+  if (workerCache) {
+    await workerCache.terminate();
+    workerCache = null;
   }
-  
-  // Calcula índice de similaridade
-  const similarityIndex = totalFields > 0 ? (matchCount / totalFields) * 100 : 0;
-  
-  return { similarityIndex, discrepancies };
-}
-
-/**
- * Normaliza um valor para comparação
- * @param value Valor a ser normalizado
- * @returns Valor normalizado
- */
-function normalizeValue(value: any): string {
-  if (value === null || value === undefined) {
-    return '';
-  }
-  
-  // Converte para string, remove acentos, espaços extras e pontuação
-  return String(value)
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\w\s]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/**
- * Calcula a similaridade entre duas strings
- * @param str1 Primeira string
- * @param str2 Segunda string
- * @returns Índice de similaridade (0-1)
- */
-function calculateStringSimilarity(str1: string, str2: string): number {
-  if (str1 === str2) return 1.0;
-  if (str1.length === 0 || str2.length === 0) return 0.0;
-  
-  // Algoritmo de distância de Levenshtein
-  const len1 = str1.length;
-  const len2 = str2.length;
-  const maxDist = Math.max(len1, len2);
-  
-  const dp: number[][] = Array(len1 + 1).fill(null).map(() => Array(len2 + 1).fill(0));
-  
-  for (let i = 0; i <= len1; i++) dp[i][0] = i;
-  for (let j = 0; j <= len2; j++) dp[0][j] = j;
-  
-  for (let i = 1; i <= len1; i++) {
-    for (let j = 1; j <= len2; j++) {
-      const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(
-        dp[i - 1][j] + 1,       // Deleção
-        dp[i][j - 1] + 1,       // Inserção
-        dp[i - 1][j - 1] + cost  // Substituição
-      );
-    }
-  }
-  
-  // A similaridade é inversamente proporcional à distância
-  return 1.0 - (dp[len1][len2] / maxDist);
 }
