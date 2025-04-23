@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { CheckCircle, Star, Award, Users, Book, Shield, ArrowRight, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -40,7 +40,7 @@ const testimonials: Testimonial[] = [
     id: 1,
     name: 'Maria Silva',
     role: 'Diretora Escola Novo Futuro',
-    content: 'O EduMatrik AI transformou completamente nosso processo de matrícula. Reduzimos o tempo de processamento em 80% e eliminamos praticamente todos os erros de documentação.',
+    content: 'O Matricula transformou completamente nosso processo de matrícula. Reduzimos o tempo de processamento em 80% e eliminamos praticamente todos os erros de documentação.',
     rating: 5,
     image: 'https://randomuser.me/api/portraits/women/32.jpg'
   },
@@ -122,12 +122,12 @@ const pricingPlans: PricingPlan[] = [
 // FAQs
 const faqs: Faq[] = [
   {
-    question: 'Quanto tempo leva para implementar o EduMatrik AI?',
+    question: 'Quanto tempo leva para implementar o Matricula?',
     answer: 'A implementação básica pode ser concluída em apenas 48 horas. Nosso time de onboarding guiará sua equipe durante todo o processo, e você poderá começar a usar as funcionalidades principais de forma imediata, enquanto personalizações adicionais são implementadas nas semanas seguintes.'
   },
   {
     question: 'Minha escola precisa de algum hardware especial?',
-    answer: 'Não, o EduMatrik AI é uma solução 100% em nuvem. Você só precisa de computadores ou dispositivos móveis com acesso à internet. Não há necessidade de servidores ou equipamentos adicionais.'
+    answer: 'Não, o Matricula é uma solução 100% em nuvem. Você só precisa de computadores ou dispositivos móveis com acesso à internet. Não há necessidade de servidores ou equipamentos adicionais.'
   },
   {
     question: 'Como funciona a validação de documentos por IA?',
@@ -135,11 +135,11 @@ const faqs: Faq[] = [
   },
   {
     question: 'O sistema pode ser integrado com o software de gestão que já utilizamos?',
-    answer: 'Sim, o EduMatrik AI oferece APIs para integração com os principais sistemas de gestão escolar do mercado. Nos planos Pro e Premium, fornecemos suporte técnico para garantir uma integração perfeita com seu software atual.'
+    answer: 'Sim, o Matricula oferece APIs para integração com os principais sistemas de gestão escolar do mercado. Nos planos Pro e Premium, fornecemos suporte técnico para garantir uma integração perfeita com seu software atual.'
   },
   {
     question: 'Qual a garantia oferecida?',
-    answer: 'Oferecemos garantia de 30 dias com reembolso total. Se você não estiver completamente satisfeito com o EduMatrik AI, basta solicitar o cancelamento dentro desse período para receber 100% do valor investido de volta, sem questionamentos.'
+    answer: 'Oferecemos garantia de 30 dias com reembolso total. Se você não estiver completamente satisfeito com o Matricula, basta solicitar o cancelamento dentro desse período para receber 100% do valor investido de volta, sem questionamentos.'
   },
   {
     question: 'Quais métodos de pagamento são aceitos?',
@@ -174,43 +174,90 @@ const TestimonialCard: React.FC<{ testimonial: Testimonial }> = ({ testimonial }
   </Card>
 );
 
-const PricingCard: React.FC<{ plan: PricingPlan }> = ({ plan }) => (
-  <Card className={`h-full flex flex-col ${plan.popular ? 'border-primary shadow-lg relative' : ''}`}>
-    {plan.popular && (
-      <div className="absolute -top-4 left-0 right-0 flex justify-center">
-        <Badge className="bg-primary text-white px-3 py-1">Mais Popular</Badge>
-      </div>
-    )}
-    <CardHeader className={`${plan.popular ? 'pt-6' : ''}`}>
-      <CardTitle className="text-2xl">{plan.name}</CardTitle>
-      <div className="mt-2">
-        <span className="text-3xl font-bold">{plan.price}</span>
-        <span className="text-gray-500 ml-1">{plan.period}</span>
-      </div>
-      <CardDescription className="mt-2">{plan.description}</CardDescription>
-    </CardHeader>
-    <CardContent className="flex-grow">
-      <ul className="space-y-3">
-        {plan.features.map((feature: string, index: number) => (
-          <li key={index} className="flex items-center">
-            <CheckCircle className="w-5 h-5 text-green-500 mr-2 flex-shrink-0" />
-            <span>{feature}</span>
-          </li>
-        ))}
-      </ul>
-    </CardContent>
-    <CardFooter>
-      <Button 
-        className={`w-full ${plan.popular ? 'bg-primary hover:bg-primary/90' : ''}`}
-        variant={plan.popular ? 'default' : 'outline'}
-        onClick={() => window.location.href = '/register'}
-      >
-        {plan.cta}
-        <ArrowRight className="ml-2 w-4 h-4" />
-      </Button>
-    </CardFooter>
-  </Card>
-);
+const PricingCard: React.FC<{ plan: PricingPlan }> = ({ plan }) => {
+  const [isLoading, setIsLoading] = useState(false);
+  
+  const handleSubscribe = async () => {
+    if (plan.id === 'premium') {
+      // O plano premium direciona para o contato de vendas
+      window.location.href = '/contato?plano=premium';
+      return;
+    }
+    
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/checkout/create-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ planId: plan.id }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        console.error('Erro ao criar sessão de checkout:', data.error);
+        alert('Não foi possível processar o pagamento. Por favor, tente novamente mais tarde.');
+      }
+    } catch (error) {
+      console.error('Erro ao processar o checkout:', error);
+      alert('Ocorreu um erro ao processar o checkout. Por favor, tente novamente.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  return (
+    <Card className={`h-full flex flex-col ${plan.popular ? 'border-primary shadow-lg relative' : ''}`}>
+      {plan.popular && (
+        <div className="absolute -top-4 left-0 right-0 flex justify-center">
+          <Badge className="bg-primary text-white px-3 py-1">Mais Popular</Badge>
+        </div>
+      )}
+      <CardHeader className={`${plan.popular ? 'pt-6' : ''}`}>
+        <CardTitle className="text-2xl">{plan.name}</CardTitle>
+        <div className="mt-2">
+          <span className="text-3xl font-bold">{plan.price}</span>
+          <span className="text-gray-500 ml-1">{plan.period}</span>
+        </div>
+        <CardDescription className="mt-2">{plan.description}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex-grow">
+        <ul className="space-y-3">
+          {plan.features.map((feature: string, index: number) => (
+            <li key={index} className="flex items-center">
+              <CheckCircle className="w-5 h-5 text-green-500 mr-2 flex-shrink-0" />
+              <span>{feature}</span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+      <CardFooter>
+        <Button 
+          className={`w-full ${plan.popular ? 'bg-primary hover:bg-primary/90' : ''}`}
+          variant={plan.popular ? 'default' : 'outline'}
+          onClick={handleSubscribe}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <>
+              <span className="animate-spin mr-2">⊙</span>
+              Processando...
+            </>
+          ) : (
+            <>
+              {plan.cta}
+              <ArrowRight className="ml-2 w-4 h-4" />
+            </>
+          )}
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+};
 
 interface FaqItemProps {
   faq: Faq;
@@ -269,12 +316,12 @@ export default function VendasPage() {
   return (
     <>
       <Helmet>
-        <title>EduMatrik AI | Revolucione o processo de matrículas da sua escola</title>
+        <title>Matricula | Revolucione o processo de matrículas da sua escola</title>
         <meta name="description" content="Sistema inteligente com IA para automação completa de matrículas escolares. Reduza erros, economize tempo e melhore a experiência de pais e alunos." />
-        <meta property="og:title" content="EduMatrik AI | Automação inteligente de matrículas escolares" />
+        <meta property="og:title" content="Matricula | Automação inteligente de matrículas escolares" />
         <meta property="og:description" content="Reduza em até 80% o tempo gasto com processos de matrícula usando nossa plataforma com inteligência artificial." />
         <meta property="og:type" content="website" />
-        <meta property="og:url" content="https://edumatrik.ai/vendas" />
+        <meta property="og:url" content="https://matricula.app/vendas" />
       </Helmet>
       
       <div className="bg-gradient-to-b from-blue-50 to-white">
@@ -323,8 +370,8 @@ export default function VendasPage() {
             {/* Aqui você pode colocar um player de vídeo ou uma imagem */}
             <div className="aspect-video bg-gray-100 flex items-center justify-center">
               <img 
-                src="https://placehold.co/1200x675/e2e8f0/1e293b?text=V%C3%ADdeo+de+Demonstra%C3%A7%C3%A3o+EduMatrik+AI" 
-                alt="Demonstração do EduMatrik AI" 
+                src="https://placehold.co/1200x675/e2e8f0/1e293b?text=V%C3%ADdeo+de+Demonstra%C3%A7%C3%A3o+Matricula" 
+                alt="Demonstração do Matricula" 
                 className="w-full h-full object-cover" 
               />
             </div>
@@ -531,7 +578,7 @@ export default function VendasPage() {
               className="md:w-1/2 mb-10 md:mb-0 md:pr-10"
             >
               <img 
-                src="https://placehold.co/600x400/f9fafb/1e293b?text=Garantia+EduMatrik+AI" 
+                src="https://placehold.co/600x400/f9fafb/1e293b?text=Garantia+Matricula" 
                 alt="Selo de garantia" 
                 className="max-w-full rounded-lg shadow-lg" 
               />

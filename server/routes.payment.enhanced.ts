@@ -19,6 +19,71 @@ import { sendUserNotification } from './pusher';
 export function registerEnhancedPaymentRoutes(app: Express, isAuthenticated: any) {
   console.log('Registrando rotas aprimoradas de pagamento');
   
+  /**
+   * @route POST /api/checkout/create-session
+   * @desc Cria uma sessão de checkout do Stripe
+   * @access Public
+   */
+  app.post('/api/checkout/create-session', async (req: Request, res: Response) => {
+    try {
+      const { planId } = req.body;
+      
+      if (!planId) {
+        return res.status(400).json({ error: 'ID do plano é obrigatório' });
+      }
+      
+      const plans = {
+        starter: {
+          name: 'Starter',
+          price: 29700, // R$297,00 em centavos
+          description: 'Plano Starter - Matricula'
+        },
+        pro: {
+          name: 'Pro',
+          price: 59700, // R$597,00 em centavos
+          description: 'Plano Pro - Matricula'
+        },
+        premium: {
+          name: 'Premium',
+          price: 99700, // R$997,00 em centavos
+          description: 'Plano Premium - Matricula'
+        }
+      };
+      
+      const plan = plans[planId as keyof typeof plans];
+      
+      if (!plan) {
+        return res.status(400).json({ error: 'Plano inválido' });
+      }
+      
+      // Use o processador de pagamento para criar uma sessão de checkout
+      const session = await paymentProcessor.stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            price_data: {
+              currency: 'brl',
+              product_data: {
+                name: plan.name,
+                description: plan.description,
+              },
+              unit_amount: plan.price,
+            },
+            quantity: 1,
+          },
+        ],
+        mode: 'subscription',
+        success_url: `${req.protocol}://${req.get('host')}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${req.protocol}://${req.get('host')}/vendas`,
+      });
+      
+      res.json({ url: session.url });
+    } catch (error: any) {
+      console.error('Erro ao criar sessão de checkout:', error);
+      res.status(500).json({ error: 'Erro ao criar sessão de checkout', details: error.message });
+    }
+  });
+  
   // Middleware para verificar papel de admin
   const isAdmin = (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
