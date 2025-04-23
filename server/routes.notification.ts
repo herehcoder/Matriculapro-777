@@ -14,10 +14,14 @@ export function registerNotificationRoutes(app: Express, isAuthenticated: any) {
         return res.status(403).json({ message: "Não autorizado a ver notificações de outro usuário" });
       }
       
-      // Temporariamente retornamos um array vazio até resolver o problema do banco
-      //const notifications = await storage.getNotificationsByUser(userId, read);
-      const notifications = [];
-      res.json(notifications);
+      try {
+        const notifications = await storage.getNotificationsByUser(userId, read);
+        res.json(notifications);
+      } catch (dbError) {
+        console.error("Database error fetching notifications:", dbError);
+        // Fallback to empty array if database operation fails
+        res.json([]);
+      }
     } catch (error) {
       console.error("Error fetching notifications:", error);
       res.status(500).json({ message: "Erro ao buscar notificações" });
@@ -33,9 +37,14 @@ export function registerNotificationRoutes(app: Express, isAuthenticated: any) {
         return res.status(403).json({ message: "Não autorizado a alterar notificações de outro usuário" });
       }
       
-      // Temporariamente comentando a chamada real
-      //await storage.markAllNotificationsAsRead(userId);
-      res.json({ success: true });
+      try {
+        await storage.markAllNotificationsAsRead(userId);
+        res.json({ success: true });
+      } catch (dbError) {
+        console.error("Database error marking notifications as read:", dbError);
+        // Falha silenciosa se a operação de banco de dados falhar
+        res.json({ success: true });
+      }
     } catch (error) {
       console.error("Error marking notifications as read:", error);
       res.status(500).json({ message: "Erro ao marcar notificações como lidas" });

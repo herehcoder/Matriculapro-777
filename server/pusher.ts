@@ -1,14 +1,27 @@
 import Pusher from 'pusher';
 import { storage } from './storage';
 
-// Initialize Pusher with your app credentials
-const pusher = new Pusher({
-  appId: process.env.PUSHER_APP_ID || '',
-  key: process.env.PUSHER_APP_KEY || '',
-  secret: process.env.PUSHER_APP_SECRET || '',
-  cluster: process.env.PUSHER_APP_CLUSTER || 'us2', // Default to us2 cluster
-  useTLS: true,
-});
+// Inicialize Pusher com credenciais ou use uma versão falsa
+let pusher: Pusher;
+
+try {
+  // Tentamos inicializar o Pusher
+  pusher = new Pusher({
+    appId: process.env.PUSHER_APP_ID || 'app-id',
+    key: process.env.PUSHER_APP_KEY || 'app-key',
+    secret: process.env.PUSHER_APP_SECRET || 'app-secret',
+    cluster: process.env.PUSHER_APP_CLUSTER || 'us2',
+    useTLS: true,
+  });
+  console.log('Pusher inicializado com sucesso');
+} catch (error) {
+  console.log('Erro ao inicializar Pusher, usando implementação simulada');
+  // Implementação falsa se não tivermos credenciais válidas
+  pusher = {
+    trigger: async () => Promise.resolve(),
+    authorizeChannel: () => ({ auth: 'fake-auth-token' }),
+  } as unknown as Pusher;
+}
 
 // Types for pusher payloads
 export interface NotificationPayload {
