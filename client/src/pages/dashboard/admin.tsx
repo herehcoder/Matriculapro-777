@@ -227,11 +227,11 @@ export default function AdminDashboard() {
     },
   });
 
-  // Buscar dados de usuários
-  const { data: usersData, isLoading: isLoadingUsers } = useQuery({
-    queryKey: ["/api/users"],
+  // Buscar dados de métricas do dashboard
+  const { data: dashboardData, isLoading: isLoadingDashboard } = useQuery({
+    queryKey: ["/api/metrics/dashboard"],
     queryFn: async () => {
-      const res = await apiRequest("GET", "/api/users");
+      const res = await apiRequest("GET", "/api/metrics/dashboard");
       return await res.json();
     },
   });
@@ -248,16 +248,16 @@ export default function AdminDashboard() {
   // Dados para o dashboard
   const platformData = {
     schools: {
-      total: schoolsData?.length || 0,
-      active: schoolsData?.filter((s: any) => s.active).length || 0,
-      inactive: schoolsData?.filter((s: any) => !s.active).length || 0,
+      total: metricsData?.totalSchools || 0,
+      active: metricsData?.activeSchools || 0,
+      inactive: metricsData?.inactiveSchools || 0,
     },
     users: {
-      total: usersData?.length || 0,
-      students: usersData?.filter((u: any) => u.role === "student").length || 0,
-      attendants: usersData?.filter((u: any) => u.role === "attendant").length || 0,
-      schools: usersData?.filter((u: any) => u.role === "school").length || 0,
-      admins: usersData?.filter((u: any) => u.role === "admin").length || 0,
+      total: metricsData?.totalUsers || 0,
+      students: metricsData?.students || 0,
+      attendants: metricsData?.attendants || 0,
+      schools: metricsData?.schoolAdmins || 0,
+      admins: metricsData?.admins || 0,
     },
     metrics: {
       totalRevenue: metricsData?.totalRevenue || 0,
@@ -266,6 +266,14 @@ export default function AdminDashboard() {
       enrollmentsChange: metricsData?.enrollmentsChange || 0,
       averageLeadConversion: metricsData?.averageLeadConversion || 0,
       leadConversionChange: metricsData?.leadConversionChange || 0,
+    },
+    enrollmentStatus: metricsData?.enrollmentStatus || {
+      started: 0,
+      personalInfo: 0,
+      courseInfo: 0,
+      payment: 0,
+      completed: 0,
+      abandoned: 0
     },
   };
 

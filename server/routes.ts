@@ -935,6 +935,132 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // API para métricas de status de matrículas
+  // API para métricas globais da plataforma (painel do administrador)
+  app.get("/api/metrics/platform", isAuthenticated, hasRole(["admin"]), async (req, res) => {
+    try {
+      // 1. Obter contagens gerais
+      const schools = await storage.listSchools();
+      const users = await storage.listUsers();
+      const enrollments = await storage.listEnrollments(1000, 0);
+      // Obter leads de forma adequada para a interface atual
+      const leads = await Promise.all(
+        schools.map(school => storage.getLeadsBySchool(school.id))
+      ).then(schoolLeads => schoolLeads.flat());
+      
+      // 2. Obter métricas e estatísticas
+      const schoolsCount = schools.length;
+      const activeSchools = schools.filter(s => s.active).length;
+      
+      // Agrupar usuários por tipo
+      const usersByRole = users.reduce((acc: any, user) => {
+        const role = user.role;
+        acc[role] = (acc[role] || 0) + 1;
+        return acc;
+      }, {});
+      
+      // Calcular receita total (todos os pagamentos de matrículas)
+      const totalRevenue = enrollments.reduce((sum, e) => sum + (e.paymentAmount || 0), 0) / 100; // Converter centavos para reais
+      
+      // Calcular matrículas do último mês
+      const now = new Date();
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+      
+      const enrollmentsLastMonth = enrollments.filter(e => {
+        const enrollmentDate = new Date(e.createdAt);
+        return enrollmentDate >= oneMonthAgo && enrollmentDate <= now;
+      });
+      
+      const enrollmentsTwoMonthsAgo = enrollments.filter(e => {
+        const enrollmentDate = new Date(e.createdAt);
+        const twoMonthsAgo = new Date(oneMonthAgo);
+        twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 1);
+        return enrollmentDate >= twoMonthsAgo && enrollmentDate < oneMonthAgo;
+      });
+      
+      // Calcular taxas de crescimento
+      const revenueLastMonth = enrollmentsLastMonth.reduce((sum, e) => sum + (e.paymentAmount || 0), 0) / 100;
+      const revenueTwoMonthsAgo = enrollmentsTwoMonthsAgo.reduce((sum, e) => sum + (e.paymentAmount || 0), 0) / 100;
+      
+      const revenueChange = revenueTwoMonthsAgo > 0 
+        ? Math.round(((revenueLastMonth - revenueTwoMonthsAgo) / revenueTwoMonthsAgo) * 100) 
+        : 0;
+      
+      const enrollmentsChange = enrollmentsTwoMonthsAgo.length > 0 
+        ? Math.round(((enrollmentsLastMonth.length - enrollmentsTwoMonthsAgo.length) / enrollmentsTwoMonthsAgo.length) * 100) 
+        : 0;
+      
+      // Calcular taxa de conversão média
+      const leadCount = leads.length;
+      const averageLeadConversion = leadCount > 0 
+        ? Math.round((enrollments.length / leadCount) * 100) 
+        : 0;
+      
+      // Calcular alteração na taxa de conversão
+      const leadsLastMonth = leads.filter(l => {
+        const leadDate = new Date(l.createdAt);
+        return leadDate >= oneMonthAgo && leadDate <= now;
+      });
+      
+      const leadsTwoMonthsAgo = leads.filter(l => {
+        const leadDate = new Date(l.createdAt);
+        const twoMonthsAgo = new Date(oneMonthAgo);
+        twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 1);
+        return leadDate >= twoMonthsAgo && leadDate < oneMonthAgo;
+      });
+      
+      const conversionLastMonth = leadsLastMonth.length > 0 
+        ? (enrollmentsLastMonth.length / leadsLastMonth.length) * 100 
+        : 0;
+      
+      const conversionTwoMonthsAgo = leadsTwoMonthsAgo.length > 0 
+        ? (enrollmentsTwoMonthsAgo.length / leadsTwoMonthsAgo.length) * 100 
+        : 0;
+      
+      const leadConversionChange = conversionTwoMonthsAgo > 0 
+        ? Math.round(((conversionLastMonth - conversionTwoMonthsAgo) / conversionTwoMonthsAgo) * 100) 
+        : 0;
+      
+      // 3. Montar resposta
+      const response = {
+        // Estatísticas de escolas
+        totalSchools: schoolsCount,
+        activeSchools,
+        inactiveSchools: schoolsCount - activeSchools,
+        
+        // Estatísticas de usuários
+        totalUsers: users.length,
+        students: usersByRole.student || 0,
+        attendants: usersByRole.attendant || 0,
+        schoolAdmins: usersByRole.school || 0,
+        admins: usersByRole.admin || 0,
+        
+        // Métricas financeiras e de conversão
+        totalRevenue,
+        revenueChange,
+        totalEnrollments: enrollments.length,
+        enrollmentsChange,
+        averageLeadConversion,
+        leadConversionChange,
+        
+        // Dados para gráficos e relatórios
+        enrollmentStatus: {
+          started: enrollments.filter(e => e.status === 'started').length,
+          personalInfo: enrollments.filter(e => e.status === 'personal_info').length,
+          courseInfo: enrollments.filter(e => e.status === 'course_info').length,
+          payment: enrollments.filter(e => e.status === 'payment').length,
+          completed: enrollments.filter(e => e.status === 'completed').length,
+          abandoned: enrollments.filter(e => e.status === 'abandoned').length
+        }
+      };
+      
+      res.json(response);
+    } catch (error) {
+      console.error("Platform metrics error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/metrics/enrollment-status", isAuthenticated, async (req, res) => {
     try {
       const user = req.user as any;
