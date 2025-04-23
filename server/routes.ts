@@ -4,6 +4,9 @@ import { WebSocketServer } from "ws";
 import { storage } from "./storage";
 import { setupAuth } from "./auth";
 import { registerNotificationRoutes } from "./routes.notification";
+import { registerEnrollmentRoutes } from "./routes.enrollment";
+import { registerCourseRoutes } from "./routes.course";
+import { registerQuestionRoutes } from "./routes.question";
 import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
@@ -51,6 +54,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Register notification routes
   registerNotificationRoutes(app, isAuthenticated);
+  
+  // Register enrollment, course, and question routes
+  registerEnrollmentRoutes(app, isAuthenticated);
+  registerCourseRoutes(app, isAuthenticated);
+  registerQuestionRoutes(app, isAuthenticated);
 
   // Middleware for error handling
   const handleZodError = (

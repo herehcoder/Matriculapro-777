@@ -152,6 +152,16 @@ export const getQuestions = (schoolId: number, section?: string) => {
   });
 };
 
+export const getQuestionsBySchool = (schoolId: number, section?: string) => {
+  let url = `/api/questions?schoolId=${schoolId}`;
+  if (section) url += `&section=${section}`;
+  
+  return fetch(url, { credentials: "include" }).then(res => {
+    if (!res.ok) throw new Error("Failed to fetch questions for school");
+    return res.json();
+  });
+};
+
 export const createQuestion = (questionData: any) => {
   return apiRequest("POST", "/api/questions", questionData);
 };

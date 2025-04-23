@@ -9,6 +9,7 @@ import SchoolDashboard from "@/pages/dashboard/school";
 import AttendantDashboard from "@/pages/dashboard/attendant";
 import StudentDashboard from "@/pages/dashboard/student";
 import EnrollmentPage from "@/pages/enrollment/index";
+import EnrollmentSuccessPage from "@/pages/enrollment/success";
 import ChatbotPage from "@/pages/chatbot/index";
 import SchoolsPage from "@/pages/schools/index";
 import NewSchoolPage from "@/pages/schools/new";
@@ -48,6 +49,7 @@ function Router() {
         <Route path="/login" component={Login} />
         <Route path="/register" component={Register} />
         <Route path="/enrollment/:schoolId/:enrollmentId?" component={EnrollmentPage} />
+        <Route path="/enrollment/success/:id" component={EnrollmentSuccessPage} />
         <Route component={Login} />
       </Switch>
     );
@@ -83,6 +85,7 @@ function Router() {
         <Route path="/dashboard/attendant" component={AttendantDashboard} />
         <Route path="/dashboard/student" component={StudentDashboard} />
         <Route path="/enrollment/:schoolId/:enrollmentId?" component={EnrollmentPage} />
+        <Route path="/enrollment/success/:id" component={EnrollmentSuccessPage} />
         <Route path="/enrollments" component={EnrollmentsPage} />
         <Route path="/enrollments/new" component={NewEnrollmentPage} />
         <Route path="/enrollments/:enrollmentId" component={EnrollmentViewPage} />
