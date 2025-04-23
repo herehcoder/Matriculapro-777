@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Link, useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import {
   Form,
   FormControl,
@@ -10,6 +11,7 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  FormDescription,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -217,6 +219,56 @@ export default function Register() {
                 </FormItem>
               )}
             />
+            
+            {/* Campo de seleção de escola - apenas visível para estudantes */}
+            {showSchoolField && (
+              <FormField
+                control={form.control}
+                name="schoolId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      Escola <span className="text-red-500">*</span>
+                    </FormLabel>
+                    <Select
+                      onValueChange={(value) => field.onChange(Number(value))}
+                      value={field.value?.toString()}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione uma escola" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {isLoadingSchools ? (
+                          <div className="flex items-center justify-center p-2">
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            <span>Carregando escolas...</span>
+                          </div>
+                        ) : schools && schools.length > 0 ? (
+                          schools.map((school: any) => (
+                            <SelectItem 
+                              key={school.id} 
+                              value={school.id.toString()}
+                            >
+                              {school.name}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <div className="p-2 text-center text-muted-foreground">
+                            Nenhuma escola encontrada
+                          </div>
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Selecione a instituição onde você está se matriculando
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
             
             {error && (
               <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm dark:bg-red-900/20 dark:border-red-800 dark:text-red-400">

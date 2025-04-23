@@ -102,6 +102,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // All authentication routes are now handled by setupAuth
 
+  // School routes
+  app.get("/api/schools", async (req, res, next) => {
+    try {
+      // Buscar todas as escolas ativas
+      const schools = await storage.listSchools();
+      const activeSchools = schools.filter(school => school.active !== false);
+      
+      res.json(activeSchools);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/schools/:id", async (req, res, next) => {
+    try {
+      const schoolId = parseInt(req.params.id);
+      const school = await storage.getSchool(schoolId);
+      
+      if (!school) {
+        return res.status(404).json({ message: "Escola não encontrada" });
+      }
+      
+      res.json(school);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // User routes
   app.get("/api/users", isAuthenticated, hasRole(["admin"]), async (req, res) => {
     const users = await storage.listUsers();
@@ -206,19 +234,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // School routes
-  app.get("/api/schools", isAuthenticated, async (req, res) => {
-    const schools = await storage.listSchools();
-    res.json(schools);
-  });
-
-  app.get("/api/schools/:id", isAuthenticated, async (req, res) => {
-    const school = await storage.getSchool(parseInt(req.params.id));
-    if (!school) {
-      return res.status(404).json({ message: "School not found" });
-    }
-    res.json(school);
-  });
+  // A rota pública de /api/schools já foi definida anteriormente
 
   app.post("/api/schools", isAuthenticated, hasRole(["admin"]), async (req, res, next) => {
     try {
