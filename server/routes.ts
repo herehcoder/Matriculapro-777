@@ -10,6 +10,7 @@ import { registerStudentRoutes } from "./routes.student";
 import { registerQuestionRoutes } from "./routes.question";
 import { registerDocumentRoutes } from "./routes.document";
 import { registerMessageRoutes } from "./routes.message";
+import { registerUserRoutes } from "./routes.user";
 import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
@@ -119,6 +120,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerDocumentRoutes(app);
   registerMessageRoutes(app, isAuthenticated);
   registerStudentRoutes(app, isAuthenticated);
+  registerUserRoutes(app, isAuthenticated);
 
   // Middleware for error handling
   const handleZodError = (

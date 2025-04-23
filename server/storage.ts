@@ -1200,6 +1200,62 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(users).limit(limit).offset(offset);
   }
 
+  async getAllUsers(): Promise<User[]> {
+    return await db.select().from(users).orderBy(users.fullName);
+  }
+  
+  async getUsersBySchool(schoolId: number): Promise<User[]> {
+    return await db
+      .select()
+      .from(users)
+      .where(eq(users.schoolId, schoolId))
+      .orderBy(users.fullName);
+  }
+  
+  async searchUsers(term: string): Promise<User[]> {
+    return await db
+      .select()
+      .from(users)
+      .where(
+        or(
+          sql`${users.fullName} ILIKE ${term}`,
+          sql`${users.email} ILIKE ${term}`,
+          sql`${users.username} ILIKE ${term}`
+        )
+      )
+      .orderBy(users.fullName);
+  }
+  
+  async searchUsersBySchool(term: string, schoolId: number): Promise<User[]> {
+    return await db
+      .select()
+      .from(users)
+      .where(
+        and(
+          eq(users.schoolId, schoolId),
+          or(
+            sql`${users.fullName} ILIKE ${term}`,
+            sql`${users.email} ILIKE ${term}`,
+            sql`${users.username} ILIKE ${term}`
+          )
+        )
+      )
+      .orderBy(users.fullName);
+  }
+  
+  async countUsers(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(users);
+    return result[0]?.count || 0;
+  }
+  
+  async countUsersByRole(role: string): Promise<number> {
+    const result = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(users)
+      .where(eq(users.role, role as any)); // 'as any' porque role é uma string, mas users.role é um enum
+    return result[0]?.count || 0;
+  }
+
   // School management
   async getSchool(id: number): Promise<School | undefined> {
     const [school] = await db.select().from(schools).where(eq(schools.id, id));
