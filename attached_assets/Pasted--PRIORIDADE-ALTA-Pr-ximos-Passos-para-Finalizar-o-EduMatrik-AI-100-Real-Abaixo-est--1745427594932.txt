@@ -1,0 +1,52 @@
+🚀 **[PRIORIDADE ALTA] Próximos Passos para Finalizar o EduMatrik AI (100% Real)**
+
+💡 Abaixo estão os módulos restantes **críticos** que precisam ser entregues para o projeto entrar em produção:
+
+---
+
+✅ **1. Evolution API (WhatsApp) – Integração Completa**
+- [ ] Criar estrutura de conexão com a Evolution API  
+- [ ] Implementar sistema de **filas de mensagens** por escola  
+- [ ] Adicionar mecanismo de **retry automático** para falhas de envio  
+- [ ] Incluir **logging completo** com status por mensagem, usuário e instância  
+
+🎯 Obs: Uma instância de WhatsApp **por escola**. Conexão será feita via **QR Code único por escola** no painel.
+
+---
+
+✅ **2. Finalizar OCR de Documentos**
+- [ ] Criar serviço robusto de OCR (revisar `utils/ocr.ts`)  
+- [ ] Fazer **validação cruzada** entre dados extraídos vs dados informados  
+- [ ] Implementar painel de **correção manual** no dashboard de matrículas  
+
+---
+
+✅ **3. Completar Sistema de Pagamentos**
+- [ ] Integrar **Webhooks do Stripe** para confirmação de pagamento  
+- [ ] Gerar e exibir **relatórios financeiros por escola**  
+- [ ] Implementar sistema de **conciliação automática** no backend  
+
+---
+
+✅ **4. Segurança e LGPD**
+- [ ] Log de **todas as ações críticas** no sistema  
+- [ ] Criar rotina de **backup automático diário**  
+- [ ] Adicionar sistema de **auditoria por usuário** com filtro por data/tipo de ação  
+
+---
+
+✅ **5. Analytics Finalizado**
+- [ ] Criar e agendar **ETL pipeline** para dados brutos  
+- [ ] Finalizar **dashboards customizados** no painel admin e por escola  
+- [ ] Adicionar **exportação de dados** (CSV e PDF)  
+
+---
+
+📌 **Diretrizes Técnicas**  
+- Garantir tratamento de erros e logs em todos os fluxos  
+- Escrever testes (unitários ou mocks) nos pontos críticos  
+- Manter código limpo, comentado e com separação clara de responsabilidades  
+- Atualizar documentação dos novos endpoints e módulos
+
+🧭 **Meta da sprint:** finalizar esses 5 módulos para colocar o sistema em produção **com robustez e estabilidade**.
+
