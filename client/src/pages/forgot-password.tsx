@@ -36,17 +36,26 @@ export default function ForgotPassword() {
   const onSubmit = async (values: z.infer<typeof forgotPasswordSchema>) => {
     setIsSubmitting(true);
     try {
-      await axios.post("/api/auth/forgot-password", values);
+      console.log("Enviando solicitação de recuperação para:", values.email);
+      const response = await axios.post("/api/auth/forgot-password", values);
+      console.log("Resposta:", response.data);
+      
       setSuccess(true);
       toast({
         title: "Email enviado",
         description: "Se o email estiver cadastrado, você receberá instruções para redefinir sua senha.",
         variant: "default",
       });
-    } catch (err) {
+    } catch (err: any) {
+      console.error("Erro ao solicitar recuperação de senha:", err);
+      
+      // Mostra o erro específico se disponível
+      const errorMessage = err.response?.data?.message || 
+        "Ocorreu um erro ao processar sua solicitação. Tente novamente mais tarde.";
+      
       toast({
         title: "Erro",
-        description: "Ocorreu um erro ao processar sua solicitação. Tente novamente mais tarde.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
