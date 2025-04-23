@@ -47,11 +47,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Setup authentication
   await setupAuth(app);
   
+  // Definir rotas públicas que não necessitam de autenticação
+  const publicRoutes = [
+    '/api/schools',
+    '/api/schools/:id',
+    '/api/courses/explore',
+    '/api/questions',
+    '/api/auth/login',
+    '/api/auth/register',
+    '/api/enrollments',
+    '/api/answers',
+  ];
+  
   // Middleware to check if user is authenticated
   const isAuthenticated = (req: Request, res: Response, next: NextFunction) => {
+    // Verificar se a rota está na lista de rotas públicas
+    // Para rotas com parâmetros, precisamos verificar parcialmente
+    const isPublicRoute = publicRoutes.some(route => {
+      // Para rotas exatas
+      if (route === req.path) {
+        return true;
+      }
+      
+      // Para rotas com parâmetros (:id, etc.)
+      if (route.includes(':')) {
+        const routeParts = route.split('/');
+        const pathParts = req.path.split('/');
+        
+        // Se o número de partes não é o mesmo, não é uma correspondência
+        if (routeParts.length !== pathParts.length) {
+          return false;
+        }
+        
+        // Verifica parte por parte
+        for (let i = 0; i < routeParts.length; i++) {
+          // Se é um parâmetro (começa com :), pular
+          if (routeParts[i].startsWith(':')) {
+            continue;
+          }
+          
+          // Se as partes fixas não correspondem, não é uma correspondência
+          if (routeParts[i] !== pathParts[i]) {
+            return false;
+          }
+        }
+        
+        return true;
+      }
+      
+      return false;
+    });
+    
+    if (isPublicRoute) {
+      return next();
+    }
+    
     if (req.isAuthenticated()) {
       return next();
     }
+    
     res.status(401).json({ message: "Unauthorized - Please log in" });
   };
   
@@ -105,12 +159,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // School routes
   app.get("/api/schools", async (req, res, next) => {
     try {
-      // Buscar todas as escolas ativas
+      // Buscar todas as escolas ativas sem requerer autenticação
       const schools = await storage.listSchools();
       const activeSchools = schools.filter(school => school.active !== false);
       
       res.json(activeSchools);
     } catch (error) {
+      console.error("Erro ao buscar escolas:", error);
       next(error);
     }
   });
