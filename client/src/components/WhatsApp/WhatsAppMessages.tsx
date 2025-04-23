@@ -498,10 +498,9 @@ const WhatsAppMessages: React.FC<WhatsAppMessagesProps> = ({ schoolId }) => {
                   </div>
                   
                   <div className="flex-1 relative">
-                    <Input
-                      as="textarea"
+                    <textarea
                       rows={1}
-                      className="resize-none py-2 min-h-[2.5rem]"
+                      className="w-full px-3 py-2 min-h-[2.5rem] rounded-md border border-input bg-background ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none"
                       placeholder="Digite uma mensagem..."
                       value={message}
                       onChange={(e) => setMessage(e.target.value)}

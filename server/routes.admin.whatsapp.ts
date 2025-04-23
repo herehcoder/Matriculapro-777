@@ -2,8 +2,7 @@ import { Request, Response } from 'express';
 import { Express } from 'express';
 import { z } from 'zod';
 import { db } from './db';
-import { EvolutionApiClient } from './utils/evolution-api';
-import { whatsappApiConfigs } from '../shared/whatsapp-config.schema';
+import { whatsappApiConfigs, whatsappApiConfigSchema } from '../shared/whatsapp-config.schema';
 import { eq } from 'drizzle-orm';
 
 /**
@@ -131,23 +130,35 @@ export function registerAdminWhatsAppRoutes(app: Express, isAuthenticated: any) 
         return res.status(404).json({ message: 'Configuração não encontrada' });
       }
       
-      // Testa a conexão com a Evolution API
-      const client = new EvolutionApiClient(
-        config.apiBaseUrl,
-        config.apiKey,
-        'test_connection'
-      );
+      // Simulação de teste de conexão
+      // Em produção, aqui faria uma requisição para a Evolution API
+      // para verificar se ela está online
       
-      const isAvailable = await client.isAvailable();
-      
-      if (!isAvailable) {
-        return res.status(400).json({ message: 'Não foi possível conectar à Evolution API' });
+      try {
+        // Simulação de chamada da API
+        const response = await fetch(`${config.apiBaseUrl}/api/health`, {
+          method: 'GET',
+          headers: {
+            'apikey': config.apiKey
+          }
+        });
+        
+        if (response.ok) {
+          return res.json({ 
+            success: true,
+            message: 'Conexão com a Evolution API estabelecida com sucesso'
+          });
+        } else {
+          return res.status(400).json({ 
+            message: 'Não foi possível conectar à Evolution API: ' + response.statusText
+          });
+        }
+      } catch (fetchError) {
+        // Se falhar na tentativa de conectar, é provável que a URL ou a API esteja inacessível
+        return res.status(400).json({ 
+          message: 'Não foi possível conectar à Evolution API. Verifique a URL e tente novamente.'
+        });
       }
-      
-      return res.json({ 
-        success: true,
-        message: 'Conexão com a Evolution API estabelecida com sucesso'
-      });
     } catch (error) {
       console.error('Erro ao testar conexão com a Evolution API:', error);
       return res.status(500).json({ message: 'Erro ao testar conexão com a Evolution API' });
