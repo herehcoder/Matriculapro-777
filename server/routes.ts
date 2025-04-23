@@ -1071,6 +1071,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(notifications);
   });
 
+  app.get("/api/notifications/user/:userId", isAuthenticated, async (req, res) => {
+    const userId = parseInt(req.params.userId);
+    const readParam = req.query.read;
+    const read = readParam === 'true' ? true : readParam === 'false' ? false : undefined;
+    
+    // Verificar se o usuário tem permissão para ver as notificações
+    const currentUser = req.user as any;
+    if (currentUser.id !== userId && currentUser.role !== 'admin') {
+      return res.status(403).json({ message: "Forbidden - You can only access your own notifications" });
+    }
+    
+    const notifications = await storage.getNotificationsByUser(userId, read);
+    res.json(notifications);
+  });
+  
+  app.patch("/api/notifications/user/:userId/mark-all-read", isAuthenticated, async (req, res) => {
+    const userId = parseInt(req.params.userId);
+    
+    // Verificar se o usuário tem permissão para marcar as notificações como lidas
+    const currentUser = req.user as any;
+    if (currentUser.id !== userId && currentUser.role !== 'admin') {
+      return res.status(403).json({ message: "Forbidden - You can only mark your own notifications as read" });
+    }
+    
+    await storage.markAllNotificationsAsRead(userId);
+    res.json({ success: true });
+  });
+
   app.post("/api/notifications", isAuthenticated, hasRole(["admin", "school"]), async (req, res, next) => {
     try {
       const user = req.user as any;
