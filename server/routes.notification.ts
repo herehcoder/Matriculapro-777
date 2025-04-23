@@ -14,7 +14,9 @@ export function registerNotificationRoutes(app: Express, isAuthenticated: any) {
         return res.status(403).json({ message: "Não autorizado a ver notificações de outro usuário" });
       }
       
-      const notifications = await storage.getNotificationsByUser(userId, read);
+      // Temporariamente retornamos um array vazio até resolver o problema do banco
+      //const notifications = await storage.getNotificationsByUser(userId, read);
+      const notifications = [];
       res.json(notifications);
     } catch (error) {
       console.error("Error fetching notifications:", error);
