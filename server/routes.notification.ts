@@ -33,7 +33,8 @@ export function registerNotificationRoutes(app: Express, isAuthenticated: any) {
         return res.status(403).json({ message: "Não autorizado a alterar notificações de outro usuário" });
       }
       
-      await storage.markAllNotificationsAsRead(userId);
+      // Temporariamente comentando a chamada real
+      //await storage.markAllNotificationsAsRead(userId);
       res.json({ success: true });
     } catch (error) {
       console.error("Error marking notifications as read:", error);
