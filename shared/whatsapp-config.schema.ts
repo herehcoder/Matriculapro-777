@@ -28,6 +28,7 @@ export const whatsappInstances = pgTable('whatsapp_instances', {
   phoneNumber: text('phone_number'),
   lastConnection: timestamp('last_connection'),
   webhookUrl: text('webhook_url'),
+  webhookSecret: text('webhook_secret'), // Segredo para verificação do webhook
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow()
 });
@@ -42,13 +43,26 @@ export const whatsappMessages = pgTable('whatsapp_messages', {
   direction: text('direction').notNull(), // 'incoming' | 'outgoing'
   status: text('status').notNull(), // 'pending', 'sent', 'delivered', 'read', 'failed'
   content: text('content'),
-  metadata: text('metadata', { mode: 'json' }),
+  metadata: text('metadata'),
   externalId: text('external_id'), // ID da mensagem na Evolution API
   type: text('type').default('text'), // 'text', 'image', 'file', 'audio', etc.
   timestamp: timestamp('timestamp').defaultNow(),
   readAt: timestamp('read_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow()
+});
+
+/**
+ * Logs de webhook e outras operações do WhatsApp
+ */
+export const whatsappLogs = pgTable('whatsapp_logs', {
+  id: serial('id').primaryKey(),
+  instanceId: text('instance_id'), // Pode ser o ID numérico ou string da instância
+  schoolId: integer('school_id'), // Optional, pode ser nulo para logs de sistema
+  eventType: text('event_type').notNull(), // 'webhook', 'error', 'connection', etc.
+  payload: text('payload'), // Payload completo do evento
+  error: text('error'), // Mensagem de erro, se aplicável
+  createdAt: timestamp('created_at').defaultNow()
 });
 
 // Schemas Zod para inserção de dados
@@ -63,14 +77,23 @@ export const insertWhatsAppInstanceSchema = createInsertSchema(whatsappInstances
   instanceToken: z.string().min(3, 'Token da instância é obrigatório'),
   schoolId: z.number().int().positive('ID da escola é obrigatório'),
   webhookUrl: z.string().url('URL inválida').optional(),
+  webhookSecret: z.string().optional(),
 });
 
 export const insertWhatsAppMessageSchema = createInsertSchema(whatsappMessages, {
   instanceId: z.number().int().positive('ID da instância é obrigatório'),
   contactId: z.number().int().positive('ID do contato é obrigatório'),
   direction: z.enum(['incoming', 'outgoing']),
-  status: z.enum(['pending', 'sent', 'delivered', 'read', 'failed']),
+  status: z.enum(['pending', 'sent', 'delivered', 'read', 'failed', 'error']),
   content: z.string().optional(),
+});
+
+export const insertWhatsAppLogSchema = createInsertSchema(whatsappLogs, {
+  instanceId: z.string().optional(),
+  schoolId: z.number().int().positive().optional(),
+  eventType: z.string().min(1, 'Tipo de evento é obrigatório'),
+  payload: z.string().optional(),
+  error: z.string().optional(),
 });
 
 // Tipos para inserção e seleção
@@ -82,3 +105,6 @@ export type InsertWhatsAppInstance = typeof whatsappInstances.$inferInsert;
 
 export type WhatsAppMessage = typeof whatsappMessages.$inferSelect;
 export type InsertWhatsAppMessage = typeof whatsappMessages.$inferInsert;
+
+export type WhatsAppLog = typeof whatsappLogs.$inferSelect;
+export type InsertWhatsAppLog = typeof whatsappLogs.$inferInsert;

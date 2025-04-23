@@ -647,6 +647,24 @@ export function registerWhatsAppRoutes(app: Express) {
     try {
       const instanceId = req.params.instanceId;
       
+      // Log detalhado para debugging
+      console.log(`Webhook recebido para instância ${instanceId}`, {
+        headers: req.headers,
+        body: JSON.stringify(req.body).substring(0, 1000) // Limitar tamanho do log
+      });
+      
+      // Registrar o webhook recebido independente de tudo, para auditoria
+      try {
+        await db.insert(whatsappLogs).values({
+          instanceId,
+          eventType: req.body.event || req.body.type || 'unknown',
+          payload: JSON.stringify(req.body),
+          createdAt: new Date()
+        });
+      } catch (logError) {
+        console.error('Erro ao registrar webhook no log:', logError);
+      }
+      
       // Verificar se a instância existe
       const [instance] = await db
         .select()
@@ -655,18 +673,68 @@ export function registerWhatsAppRoutes(app: Express) {
       
       if (!instance) {
         console.error(`Webhook recebido para instância inexistente: ${instanceId}`);
+        
+        // Registrar erro detalhado
+        try {
+          await db.insert(whatsappLogs).values({
+            instanceId,
+            eventType: 'error',
+            error: 'Instância não encontrada',
+            payload: JSON.stringify(req.body),
+            createdAt: new Date()
+          });
+        } catch (logError) {
+          console.error('Erro ao registrar erro de webhook:', logError);
+        }
+        
         return res.sendStatus(404);
       }
       
       const schoolId = instance.schoolId;
       
-      // Em um ambiente de produção, verificar a assinatura do webhook
-      // para garantir que a requisição é legítima da Evolution API
-      // const signature = req.headers['x-evolution-signature'];
-      // const isValid = verifySignature(signature, req.body, instance.instanceToken);
-      // if (!isValid) return res.status(401).send('Assinatura inválida');
+      // Atualizar log com o ID da escola
+      try {
+        await db.update(whatsappLogs)
+          .set({ schoolId })
+          .where(and(
+            eq(whatsappLogs.instanceId, instanceId),
+            eq(whatsappLogs.schoolId, null)
+          ));
+      } catch (logError) {
+        console.error('Erro ao atualizar log com ID da escola:', logError);
+      }
       
-      console.log(`Recebido webhook para a escola ${schoolId}, instância ${instanceId}:`, req.body);
+      // Em um ambiente de produção, verificar a assinatura do webhook
+      if (instance.webhookSecret) {
+        const signature = req.headers['x-evolution-signature'] || 
+                          req.headers['x-api-key'] || 
+                          req.headers['x-webhook-signature'];
+        
+        if (!signature || 
+            (Array.isArray(signature) && !signature.includes(instance.webhookSecret)) || 
+            (!Array.isArray(signature) && signature !== instance.webhookSecret)) {
+          
+          console.error(`Assinatura de webhook inválida para instância ${instanceId}`);
+          
+          // Registrar erro de assinatura
+          try {
+            await db.insert(whatsappLogs).values({
+              instanceId: String(instance.id),
+              schoolId,
+              eventType: 'error',
+              error: 'Assinatura de webhook inválida',
+              payload: JSON.stringify({ headers: req.headers }),
+              createdAt: new Date()
+            });
+          } catch (logError) {
+            console.error('Erro ao registrar falha de assinatura:', logError);
+          }
+          
+          return res.status(401).send('Assinatura inválida');
+        }
+      }
+      
+      console.log(`Processando webhook para a escola ${schoolId}, instância ${instanceId}:`, req.body);
       
       // Processar o webhook de acordo com o tipo de evento
       const eventType = req.body.event || req.body.type;
