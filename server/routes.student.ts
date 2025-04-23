@@ -1,5 +1,8 @@
 import { Request, Response, Express } from "express";
 import { storage } from "./storage";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
+import { documents } from "../shared/schema";
 
 export function registerStudentRoutes(app: Express, isAuthenticated: any) {
   // API para listar matrículas do aluno
@@ -20,11 +23,22 @@ export function registerStudentRoutes(app: Express, isAuthenticated: any) {
             ? await storage.getCourse(enrollment.courseId)
             : null;
           
+          // Calcular status real para o frontend
+          let status = "pending";
+          if (enrollment.status === "completed") {
+            status = "completed";
+          } else if (["personal_info", "course_info", "payment"].includes(enrollment.status)) {
+            status = "in_progress";
+          }
+          
           return {
-            ...enrollment,
+            id: enrollment.id,
+            courseId: enrollment.courseId,
+            status: status,
             course,
-            // Valores para demonstração (em produção viriam do banco)
-            progress: Math.floor(Math.random() * 100),
+            progress: enrollment.paymentCompleted ? 100 : 
+                      enrollment.courseInfoCompleted ? 75 : 
+                      enrollment.personalInfoCompleted ? 50 : 25,
             startDate: enrollment.createdAt,
             duration: "4 semanas",
           };
@@ -120,45 +134,53 @@ export function registerStudentRoutes(app: Express, isAuthenticated: any) {
       if (!student || student.role !== "student") {
         return res.status(403).json({ message: "Acesso não autorizado" });
       }
+      
+      // Primeiro precisamos encontrar o registro de estudante para este usuário
+      const studentRecord = await storage.getStudentByUserId(student.id);
+      
+      if (!studentRecord) {
+        return res.status(404).json({ success: false, error: "Registro de estudante não encontrado" });
+      }
 
-      // Em produção, buscar do banco de dados
-      // Para demonstração, retornar alguns documentos fictícios
-      const documents = [
-        {
-          id: 1,
-          name: "Comprovante de Matrícula",
-          type: "Certificado",
-          date: new Date(),
-          size: "245 KB"
-        },
-        {
-          id: 2,
-          name: "RG e CPF",
-          type: "Pessoal",
-          date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-          size: "1.2 MB"
-        },
-        {
-          id: 3,
-          name: "Trabalho Final - Design UX",
-          type: "Entrega",
-          date: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000),
-          size: "3.5 MB",
-          course: "Design de Interfaces"
-        },
-        {
-          id: 4,
-          name: "Histórico Escolar",
-          type: "Acadêmico",
-          date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          size: "560 KB"
+      // Agora precisamos buscar as matrículas deste estudante
+      const enrollments = await storage.getEnrollmentsByStudent(studentRecord.id);
+      
+      if (!enrollments || enrollments.length === 0) {
+        return res.json([]);
+      }
+      
+      // Vamos buscar documentos para cada matrícula
+      try {
+        const allDocuments = [];
+        for (const enrollment of enrollments) {
+          const documentsData = await db.select()
+            .from(documents)
+            .where(eq(documents.enrollmentId, enrollment.id));
+          
+          if (documentsData && documentsData.length > 0) {
+            // Formatar documentos para o frontend
+            const formattedDocs = documentsData.map(doc => ({
+              id: doc.id,
+              name: doc.fileName,
+              type: doc.documentType,
+              date: doc.uploadedAt,
+              size: `${Math.round(doc.fileSize / 1024)} KB`,
+              url: doc.fileUrl,
+              status: doc.status
+            }));
+            
+            allDocuments.push(...formattedDocs);
+          }
         }
-      ];
-
-      res.json(documents);
+        
+        res.json(allDocuments);
+      } catch (error) {
+        console.error("Error fetching documents:", error);
+        res.status(500).json({ success: false, error: "Erro ao buscar documentos" });
+      }
     } catch (error) {
       console.error("Error getting student documents:", error);
-      res.status(500).json({ message: "Internal server error" });
+      res.status(500).json({ success: false, error: "Erro ao buscar documentos do aluno" });
     }
   });
 
