@@ -1,9 +1,10 @@
 import React from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
-import { formatDistanceToNow } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import { format, isToday, isYesterday, isThisWeek, isThisYear } from 'date-fns';
+import { pt } from 'date-fns/locale';
 
 interface Conversation {
   userId: number;
@@ -21,116 +22,119 @@ interface ConversationListProps {
   isLoading: boolean;
 }
 
-const ConversationList: React.FC<ConversationListProps> = ({
-  conversations,
-  activeId,
-  onSelectConversation,
-  isLoading
+// Função para obter as iniciais do nome
+const getInitials = (name: string): string => {
+  return name
+    .split(' ')
+    .map(part => part[0])
+    .join('')
+    .toUpperCase()
+    .substring(0, 2);
+};
+
+// Função para traduzir o papel do usuário
+const translateRole = (role: string): string => {
+  const translations: Record<string, string> = {
+    'admin': 'Administrador',
+    'school': 'Escola',
+    'attendant': 'Atendente',
+    'student': 'Estudante'
+  };
+  return translations[role] || role;
+};
+
+// Função para formatar data de forma relativa
+const formatRelativeTime = (dateString: string): string => {
+  const date = new Date(dateString);
+  
+  if (isToday(date)) {
+    return format(date, 'HH:mm');
+  } else if (isYesterday(date)) {
+    return 'Ontem';
+  } else if (isThisWeek(date)) {
+    return format(date, 'EEEE', { locale: pt });
+  } else if (isThisYear(date)) {
+    return format(date, 'd MMM', { locale: pt });
+  } else {
+    return format(date, 'dd/MM/yyyy');
+  }
+};
+
+const ConversationList: React.FC<ConversationListProps> = ({ 
+  conversations, 
+  activeId, 
+  onSelectConversation, 
+  isLoading 
 }) => {
-  // Função para formatar o tempo da última mensagem
-  const formatMessageTime = (timeString: string) => {
-    try {
-      const date = new Date(timeString);
-      return formatDistanceToNow(date, { addSuffix: true, locale: ptBR });
-    } catch (error) {
-      return timeString;
-    }
-  };
-
-  // Função para obter as iniciais do nome
-  const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map(part => part[0])
-      .slice(0, 2)
-      .join('')
-      .toUpperCase();
-  };
-
-  // Função para obter a cor de fundo baseada no papel do usuário
-  const getRoleColor = (role: string) => {
-    switch (role) {
-      case 'admin':
-        return 'bg-red-100 text-red-800';
-      case 'school':
-        return 'bg-blue-100 text-blue-800';
-      case 'attendant':
-        return 'bg-yellow-100 text-yellow-800';
-      case 'student':
-        return 'bg-green-100 text-green-800';
-      default:
-        return 'bg-gray-100 text-gray-800';
-    }
-  };
-
   if (isLoading) {
     return (
       <div className="p-4 space-y-4">
-        {Array(5)
-          .fill(0)
-          .map((_, index) => (
-            <div key={index} className="flex items-start gap-3">
-              <Skeleton className="h-10 w-10 rounded-full" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-28" />
-                <Skeleton className="h-3 w-full" />
-              </div>
-              <Skeleton className="h-3 w-12" />
+        {Array.from({ length: 5 }).map((_, index) => (
+          <div key={index} className="flex items-center gap-3">
+            <Skeleton className="h-10 w-10 rounded-full" />
+            <div className="space-y-2 flex-1">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3 w-full" />
             </div>
-          ))}
+            <Skeleton className="h-3 w-10" />
+          </div>
+        ))}
       </div>
     );
   }
 
   if (conversations.length === 0) {
     return (
-      <div className="p-6 text-center">
-        <p className="text-muted-foreground">Nenhuma conversa encontrada</p>
+      <div className="flex items-center justify-center h-40 text-center px-4">
+        <div className="space-y-2">
+          <p className="text-muted-foreground">Nenhuma conversa ainda</p>
+          <p className="text-xs text-muted-foreground">
+            Selecione um contato na aba de usuários para iniciar uma conversa
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="divide-y">
-      {conversations.map(conversation => (
-        <div
-          key={conversation.userId}
-          className={`flex items-start gap-3 p-3 cursor-pointer hover:bg-muted/50 transition-colors ${
-            activeId === conversation.userId ? 'bg-muted' : ''
-          }`}
-          onClick={() => onSelectConversation(conversation.userId)}
-        >
-          <Avatar>
-            <AvatarImage src={`/api/avatar/${conversation.userId}`} alt={conversation.fullName} />
-            <AvatarFallback>{getInitials(conversation.fullName)}</AvatarFallback>
-          </Avatar>
-          
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2 truncate">
+    <div className="p-2">
+      <div className="space-y-1">
+        {conversations.map(conversation => (
+          <button
+            key={conversation.userId}
+            onClick={() => onSelectConversation(conversation.userId)}
+            className={`w-full flex items-center gap-3 p-2 rounded-md transition-colors text-left
+              ${activeId === conversation.userId ? 'bg-accent' : 'hover:bg-muted'}`}
+          >
+            <Avatar className="h-10 w-10">
+              <AvatarFallback>
+                {getInitials(conversation.fullName)}
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between">
                 <span className="font-medium truncate">{conversation.fullName}</span>
-                <Badge variant="outline" className={`text-xs px-1.5 py-0 ${getRoleColor(conversation.role)}`}>
-                  {conversation.role}
-                </Badge>
+                <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
+                  {formatRelativeTime(conversation.lastMessageTime)}
+                </span>
               </div>
-              <span className="text-xs text-muted-foreground whitespace-nowrap">
-                {formatMessageTime(conversation.lastMessageTime)}
-              </span>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground truncate">
+                  {conversation.lastMessage}
+                </p>
+                {conversation.unreadCount > 0 && (
+                  <Badge 
+                    variant="default" 
+                    className="ml-2 h-5 w-5 rounded-full px-0 flex items-center justify-center"
+                  >
+                    {conversation.unreadCount}
+                  </Badge>
+                )}
+              </div>
             </div>
-            
-            <div className="flex justify-between items-center mt-1">
-              <p className="text-sm text-muted-foreground truncate pr-2">
-                {conversation.lastMessage}
-              </p>
-              {conversation.unreadCount > 0 && (
-                <Badge className="bg-primary text-white text-xs ml-auto" variant="default">
-                  {conversation.unreadCount}
-                </Badge>
-              )}
-            </div>
-          </div>
-        </div>
-      ))}
+          </button>
+        ))}
+      </div>
     </div>
   );
 };

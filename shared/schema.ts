@@ -312,10 +312,6 @@ export const insertMessageSchema = createInsertSchema(messages).omit({
   createdAt: true
 });
 
-// Types for Drizzle ORM
-export type Message = typeof messages.$inferSelect;
-export type InsertMessage = z.infer<typeof insertMessageSchema>;
-
 // Schema for inserting a new metric
 export const insertMetricSchema = createInsertSchema(metrics).omit({
   id: true,
@@ -329,7 +325,7 @@ export const insertDocumentSchema = createInsertSchema(documents).omit({
   updatedAt: true
 });
 
-// Types
+// Types for Drizzle ORM - All types consolidated in one place
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 

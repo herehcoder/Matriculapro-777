@@ -1,9 +1,8 @@
 import React from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
-import { Check, CheckCheck } from 'lucide-react';
+import { format, isToday, isYesterday, isThisWeek, isThisYear } from 'date-fns';
+import { pt } from 'date-fns/locale';
 
 interface Message {
   id: number;
@@ -20,172 +19,145 @@ interface MessageListProps {
   isLoading: boolean;
 }
 
+// Função para obter as iniciais do nome
+const getInitials = (name: string): string => {
+  return name
+    .split(' ')
+    .map(part => part[0])
+    .join('')
+    .toUpperCase()
+    .substring(0, 2);
+};
+
+// Função para formatar data para cabeçalho de grupo
+const formatDateHeader = (dateString: string): string => {
+  const date = new Date(dateString);
+  
+  if (isToday(date)) {
+    return 'Hoje';
+  } else if (isYesterday(date)) {
+    return 'Ontem';
+  } else if (isThisWeek(date)) {
+    return format(date, 'EEEE', { locale: pt });
+  } else if (isThisYear(date)) {
+    return format(date, 'd MMMM', { locale: pt });
+  } else {
+    return format(date, 'dd/MM/yyyy');
+  }
+};
+
+// Função para agrupar mensagens por data
+const groupMessagesByDate = (messages: Message[]): Record<string, Message[]> => {
+  return messages.reduce<Record<string, Message[]>>((groups, message) => {
+    const date = new Date(message.createdAt);
+    const dateKey = format(date, 'yyyy-MM-dd');
+    
+    if (!groups[dateKey]) {
+      groups[dateKey] = [];
+    }
+    
+    groups[dateKey].push(message);
+    return groups;
+  }, {});
+};
+
 const MessageList: React.FC<MessageListProps> = ({ messages, isUserMessage, isLoading }) => {
-  // Função para obter as iniciais do nome
-  const getInitials = (name: string) => {
-    if (!name) return '??';
-    return name
-      .split(' ')
-      .map(part => part[0])
-      .slice(0, 2)
-      .join('')
-      .toUpperCase();
-  };
-
-  // Função para formatar o tempo da mensagem
-  const formatMessageTime = (timeString: string) => {
-    try {
-      const date = new Date(timeString);
-      return format(date, 'HH:mm', { locale: ptBR });
-    } catch (error) {
-      return '';
-    }
-  };
-
-  // Componente para ícone de status da mensagem
-  const MessageStatus = ({ status }: { status: 'sent' | 'delivered' | 'read' }) => {
-    if (status === 'read') {
-      return <CheckCheck className="h-3 w-3 text-blue-500" />;
-    } else if (status === 'delivered') {
-      return <CheckCheck className="h-3 w-3 text-muted-foreground" />;
-    } else {
-      return <Check className="h-3 w-3 text-muted-foreground" />;
-    }
-  };
+  // Agrupar mensagens por data
+  const groupedMessages = groupMessagesByDate(messages);
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
-        {Array(3)
-          .fill(0)
-          .map((_, index) => (
-            <div
-              key={index}
-              className={`flex items-start gap-2 ${
-                index % 2 === 0 ? 'justify-start' : 'justify-end'
-              }`}
-            >
-              {index % 2 === 0 && <Skeleton className="h-8 w-8 rounded-full" />}
-              <div>
-                <Skeleton
-                  className={`h-16 w-48 ${
-                    index % 2 === 0 ? 'rounded-tr-xl rounded-br-xl rounded-bl-xl' : 'rounded-tl-xl rounded-bl-xl rounded-br-xl'
-                  }`}
-                />
-                <Skeleton className="h-3 w-16 mt-1 ml-auto" />
-              </div>
-              {index % 2 !== 0 && <Skeleton className="h-8 w-8 rounded-full" />}
+      <div className="space-y-8">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <div key={index} className="space-y-4">
+            <div className="flex justify-center">
+              <Skeleton className="h-5 w-24 rounded-md" />
             </div>
-          ))}
+            <div className={`flex ${index % 2 === 0 ? 'justify-end' : 'justify-start'}`}>
+              {index % 2 !== 0 && <Skeleton className="h-8 w-8 rounded-full mr-2" />}
+              <div className="space-y-2">
+                <Skeleton className={`h-4 w-40 ${index % 2 === 0 ? 'ml-auto' : ''}`} />
+                <Skeleton className={`h-12 w-60 rounded-xl ${index % 2 === 0 ? 'ml-auto' : ''}`} />
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
 
   if (messages.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <p className="text-center text-muted-foreground">
-          Nenhuma mensagem ainda. Envie uma mensagem para iniciar a conversa.
-        </p>
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <p className="text-muted-foreground mb-2">Nenhuma mensagem ainda</p>
+          <p className="text-xs text-muted-foreground">
+            Envie uma mensagem para iniciar a conversa
+          </p>
+        </div>
       </div>
     );
   }
 
-  // Agrupar mensagens por data
-  const groupedMessages: Record<string, Message[]> = {};
-  
-  messages.forEach(message => {
-    const date = new Date(message.createdAt);
-    const dateStr = format(date, 'dd/MM/yyyy');
-    
-    if (!groupedMessages[dateStr]) {
-      groupedMessages[dateStr] = [];
-    }
-    
-    groupedMessages[dateStr].push(message);
-  });
-
-  // Obter datas ordenadas (mais antigas primeiro)
-  const sortedDates = Object.keys(groupedMessages).sort((a, b) => {
-    const dateA = new Date(a.split('/').reverse().join('-'));
-    const dateB = new Date(b.split('/').reverse().join('-'));
-    return dateA.getTime() - dateB.getTime();
-  });
-
   return (
     <div className="space-y-6">
-      {sortedDates.map(dateStr => (
+      {Object.keys(groupedMessages).map(dateStr => (
         <div key={dateStr} className="space-y-4">
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-muted" />
-            </div>
-            <div className="relative flex justify-center">
-              <span className="bg-background px-2 text-xs text-muted-foreground">
-                {dateStr}
-              </span>
+          <div className="flex justify-center">
+            <div className="bg-muted px-3 py-1 rounded-md text-xs font-medium text-muted-foreground">
+              {formatDateHeader(dateStr)}
             </div>
           </div>
-
-          {groupedMessages[dateStr].map(message => {
-            const isUser = isUserMessage(message.senderId);
-            
-            return (
-              <div
-                key={message.id}
-                className={`flex items-start gap-2 ${
-                  isUser ? 'flex-row-reverse' : 'flex-row'
-                }`}
-              >
-                {!isUser && (
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage
-                      src={`/api/avatar/${message.senderId}`}
-                      alt={message.senderName || 'User'}
-                    />
-                    <AvatarFallback>
-                      {getInitials(message.senderName || '')}
-                    </AvatarFallback>
-                  </Avatar>
-                )}
-
+          
+          <div className="space-y-4">
+            {groupedMessages[dateStr].map(message => {
+              const isUser = isUserMessage(message.senderId);
+              
+              return (
                 <div
-                  className={`flex flex-col ${
-                    isUser ? 'items-end' : 'items-start'
+                  key={message.id}
+                  className={`flex items-start gap-2 ${
+                    isUser ? 'flex-row-reverse' : 'flex-row'
                   }`}
                 >
-                  <div
-                    className={`px-3 py-2 rounded-lg max-w-[85%] break-words ${
-                      isUser
-                        ? 'bg-primary text-primary-foreground rounded-tr-none'
-                        : 'bg-muted rounded-tl-none'
-                    }`}
-                  >
-                    {message.content}
-                  </div>
+                  {!isUser && (
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage
+                        src={`/api/avatar/${message.senderId}`}
+                        alt={message.senderName || 'User'}
+                      />
+                      <AvatarFallback>
+                        {getInitials(message.senderName || '')}
+                      </AvatarFallback>
+                    </Avatar>
+                  )}
                   
-                  <div className="flex items-center mt-1 text-xs text-muted-foreground">
-                    <span>{formatMessageTime(message.createdAt)}</span>
-                    {isUser && (
-                      <span className="ml-1">
-                        <MessageStatus status={message.status} />
+                  <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+                    <div
+                      className={`px-3 py-2 rounded-xl ${
+                        isUser 
+                          ? 'bg-primary text-primary-foreground rounded-tr-sm' 
+                          : 'bg-muted rounded-tl-sm'
+                      }`}
+                    >
+                      {message.content}
+                    </div>
+                    
+                    <div className="flex items-center mt-1 text-xs text-muted-foreground">
+                      <span>
+                        {format(new Date(message.createdAt), 'HH:mm')}
                       </span>
-                    )}
+                      {isUser && message.status && (
+                        <span className="ml-1">
+                          {message.status === 'sent' ? '✓' : message.status === 'delivered' ? '✓✓' : '✓✓'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-
-                {isUser && (
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage
-                      src="/api/avatar/me"
-                      alt="You"
-                    />
-                    <AvatarFallback>ME</AvatarFallback>
-                  </Avatar>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       ))}
     </div>
