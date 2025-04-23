@@ -1723,6 +1723,38 @@ DatabaseStorage.prototype.updateUserSettings = async function(userId: number, se
   return updatedSettings || undefined;
 };
 
+// Methods for dashboard metrics
+DatabaseStorage.prototype.countSchools = async function(): Promise<number> {
+  const result = await db.select({ count: sql`count(*)` }).from(schools);
+  return Number(result[0].count);
+};
+
+DatabaseStorage.prototype.countStudents = async function(): Promise<number> {
+  const result = await db.select({ count: sql`count(*)` }).from(students);
+  return Number(result[0].count);
+};
+
+DatabaseStorage.prototype.countLeads = async function(): Promise<number> {
+  const result = await db.select({ count: sql`count(*)` }).from(leads);
+  return Number(result[0].count);
+};
+
+DatabaseStorage.prototype.countUsersByRole = async function(): Promise<Record<string, number>> {
+  const result = await db
+    .select({
+      role: users.role,
+      count: sql`count(*)`,
+    })
+    .from(users)
+    .groupBy(users.role);
+  
+  const roleCount: Record<string, number> = {};
+  for (const row of result) {
+    roleCount[row.role] = Number(row.count);
+  }
+  return roleCount;
+};
+
 export const storage = new DatabaseStorage();
 
 // Add notification methods

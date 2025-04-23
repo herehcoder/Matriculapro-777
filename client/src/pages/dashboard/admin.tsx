@@ -214,7 +214,7 @@ export default function AdminDashboard() {
     queryKey: ["/api/schools"],
     queryFn: async () => {
       const res = await apiRequest("GET", "/api/schools");
-      return await res.json();
+      return res;
     },
   });
 
@@ -223,16 +223,7 @@ export default function AdminDashboard() {
     queryKey: ["/api/metrics/platform"],
     queryFn: async () => {
       const res = await apiRequest("GET", "/api/metrics/platform");
-      return await res.json();
-    },
-  });
-
-  // Buscar dados de métricas do dashboard
-  const { data: dashboardData, isLoading: isLoadingDashboard } = useQuery({
-    queryKey: ["/api/metrics/dashboard"],
-    queryFn: async () => {
-      const res = await apiRequest("GET", "/api/metrics/dashboard");
-      return await res.json();
+      return res;
     },
   });
 
@@ -266,6 +257,8 @@ export default function AdminDashboard() {
       enrollmentsChange: metricsData?.enrollmentsChange || 0,
       averageLeadConversion: metricsData?.averageLeadConversion || 0,
       leadConversionChange: metricsData?.leadConversionChange || 0,
+      totalStudents: metricsData?.totalStudents || 0,
+      totalLeads: metricsData?.totalLeads || 0,
     },
     enrollmentStatus: metricsData?.enrollmentStatus || {
       started: 0,
@@ -277,7 +270,7 @@ export default function AdminDashboard() {
     },
   };
 
-  if (isLoadingSchools || isLoadingMetrics || isLoadingDashboard) {
+  if (isLoadingSchools || isLoadingMetrics) {
     return (
       <div className="container mx-auto py-10">
         <div className="flex justify-center items-center h-64">
@@ -316,7 +309,7 @@ export default function AdminDashboard() {
 
         {/* Visão Geral */}
         <TabsContent value="overview" className="space-y-6">
-          <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <MetricCard
               title="Total de Escolas"
               value={platformData.schools.total}
@@ -328,6 +321,18 @@ export default function AdminDashboard() {
               value={platformData.users.total}
               description="usuários registrados"
               icon={<Users className="h-4 w-4 text-primary" />}
+            />
+            <MetricCard
+              title="Total de Estudantes"
+              value={platformData.metrics.totalStudents}
+              description="estudantes cadastrados"
+              icon={<GraduationCap className="h-4 w-4 text-primary" />}
+            />
+            <MetricCard
+              title="Total de Leads"
+              value={platformData.metrics.totalLeads}
+              description="leads cadastrados"
+              icon={<Users2 className="h-4 w-4 text-primary" />}
             />
             <MetricCard
               title="Receita Total"
