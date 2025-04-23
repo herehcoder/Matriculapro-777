@@ -1,15 +1,22 @@
 import {
   users, schools, attendants, students, leads, courses, questions, answers,
-  chatHistory, enrollments, whatsappMessages, metrics, notifications, messages, passwordResetTokens, userSettings,
+  chatHistory, enrollments, metrics, notifications, messages, passwordResetTokens, userSettings,
   type User, type InsertUser, type School, type InsertSchool,
   type Attendant, type Student, type InsertStudent, type Lead, type InsertLead,
   type Course, type InsertCourse, type Question, type InsertQuestion,
   type Answer, type InsertAnswer, type ChatMessage, type InsertChatMessage,
-  type Enrollment, type InsertEnrollment, type WhatsappMessage, type InsertWhatsappMessage,
-  type Metric, type InsertMetric, type Notification, type InsertNotification,
-  type Message, type InsertMessage, type PasswordResetToken, type InsertPasswordResetToken,
-  type UserSettings, type InsertUserSettings
+  type Enrollment, type InsertEnrollment, type Metric, type InsertMetric, 
+  type Notification, type InsertNotification, type Message, type InsertMessage, 
+  type PasswordResetToken, type InsertPasswordResetToken, type UserSettings, type InsertUserSettings
 } from "@shared/schema";
+
+// Importando os novos schemas do WhatsApp
+import {
+  whatsappInstances, whatsappContacts, whatsappMessages,
+  type WhatsappInstance, type InsertWhatsappInstance,
+  type WhatsappContact, type InsertWhatsappContact,
+  type WhatsappMessage, type InsertWhatsappMessage
+} from "../shared/whatsapp.schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql, or, lt } from "drizzle-orm";
 
@@ -102,10 +109,32 @@ export interface IStorage {
   updateEnrollment(id: number, enrollment: Partial<Enrollment>): Promise<Enrollment | undefined>;
   listEnrollments(limit?: number, offset?: number): Promise<Enrollment[]>;
   
-  // WhatsApp messages management
+  // WhatsApp management - Evolution API
+  // Instâncias
+  getWhatsappInstance(id: number): Promise<WhatsappInstance | undefined>;
+  getWhatsappInstanceBySchool(schoolId: number): Promise<WhatsappInstance | undefined>;
+  listWhatsappInstances(activeOnly?: boolean): Promise<WhatsappInstance[]>;
+  createWhatsappInstance(data: InsertWhatsappInstance): Promise<WhatsappInstance>;
+  updateWhatsappInstance(id: number, data: Partial<InsertWhatsappInstance>): Promise<WhatsappInstance>;
+  updateWhatsappInstanceStatus(id: number, status: string, qrcode?: string): Promise<WhatsappInstance>;
+  deleteWhatsappInstance(id: number): Promise<boolean>;
+  
+  // Contatos
+  getWhatsappContact(id: number): Promise<WhatsappContact | undefined>;
+  getWhatsappContactByPhone(instanceId: number, phone: string): Promise<WhatsappContact | undefined>;
+  listWhatsappContacts(instanceId: number): Promise<WhatsappContact[]>;
+  createWhatsappContact(data: InsertWhatsappContact): Promise<WhatsappContact>;
+  updateWhatsappContact(id: number, data: Partial<InsertWhatsappContact>): Promise<WhatsappContact>;
+  upsertWhatsappContact(instanceId: number, phone: string, data: Partial<InsertWhatsappContact>): Promise<WhatsappContact>;
+  
+  // Mensagens
   getWhatsappMessage(id: number): Promise<WhatsappMessage | undefined>;
-  getWhatsappMessagesBySchool(schoolId: number): Promise<WhatsappMessage[]>;
-  createWhatsappMessage(message: InsertWhatsappMessage): Promise<WhatsappMessage>;
+  getWhatsappMessageByExternalId(externalId: string): Promise<WhatsappMessage | undefined>;
+  listWhatsappMessagesByContact(contactId: number, limit?: number, offset?: number): Promise<WhatsappMessage[]>;
+  createWhatsappMessage(data: InsertWhatsappMessage): Promise<WhatsappMessage>;
+  updateWhatsappMessageStatus(id: number, status: string, statusTimestamp?: Date): Promise<WhatsappMessage>;
+  updateWhatsappMessageStatusByExternalId(externalId: string, status: string, statusTimestamp?: Date): Promise<WhatsappMessage | null>;
+  getWhatsappRecentConversations(instanceId: number, limit?: number): Promise<any[]>;
   
   // Metrics management
   getMetric(id: number): Promise<Metric | undefined>;
@@ -1821,3 +1850,7 @@ export const storage = new DatabaseStorage();
 
 // Add notification methods
 addNotificationMethodsToDatabaseStorage(storage);
+
+// Importar métodos de WhatsApp
+import { addWhatsappMethodsToStorage } from './storage.whatsapp';
+addWhatsappMethodsToStorage(storage);
