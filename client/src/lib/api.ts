@@ -2,11 +2,16 @@ import { apiRequest } from "./queryClient";
 
 // Authentication
 export const loginUser = (email: string, password: string, role: string) => {
-  return apiRequest("POST", "/api/auth/login", { email, password, role });
+  return fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, role }),
+    credentials: "include"
+  });
 };
 
 export const logoutUser = () => {
-  return apiRequest("POST", "/api/auth/logout");
+  return apiRequest("POST", "/api/auth/logout", undefined);
 };
 
 export const getCurrentUser = () => {
