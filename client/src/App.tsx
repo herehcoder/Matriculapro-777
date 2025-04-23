@@ -22,6 +22,9 @@ import NewEnrollmentPage from "@/pages/enrollments/new";
 import FormQuestionsPage from "@/pages/form-questions/index";
 import CoursesPage from "@/pages/courses/index";
 import NewCoursePage from "@/pages/courses/new";
+import ExploreCoursesPage from "@/pages/courses/explore";
+import MyEnrollmentsPage from "@/pages/my-enrollments/index";
+import SupportPage from "@/pages/support/index";
 import WhatsAppPage from "@/pages/whatsapp/index";
 import AnalyticsPage from "@/pages/analytics/index";
 import AccountPage from "@/pages/account";
@@ -87,6 +90,7 @@ function Router() {
         <Route path="/dashboard/student" component={StudentDashboard} />
         <Route path="/enrollment/:schoolId/:enrollmentId?" component={EnrollmentPage} />
         <Route path="/enrollment/success/:id" component={EnrollmentSuccessPage} />
+        <Route path="/enrollment/continue/:enrollmentId" component={EnrollmentPage} />
         <Route path="/enrollments" component={EnrollmentsPage} />
         <Route path="/enrollments/new" component={NewEnrollmentPage} />
         <Route path="/enrollments/:enrollmentId" component={EnrollmentViewPage} />
@@ -99,6 +103,9 @@ function Router() {
         <Route path="/onboarding" component={OnboardingPage} />
         <Route path="/courses" component={CoursesPage} />
         <Route path="/courses/new" component={NewCoursePage} />
+        <Route path="/courses/explore" component={ExploreCoursesPage} />
+        <Route path="/my-enrollments" component={MyEnrollmentsPage} />
+        <Route path="/support" component={SupportPage} />
         <Route path="/whatsapp" component={WhatsAppPage} />
         <Route path="/analytics" component={AnalyticsPage} />
         <Route path="/account" component={AccountPage} />
