@@ -1,118 +1,85 @@
 import React, { useState } from 'react';
-import { 
-  Form, 
-  FormControl, 
-  FormDescription, 
-  FormField, 
-  FormItem, 
-  FormLabel, 
-  FormMessage 
-} from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
-import * as z from 'zod';
-import { toast } from '@/hooks/use-toast';
-import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
 import { CalendarIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { cn } from '@/lib/utils';
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+
+const personalInfoSchema = z.object({
+  fullName: z.string().min(3, { message: 'Nome completo é obrigatório' }),
+  email: z.string().email({ message: 'Email inválido' }),
+  phone: z.string().min(10, { message: 'Telefone deve ter pelo menos 10 dígitos' }),
+  birthDate: z.date({ required_error: 'Data de nascimento é obrigatória' }),
+  gender: z.string({ required_error: 'Gênero é obrigatório' }),
+  address: z.string().min(5, { message: 'Endereço é obrigatório' }),
+  city: z.string().min(2, { message: 'Cidade é obrigatória' }),
+  state: z.string().min(2, { message: 'Estado é obrigatório' }),
+  zipCode: z.string().min(5, { message: 'CEP é obrigatório' }),
+  courseId: z.number({ required_error: 'Curso é obrigatório' }),
+});
+
+type PersonalInfoFormValues = z.infer<typeof personalInfoSchema>;
 
 interface PersonalInfoStepProps {
   formData: any;
   updateFormData: (data: any) => void;
   courses: any[];
-  questions: any[];
+  questions?: any[];
 }
 
-const PersonalInfoStep: React.FC<PersonalInfoStepProps> = ({ 
-  formData, 
-  updateFormData, 
+const PersonalInfoStep: React.FC<PersonalInfoStepProps> = ({
+  formData,
+  updateFormData,
   courses,
-  questions
+  questions = [],
 }) => {
-  const [selectedGender, setSelectedGender] = useState<string>(formData.gender || '');
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(
-    formData.birthDate ? new Date(formData.birthDate) : undefined
-  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const formSchema = z.object({
-    fullName: z.string()
-      .min(3, { message: 'Nome completo deve ter no mínimo 3 caracteres' })
-      .max(100, { message: 'Nome completo deve ter no máximo 100 caracteres' }),
-    email: z.string()
-      .email({ message: 'E-mail inválido' }),
-    phone: z.string()
-      .min(10, { message: 'Telefone deve ter no mínimo 10 dígitos' })
-      .max(15, { message: 'Telefone deve ter no máximo 15 dígitos' }),
-    birthDate: z.string()
-      .min(1, { message: 'Data de nascimento é obrigatória' }),
-    gender: z.string()
-      .min(1, { message: 'Gênero é obrigatório' }),
-    address: z.string()
-      .min(5, { message: 'Endereço deve ter no mínimo 5 caracteres' }),
-    city: z.string()
-      .min(2, { message: 'Cidade deve ter no mínimo 2 caracteres' }),
-    state: z.string()
-      .min(2, { message: 'Estado deve ter no mínimo 2 caracteres' }),
-    zipCode: z.string()
-      .min(5, { message: 'CEP deve ter no mínimo 5 caracteres' }),
-    courseId: z.any(),
+  // Parse string date to Date object if exists in formData
+  const defaultValues: Partial<PersonalInfoFormValues> = {
+    ...formData,
+    birthDate: formData.birthDate ? new Date(formData.birthDate) : undefined,
+    courseId: formData.courseId ? Number(formData.courseId) : undefined,
+  };
+
+  const form = useForm<PersonalInfoFormValues>({
+    resolver: zodResolver(personalInfoSchema),
+    defaultValues,
   });
 
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      fullName: formData.fullName || '',
-      email: formData.email || '',
-      phone: formData.phone || '',
-      birthDate: formData.birthDate || '',
-      gender: formData.gender || '',
-      address: formData.address || '',
-      city: formData.city || '',
-      state: formData.state || '',
-      zipCode: formData.zipCode || '',
-      courseId: formData.courseId || null,
-    },
-  });
-
-  const onSubmit = (data: z.infer<typeof formSchema>) => {
-    updateFormData(data);
-    toast({
-      title: 'Dados pessoais salvos',
-      description: 'Seus dados pessoais foram salvos com sucesso!',
-    });
-  };
-
-  const handleDateChange = (date: Date | undefined) => {
-    setSelectedDate(date);
-    if (date) {
-      form.setValue('birthDate', date.toISOString().split('T')[0], { shouldValidate: true });
-    }
-  };
-
-  const handleGenderChange = (value: string) => {
-    setSelectedGender(value);
-    form.setValue('gender', value, { shouldValidate: true });
-  };
+  function onSubmit(data: PersonalInfoFormValues) {
+    setIsSubmitting(true);
+    
+    // Convert date to ISO string for storage/API transmission
+    const formattedData = {
+      ...data,
+      birthDate: data.birthDate.toISOString(),
+    };
+    
+    updateFormData(formattedData);
+    setIsSubmitting(false);
+  }
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)}>
-        <div className="space-y-8">
-          <div>
-            <h3 className="text-lg font-medium">Informações Pessoais</h3>
-            <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-              Preencha seus dados pessoais para dar início ao processo de matrícula.
-            </p>
-          </div>
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-semibold tracking-tight">Informações Pessoais</h2>
+        <p className="text-sm text-muted-foreground">
+          Preencha seus dados pessoais para iniciar o processo de matrícula.
+        </p>
+      </div>
 
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <FormField
               control={form.control}
@@ -121,7 +88,7 @@ const PersonalInfoStep: React.FC<PersonalInfoStepProps> = ({
                 <FormItem>
                   <FormLabel>Nome Completo</FormLabel>
                   <FormControl>
-                    <Input placeholder="João da Silva" {...field} />
+                    <Input placeholder="Digite seu nome completo" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -133,9 +100,9 @@ const PersonalInfoStep: React.FC<PersonalInfoStepProps> = ({
               name="email"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>E-mail</FormLabel>
+                  <FormLabel>Email</FormLabel>
                   <FormControl>
-                    <Input placeholder="joao@exemplo.com" {...field} />
+                    <Input placeholder="seu.email@exemplo.com" type="email" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -149,7 +116,7 @@ const PersonalInfoStep: React.FC<PersonalInfoStepProps> = ({
                 <FormItem>
                   <FormLabel>Telefone</FormLabel>
                   <FormControl>
-                    <Input placeholder="(11) 99999-9999" {...field} />
+                    <Input placeholder="(11) 98765-4321" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -168,26 +135,26 @@ const PersonalInfoStep: React.FC<PersonalInfoStepProps> = ({
                         <Button
                           variant="outline"
                           className={cn(
-                            "w-full text-left font-normal flex justify-between",
-                            !field.value && "text-neutral-500"
+                            "pl-3 text-left font-normal",
+                            !field.value && "text-muted-foreground"
                           )}
                         >
                           {field.value ? (
-                            format(new Date(field.value), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })
+                            format(field.value, "dd/MM/yyyy", { locale: ptBR })
                           ) : (
                             <span>Selecione uma data</span>
                           )}
-                          <CalendarIcon className="h-4 w-4 opacity-70" />
+                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                         </Button>
                       </FormControl>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
                       <Calendar
                         mode="single"
-                        selected={selectedDate}
-                        onSelect={handleDateChange}
-                        disabled={(date) => date > new Date() || date < new Date("1900-01-01")}
+                        selected={field.value}
+                        onSelect={field.onChange}
                         initialFocus
+                        locale={ptBR}
                       />
                     </PopoverContent>
                   </Popover>
@@ -204,26 +171,25 @@ const PersonalInfoStep: React.FC<PersonalInfoStepProps> = ({
                   <FormLabel>Gênero</FormLabel>
                   <FormControl>
                     <RadioGroup
-                      onValueChange={handleGenderChange}
+                      onValueChange={field.onChange}
                       defaultValue={field.value}
-                      className="flex space-x-4"
-                      value={selectedGender}
+                      className="flex flex-col space-y-1"
                     >
-                      <FormItem className="flex items-center space-x-2 space-y-0">
+                      <FormItem className="flex items-center space-x-3 space-y-0">
                         <FormControl>
-                          <RadioGroupItem value="male" />
+                          <RadioGroupItem value="masculino" />
                         </FormControl>
                         <FormLabel className="font-normal">Masculino</FormLabel>
                       </FormItem>
-                      <FormItem className="flex items-center space-x-2 space-y-0">
+                      <FormItem className="flex items-center space-x-3 space-y-0">
                         <FormControl>
-                          <RadioGroupItem value="female" />
+                          <RadioGroupItem value="feminino" />
                         </FormControl>
                         <FormLabel className="font-normal">Feminino</FormLabel>
                       </FormItem>
-                      <FormItem className="flex items-center space-x-2 space-y-0">
+                      <FormItem className="flex items-center space-x-3 space-y-0">
                         <FormControl>
-                          <RadioGroupItem value="other" />
+                          <RadioGroupItem value="outro" />
                         </FormControl>
                         <FormLabel className="font-normal">Outro</FormLabel>
                       </FormItem>
@@ -236,56 +202,10 @@ const PersonalInfoStep: React.FC<PersonalInfoStepProps> = ({
 
             <FormField
               control={form.control}
-              name="courseId"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Curso de Interesse</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    defaultValue={field.value?.toString()}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecione um curso" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {courses && courses.length > 0 ? (
-                        courses.map((option, index) => (
-                          <SelectItem key={option.id} value={option.id.toString()}>
-                            {option.name}
-                          </SelectItem>
-                        ))
-                      ) : (
-                        <SelectItem value="none" disabled>
-                          Nenhum curso disponível
-                        </SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>
-                    Selecione o curso para o qual deseja se matricular.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
-
-          <div>
-            <h3 className="text-lg font-medium">Endereço</h3>
-            <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-              Informe seu endereço completo para fins de registro.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <FormField
-              control={form.control}
               name="address"
               render={({ field }) => (
-                <FormItem className="col-span-full">
-                  <FormLabel>Endereço Completo</FormLabel>
+                <FormItem>
+                  <FormLabel>Endereço</FormLabel>
                   <FormControl>
                     <Input placeholder="Rua, número, complemento" {...field} />
                   </FormControl>
@@ -301,7 +221,7 @@ const PersonalInfoStep: React.FC<PersonalInfoStepProps> = ({
                 <FormItem>
                   <FormLabel>Cidade</FormLabel>
                   <FormControl>
-                    <Input placeholder="São Paulo" {...field} />
+                    <Input placeholder="Sua cidade" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -314,9 +234,45 @@ const PersonalInfoStep: React.FC<PersonalInfoStepProps> = ({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Estado</FormLabel>
-                  <FormControl>
-                    <Input placeholder="SP" {...field} />
-                  </FormControl>
+                  <Select 
+                    onValueChange={field.onChange} 
+                    defaultValue={field.value}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione seu estado" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="AC">Acre</SelectItem>
+                      <SelectItem value="AL">Alagoas</SelectItem>
+                      <SelectItem value="AP">Amapá</SelectItem>
+                      <SelectItem value="AM">Amazonas</SelectItem>
+                      <SelectItem value="BA">Bahia</SelectItem>
+                      <SelectItem value="CE">Ceará</SelectItem>
+                      <SelectItem value="DF">Distrito Federal</SelectItem>
+                      <SelectItem value="ES">Espírito Santo</SelectItem>
+                      <SelectItem value="GO">Goiás</SelectItem>
+                      <SelectItem value="MA">Maranhão</SelectItem>
+                      <SelectItem value="MT">Mato Grosso</SelectItem>
+                      <SelectItem value="MS">Mato Grosso do Sul</SelectItem>
+                      <SelectItem value="MG">Minas Gerais</SelectItem>
+                      <SelectItem value="PA">Pará</SelectItem>
+                      <SelectItem value="PB">Paraíba</SelectItem>
+                      <SelectItem value="PR">Paraná</SelectItem>
+                      <SelectItem value="PE">Pernambuco</SelectItem>
+                      <SelectItem value="PI">Piauí</SelectItem>
+                      <SelectItem value="RJ">Rio de Janeiro</SelectItem>
+                      <SelectItem value="RN">Rio Grande do Norte</SelectItem>
+                      <SelectItem value="RS">Rio Grande do Sul</SelectItem>
+                      <SelectItem value="RO">Rondônia</SelectItem>
+                      <SelectItem value="RR">Roraima</SelectItem>
+                      <SelectItem value="SC">Santa Catarina</SelectItem>
+                      <SelectItem value="SP">São Paulo</SelectItem>
+                      <SelectItem value="SE">Sergipe</SelectItem>
+                      <SelectItem value="TO">Tocantins</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <FormMessage />
                 </FormItem>
               )}
@@ -329,58 +285,65 @@ const PersonalInfoStep: React.FC<PersonalInfoStepProps> = ({
                 <FormItem>
                   <FormLabel>CEP</FormLabel>
                   <FormControl>
-                    <Input placeholder="01310-000" {...field} />
+                    <Input placeholder="12345-678" {...field} />
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="courseId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Curso de Interesse</FormLabel>
+                  <Select 
+                    onValueChange={(value) => field.onChange(Number(value))} 
+                    defaultValue={field.value?.toString()}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione um curso" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {courses.map((course) => (
+                        <SelectItem key={course.id} value={course.id.toString()}>
+                          {course.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <FormMessage />
                 </FormItem>
               )}
             />
           </div>
 
+          {/* Render custom questions if any */}
           {questions && questions.length > 0 && (
-            <>
-              <div>
-                <h3 className="text-lg font-medium">Perguntas Adicionais</h3>
-                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-                  Por favor, responda às perguntas abaixo.
-                </p>
+            <div className="border p-4 rounded-md mt-6">
+              <h3 className="text-lg font-medium mb-4">Informações Adicionais</h3>
+              <div className="space-y-4">
+                {questions.map((question) => (
+                  <div key={question.id} className="space-y-2">
+                    <label className="text-sm font-medium">{question.text}</label>
+                    <Input type="text" placeholder="Sua resposta" />
+                  </div>
+                ))}
               </div>
-
-              <Card className="border-dashed">
-                <CardContent className="p-6 space-y-4">
-                  {questions.map((question, index) => (
-                    <div key={question.id || index} className="space-y-2">
-                      <h4 className="font-medium">{question.text}</h4>
-                      {question.type === 'text' && (
-                        <Input placeholder="Sua resposta" />
-                      )}
-                      {question.type === 'select' && (
-                        <Select>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione uma opção" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {question.options && question.options.map((option: any, index: any) => (
-                              <SelectItem key={index} value={option}>
-                                {option}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            </>
+            </div>
           )}
 
           <div className="flex justify-end">
-            <Button type="submit">Salvar Dados Pessoais</Button>
+            <Button type="submit" disabled={isSubmitting}>
+              Salvar Informações
+            </Button>
           </div>
-        </div>
-      </form>
-    </Form>
+        </form>
+      </Form>
+    </div>
   );
 };
 

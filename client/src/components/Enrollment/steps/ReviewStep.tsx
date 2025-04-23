@@ -1,17 +1,24 @@
 import React from 'react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Check, Download, FileText, IdCard, Image, User, MapPin, Phone, Mail, Calendar, GraduationCap } from 'lucide-react';
-import { Separator } from '@/components/ui/separator';
-import { 
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { CheckCircle2, FileIcon, CreditCard, Edit } from 'lucide-react';
 
 interface ReviewStepProps {
   formData: {
@@ -40,311 +47,261 @@ interface ReviewStepProps {
 const ReviewStep: React.FC<ReviewStepProps> = ({ formData, courses }) => {
   const { personalInfo, documents } = formData;
   
-  const selectedCourse = courses?.find(
-    course => course.id.toString() === personalInfo?.courseId?.toString()
+  // Find the selected course
+  const selectedCourse = courses.find(
+    (course) => course.id === Number(personalInfo.courseId)
   );
 
-  const formatGender = (gender: string) => {
-    if (gender === 'male') return 'Masculino';
-    if (gender === 'female') return 'Feminino';
-    if (gender === 'other') return 'Outro';
-    return gender;
-  };
-
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '-';
+  const formatDate = (dateString: string) => {
     try {
-      return format(new Date(dateStr), "dd 'de' MMMM 'de' yyyy", { locale: ptBR });
+      return format(new Date(dateString), 'dd/MM/yyyy', { locale: ptBR });
     } catch (error) {
-      return dateStr;
+      return dateString || 'Data não informada';
     }
   };
 
-  const DocumentPreview = ({ document, icon }: { document: any, icon: React.ReactNode }) => {
-    if (!document) return null;
-    
-    return (
-      <Card className="border border-neutral-200 dark:border-neutral-800">
-        <CardContent className="p-4 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="h-10 w-10 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center text-primary-600 dark:text-primary-300">
-              {icon}
-            </div>
-            <div>
-              <p className="font-medium truncate max-w-[200px]">{document.fileName}</p>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                {(document.fileSize / 1024).toFixed(1)} KB
-              </p>
-            </div>
-          </div>
-          {document.fileUrl && (
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <FileText className="h-4 w-4 mr-2" />
-                  Visualizar
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-4xl">
-                <DialogHeader>
-                  <DialogTitle>{document.fileName}</DialogTitle>
-                </DialogHeader>
-                <div className="mt-4 relative">
-                  {document.fileType.startsWith('image/') ? (
-                    <img 
-                      src={document.fileUrl} 
-                      alt={document.fileName} 
-                      className="max-w-full max-h-[70vh] mx-auto object-contain rounded-md"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center p-10 space-y-4 border-2 border-dashed rounded-md">
-                      <FileText className="h-16 w-16 text-neutral-400" />
-                      <p className="text-neutral-500">Visualização não disponível</p>
-                      <a 
-                        href={document.fileUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background bg-primary text-primary-foreground hover:bg-primary/90 h-10 py-2 px-4"
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Baixar Documento
-                      </a>
-                    </div>
-                  )}
-                </div>
-              </DialogContent>
-            </Dialog>
-          )}
-        </CardContent>
-      </Card>
-    );
+  const getGenderLabel = (gender: string) => {
+    const genders: Record<string, string> = {
+      masculino: 'Masculino',
+      feminino: 'Feminino',
+      outro: 'Outro',
+    };
+    return genders[gender] || gender;
   };
 
+  const getDocumentName = (docType: string): string => {
+    const docNames: Record<string, string> = {
+      identityDocument: 'Documento de Identidade',
+      proofOfAddress: 'Comprovante de Residência',
+      photo: 'Foto',
+      schoolRecords: 'Histórico Escolar',
+    };
+    return docNames[docType] || docType;
+  };
+
+  const checkDocumentStatus = (doc: any): boolean => {
+    return !!doc && !!doc.url;
+  };
+
+  const allDocumentsUploaded = Object.values(documents).every(checkDocumentStatus);
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-medium">Revisão da Matrícula</h3>
-        <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-          Revise todas as informações antes de finalizar sua matrícula.
+        <h2 className="text-2xl font-semibold tracking-tight">Revisar Informações</h2>
+        <p className="text-sm text-muted-foreground">
+          Verifique se todos os dados estão corretos antes de finalizar sua matrícula.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="space-y-6">
-          <div>
-            <h4 className="text-base font-medium flex items-center">
-              <User className="h-5 w-5 mr-2 text-primary" />
-              Informações Pessoais
-            </h4>
-            <Separator className="my-3" />
-
-            <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <dt className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Nome Completo</dt>
-                <dd className="mt-1 text-sm">{personalInfo.fullName || '-'}</dd>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg flex items-center">
+              <span className="mr-2">Informações Pessoais</span>
+              <Button variant="ghost" size="icon" className="h-6 w-6">
+                <Edit className="h-4 w-4" />
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <dt className="font-medium text-neutral-500">Nome:</dt>
+                <dd>{personalInfo.fullName}</dd>
               </div>
-              <div>
-                <dt className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Email</dt>
-                <dd className="mt-1 text-sm flex items-center">
-                  <Mail className="h-3.5 w-3.5 mr-1 text-neutral-400" />
-                  {personalInfo.email || '-'}
-                </dd>
+              <div className="flex justify-between">
+                <dt className="font-medium text-neutral-500">Email:</dt>
+                <dd>{personalInfo.email}</dd>
               </div>
-              <div>
-                <dt className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Telefone</dt>
-                <dd className="mt-1 text-sm flex items-center">
-                  <Phone className="h-3.5 w-3.5 mr-1 text-neutral-400" />
-                  {personalInfo.phone || '-'}
-                </dd>
+              <div className="flex justify-between">
+                <dt className="font-medium text-neutral-500">Telefone:</dt>
+                <dd>{personalInfo.phone}</dd>
               </div>
-              <div>
-                <dt className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Data de Nascimento</dt>
-                <dd className="mt-1 text-sm flex items-center">
-                  <Calendar className="h-3.5 w-3.5 mr-1 text-neutral-400" />
-                  {formatDate(personalInfo.birthDate)}
-                </dd>
+              <div className="flex justify-between">
+                <dt className="font-medium text-neutral-500">Data de Nascimento:</dt>
+                <dd>{formatDate(personalInfo.birthDate)}</dd>
               </div>
-              <div>
-                <dt className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Gênero</dt>
-                <dd className="mt-1 text-sm">{formatGender(personalInfo.gender) || '-'}</dd>
+              <div className="flex justify-between">
+                <dt className="font-medium text-neutral-500">Gênero:</dt>
+                <dd>{getGenderLabel(personalInfo.gender)}</dd>
               </div>
             </dl>
-          </div>
+          </CardContent>
+        </Card>
 
-          <div>
-            <h4 className="text-base font-medium flex items-center">
-              <MapPin className="h-5 w-5 mr-2 text-primary" />
-              Endereço
-            </h4>
-            <Separator className="my-3" />
-
-            <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <dt className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Endereço Completo</dt>
-                <dd className="mt-1 text-sm">{personalInfo.address || '-'}</dd>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg flex items-center">
+              <span className="mr-2">Endereço</span>
+              <Button variant="ghost" size="icon" className="h-6 w-6">
+                <Edit className="h-4 w-4" />
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <dt className="font-medium text-neutral-500">Endereço:</dt>
+                <dd>{personalInfo.address}</dd>
               </div>
-              <div>
-                <dt className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Cidade</dt>
-                <dd className="mt-1 text-sm">{personalInfo.city || '-'}</dd>
+              <div className="flex justify-between">
+                <dt className="font-medium text-neutral-500">Cidade:</dt>
+                <dd>{personalInfo.city}</dd>
               </div>
-              <div>
-                <dt className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Estado</dt>
-                <dd className="mt-1 text-sm">{personalInfo.state || '-'}</dd>
+              <div className="flex justify-between">
+                <dt className="font-medium text-neutral-500">Estado:</dt>
+                <dd>{personalInfo.state}</dd>
               </div>
-              <div>
-                <dt className="text-sm font-medium text-neutral-500 dark:text-neutral-400">CEP</dt>
-                <dd className="mt-1 text-sm">{personalInfo.zipCode || '-'}</dd>
+              <div className="flex justify-between">
+                <dt className="font-medium text-neutral-500">CEP:</dt>
+                <dd>{personalInfo.zipCode}</dd>
               </div>
             </dl>
-          </div>
+          </CardContent>
+        </Card>
 
-          <div>
-            <h4 className="text-base font-medium flex items-center">
-              <GraduationCap className="h-5 w-5 mr-2 text-primary" />
-              Curso Selecionado
-            </h4>
-            <Separator className="my-3" />
-
+        <Card className="md:col-span-2">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Curso Selecionado</CardTitle>
+          </CardHeader>
+          <CardContent>
             {selectedCourse ? (
-              <Card className="border border-primary/20 bg-primary/5">
-                <CardContent className="p-4">
-                  <div className="flex flex-col space-y-2">
-                    <h5 className="font-medium">{selectedCourse.name}</h5>
-                    {selectedCourse.description && (
-                      <p className="text-sm text-neutral-600 dark:text-neutral-300">
-                        {selectedCourse.description}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {selectedCourse.duration && (
-                        <div className="text-xs px-2 py-1 bg-primary/10 text-primary rounded">
-                          Duração: {selectedCourse.duration}
-                        </div>
-                      )}
-                      {selectedCourse.format && (
-                        <div className="text-xs px-2 py-1 bg-primary/10 text-primary rounded">
-                          Formato: {selectedCourse.format}
-                        </div>
-                      )}
-                      {selectedCourse.price && (
-                        <div className="text-xs px-2 py-1 bg-primary/10 text-primary rounded">
-                          Valor: R$ {selectedCourse.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </div>
-                      )}
-                    </div>
+              <div className="space-y-4">
+                <div className="flex items-center">
+                  <div className="w-14 h-14 mr-4 flex items-center justify-center rounded-full bg-primary/10 text-primary">
+                    <span className="text-xl font-bold">{selectedCourse.name.charAt(0)}</span>
                   </div>
-                </CardContent>
-              </Card>
-            ) : (
-              <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                Nenhum curso selecionado.
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <div>
-            <h4 className="text-base font-medium flex items-center">
-              <FileText className="h-5 w-5 mr-2 text-primary" />
-              Documentos Enviados
-            </h4>
-            <Separator className="my-3" />
-
-            <div className="space-y-3">
-              <div>
-                <h5 className="text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-2">
-                  Documento de Identidade
-                </h5>
-                {documents.identityDocument ? (
-                  <DocumentPreview 
-                    document={documents.identityDocument} 
-                    icon={<IdCard className="h-5 w-5" />} 
-                  />
-                ) : (
-                  <p className="text-sm text-rose-500">Documento não enviado</p>
-                )}
-              </div>
-
-              <div>
-                <h5 className="text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-2">
-                  Comprovante de Endereço
-                </h5>
-                {documents.proofOfAddress ? (
-                  <DocumentPreview 
-                    document={documents.proofOfAddress} 
-                    icon={<FileText className="h-5 w-5" />} 
-                  />
-                ) : (
-                  <p className="text-sm text-rose-500">Documento não enviado</p>
-                )}
-              </div>
-
-              <div>
-                <h5 className="text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-2">
-                  Foto Recente
-                </h5>
-                {documents.photo ? (
-                  <DocumentPreview 
-                    document={documents.photo} 
-                    icon={<Image className="h-5 w-5" />} 
-                  />
-                ) : (
-                  <p className="text-sm text-rose-500">Documento não enviado</p>
-                )}
-              </div>
-
-              <div>
-                <h5 className="text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-2">
-                  Histórico Escolar
-                </h5>
-                {documents.schoolRecords ? (
-                  <DocumentPreview 
-                    document={documents.schoolRecords} 
-                    icon={<FileText className="h-5 w-5" />} 
-                  />
-                ) : (
-                  <p className="text-sm text-rose-500">Documento não enviado</p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <Card className="bg-amber-50 dark:bg-amber-950 border-amber-200 dark:border-amber-800">
-            <CardContent className="p-4">
-              <div className="flex space-x-3">
-                <div className="flex-shrink-0">
-                  <svg className="h-5 w-5 text-amber-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                    <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                  </svg>
+                  <div>
+                    <h3 className="text-lg font-medium">{selectedCourse.name}</h3>
+                    <p className="text-sm text-neutral-500">
+                      {selectedCourse.duration} | {selectedCourse.shift}
+                    </p>
+                  </div>
+                  <Badge className="ml-auto" variant="outline">
+                    {selectedCourse.modality}
+                  </Badge>
                 </div>
-                <div>
-                  <h3 className="text-sm font-medium text-amber-800 dark:text-amber-200">Atenção</h3>
-                  <div className="mt-2 text-sm text-amber-700 dark:text-amber-300">
-                    <p>
-                      Ao prosseguir, você confirma que todos os dados fornecidos são verdadeiros e que está ciente das regras e políticas da instituição. A matrícula está sujeita à análise e aprovação.
+                <Separator />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-neutral-500">Duração</p>
+                    <p>{selectedCourse.duration}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-neutral-500">Turno</p>
+                    <p>{selectedCourse.shift}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-neutral-500">Preço</p>
+                    <p className="font-semibold text-green-600">
+                      R$ {selectedCourse.price?.toFixed(2).replace('.', ',')}
                     </p>
                   </div>
                 </div>
+                {selectedCourse.startDate && (
+                  <div>
+                    <p className="text-sm font-medium text-neutral-500">Data de início</p>
+                    <p>{formatDate(selectedCourse.startDate)}</p>
+                  </div>
+                )}
               </div>
-            </CardContent>
-          </Card>
-        </div>
+            ) : (
+              <p>Curso não encontrado</p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="md:col-span-2">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg flex items-center">
+              <span className="mr-2">Documentos Enviados</span>
+              <Button variant="ghost" size="icon" className="h-6 w-6">
+                <Edit className="h-4 w-4" />
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Documento</TableHead>
+                  <TableHead>Arquivo</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {Object.entries(documents).map(([key, doc]) => (
+                  <TableRow key={key}>
+                    <TableCell>{getDocumentName(key)}</TableCell>
+                    <TableCell>
+                      {checkDocumentStatus(doc) ? (
+                        <div className="flex items-center space-x-2">
+                          <FileIcon className="h-4 w-4 text-neutral-400" />
+                          <span className="text-sm">
+                            {doc.fileName || 'Documento enviado'}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-neutral-400">Não enviado</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {checkDocumentStatus(doc) ? (
+                        <div className="flex items-center space-x-1 text-green-600">
+                          <CheckCircle2 className="h-4 w-4" />
+                          <span className="text-sm">Enviado</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center space-x-1 text-red-500">
+                          <span className="text-sm">Pendente</span>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {!allDocumentsUploaded && (
+              <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-md text-amber-600 text-sm">
+                <p className="font-medium">Atenção</p>
+                <p>Você ainda tem documentos pendentes. Retorne à etapa anterior para concluir o envio.</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
-      <div className="pt-4 text-center">
-        <p className="mb-4 text-neutral-600 dark:text-neutral-300">
-          Confira todos os dados antes de finalizar sua matrícula.
-        </p>
-        <Button
-          className="px-10 py-6 text-base"
-          size="lg"
-          variant="default"
-        >
-          <Check className="mr-2 h-5 w-5" />
-          Confirmar e Finalizar Matrícula
-        </Button>
-      </div>
+      <Card className="md:col-span-2 bg-neutral-50 dark:bg-neutral-900">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Termos e Condições</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <p className="text-sm">
+              Ao prosseguir com a matrícula, você concorda com os seguintes termos:
+            </p>
+            <ul className="text-sm space-y-2 list-disc list-inside">
+              <li>Os documentos fornecidos são verdadeiros e válidos.</li>
+              <li>
+                As informações fornecidas estão corretas e você assume responsabilidade pela sua veracidade.
+              </li>
+              <li>
+                Você está ciente das políticas de pagamento e das condições de matrícula.
+              </li>
+              <li>
+                Você concorda em receber comunicações relacionadas ao curso e ao processo de matrícula.
+              </li>
+            </ul>
+            <div className="pt-4">
+              <Button className="w-full" size="lg">
+                <CreditCard className="mr-2 h-4 w-4" />
+                Finalizar Matrícula
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };

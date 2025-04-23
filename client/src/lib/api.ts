@@ -26,6 +26,22 @@ export const registerUser = (userData: any) => {
   return apiRequest("POST", "/api/auth/register", userData);
 };
 
+// Document upload
+export const uploadDocument = async (formData: FormData) => {
+  try {
+    const response = await fetch('/api/documents/upload', {
+      method: 'POST',
+      body: formData,
+      credentials: 'include'
+    });
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error uploading document:', error);
+    return { success: false, error: 'Erro ao fazer upload do documento' };
+  }
+};
+
 // Schools
 export const getSchools = () => {
   return fetch("/api/schools", { credentials: "include" }).then(res => {
@@ -207,17 +223,7 @@ export const sendWhatsAppMessage = (data: any) => {
   return apiRequest("POST", "/api/whatsapp/webhook", data);
 };
 
-// Documents
-export const uploadDocument = (formData: FormData) => {
-  return fetch("/api/documents/upload", {
-    method: "POST",
-    credentials: "include",
-    body: formData,
-  }).then(res => {
-    if (!res.ok) throw new Error("Failed to upload document");
-    return res.json();
-  });
-};
+// Essa segunda função de upload de documento está duplicada e pode ser removida
 
 // Dashboard Metrics
 export const getDashboardMetrics = (schoolId?: number) => {
