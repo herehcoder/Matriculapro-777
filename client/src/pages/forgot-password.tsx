@@ -67,8 +67,7 @@ export default function ForgotPassword() {
       <div className="w-full max-w-md p-8 bg-white rounded-xl shadow-lg dark:bg-neutral-900">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-display font-bold mb-2">
-            <span className="text-primary-600 dark:text-primary-400">EduMatrik</span>
-            <span className="text-secondary-500">AI</span>
+            <span className="text-primary-600 dark:text-primary-400">Matricula</span>
           </h1>
           <p className="text-neutral-500 dark:text-neutral-400">
             Recuperação de senha
