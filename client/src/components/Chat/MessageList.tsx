@@ -1,7 +1,10 @@
 import React from 'react';
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@/components/ui/avatar";
 import { format } from 'date-fns';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface Message {
@@ -24,11 +27,13 @@ const MessageList: React.FC<MessageListProps> = ({ messages, isUserMessage, isLo
     return (
       <div className="space-y-4">
         {[1, 2, 3].map((i) => (
-          <div key={i} className={`flex ${i % 2 === 0 ? 'justify-end' : 'justify-start'}`}>
-            {i % 2 !== 0 && <Skeleton className="h-8 w-8 rounded-full mr-2" />}
-            <div className={`max-w-[80%] ${i % 2 === 0 ? 'bg-primary/10' : 'bg-muted/60'} rounded-lg p-3`}>
-              <Skeleton className="h-4 w-40 mb-1" />
-              <Skeleton className="h-3 w-16" />
+          <div key={i} className={`flex items-start ${i % 2 === 0 ? 'justify-end' : ''}`}>
+            {i % 2 !== 0 && (
+              <Skeleton className="h-10 w-10 rounded-full mr-3" />
+            )}
+            <div className={`${i % 2 === 0 ? 'bg-primary text-white' : 'bg-muted'} px-4 py-2 rounded-lg max-w-[80%]`}>
+              <Skeleton className="h-4 w-32 mb-2" />
+              <Skeleton className="h-4 w-64" />
             </div>
           </div>
         ))}
@@ -38,101 +43,48 @@ const MessageList: React.FC<MessageListProps> = ({ messages, isUserMessage, isLo
 
   if (messages.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <p className="text-muted-foreground text-center">
-          Nenhuma mensagem ainda. Envie uma mensagem para iniciar a conversa.
-        </p>
+      <div className="flex items-center justify-center h-full text-center p-4">
+        <div>
+          <p className="text-muted-foreground">Nenhuma mensagem encontrada</p>
+          <p className="text-sm text-muted-foreground">Envie uma mensagem para iniciar a conversa</p>
+        </div>
       </div>
     );
   }
 
-  // Group messages by date for better organization
-  const groupedMessages: Record<string, Message[]> = {};
-  
-  messages.forEach(message => {
-    const date = new Date(message.createdAt);
-    const dateKey = format(date, 'yyyy-MM-dd');
-    
-    if (!groupedMessages[dateKey]) {
-      groupedMessages[dateKey] = [];
-    }
-    
-    groupedMessages[dateKey].push(message);
-  });
-
-  const formatGroupDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    
-    if (date.toDateString() === now.toDateString()) {
-      return 'Hoje';
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      return 'Ontem';
-    } else {
-      return format(date, 'dd/MM/yyyy');
-    }
-  };
-
-  const sortedDates = Object.keys(groupedMessages).sort();
-
   return (
-    <div className="space-y-6">
-      {sortedDates.map(dateKey => (
-        <div key={dateKey}>
-          <div className="flex justify-center mb-4">
-            <span className="text-xs bg-muted px-2 py-1 rounded-full text-muted-foreground">
-              {formatGroupDate(dateKey)}
-            </span>
+    <div className="space-y-4">
+      {messages.map((message) => {
+        const isUser = isUserMessage(message.senderId);
+        return (
+          <div key={message.id} className={`flex items-start ${isUser ? 'justify-end' : ''}`}>
+            {!isUser && (
+              <Avatar className="h-8 w-8 mr-2">
+                <AvatarFallback>
+                  {message.senderName ? message.senderName.substring(0, 2).toUpperCase() : 'UN'}
+                </AvatarFallback>
+              </Avatar>
+            )}
+            <div>
+              <div 
+                className={`px-4 py-2 rounded-lg max-w-[320px] break-words ${
+                  isUser 
+                    ? 'bg-primary text-white rounded-tr-none' 
+                    : 'bg-muted rounded-tl-none'
+                }`}
+              >
+                {!isUser && (
+                  <p className="text-xs font-medium mb-1">{message.senderName}</p>
+                )}
+                <p>{message.content}</p>
+              </div>
+              <div className={`text-xs text-muted-foreground mt-1 ${isUser ? 'text-right' : ''}`}>
+                {format(new Date(message.createdAt), 'HH:mm')} • {message.status}
+              </div>
+            </div>
           </div>
-          
-          <div className="space-y-4">
-            {groupedMessages[dateKey].map((message, index) => {
-              const isUser = isUserMessage(message.senderId);
-              const showAvatar = !isUser && (index === 0 || 
-                groupedMessages[dateKey][index - 1]?.senderId !== message.senderId);
-              const time = format(new Date(message.createdAt), 'HH:mm');
-              
-              return (
-                <div key={message.id} className={cn("flex", isUser ? "justify-end" : "justify-start")}>
-                  {!isUser && showAvatar && (
-                    <Avatar className="h-8 w-8 mr-2">
-                      <AvatarFallback>
-                        {message.senderName ? message.senderName.substring(0, 2).toUpperCase() : 'UN'}
-                      </AvatarFallback>
-                    </Avatar>
-                  )}
-                  
-                  {!isUser && !showAvatar && <div className="w-10" />}
-                  
-                  <div className="flex flex-col">
-                    <div 
-                      className={cn(
-                        "max-w-sm px-4 py-2 rounded-lg",
-                        isUser 
-                          ? "bg-primary text-primary-foreground rounded-br-none" 
-                          : "bg-muted rounded-bl-none"
-                      )}
-                    >
-                      {message.content}
-                    </div>
-                    
-                    <span className="text-xs text-muted-foreground mt-1 flex items-center">
-                      {time}
-                      {isUser && (
-                        <span className="ml-1">
-                          {message.status === 'read' ? '✓✓' : message.status === 'delivered' ? '✓✓' : '✓'}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };
