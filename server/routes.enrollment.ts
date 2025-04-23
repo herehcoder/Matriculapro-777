@@ -41,7 +41,12 @@ export function registerEnrollmentRoutes(app: Express, isAuthenticated: any) {
   app.get("/api/enrollments/:id", async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const enrollment = await storage.getEnrollment(parseInt(id));
+      // Garantir que o id seja um número válido
+      const enrollmentId = Number(id);
+      if (isNaN(enrollmentId)) {
+        return res.status(400).json({ message: "Invalid enrollment ID" });
+      }
+      const enrollment = await storage.getEnrollment(enrollmentId);
       
       if (!enrollment) {
         return res.status(404).json({ message: "Enrollment not found" });
@@ -87,14 +92,20 @@ export function registerEnrollmentRoutes(app: Express, isAuthenticated: any) {
       const { id } = req.params;
       const enrollmentData = req.body;
       
+      // Garantir que o id seja um número válido
+      const enrollmentId = Number(id);
+      if (isNaN(enrollmentId)) {
+        return res.status(400).json({ message: "Invalid enrollment ID" });
+      }
+      
       // Get existing enrollment
-      const existingEnrollment = await storage.getEnrollment(parseInt(id));
+      const existingEnrollment = await storage.getEnrollment(enrollmentId);
       if (!existingEnrollment) {
         return res.status(404).json({ message: "Enrollment not found" });
       }
       
       // Update enrollment
-      const updatedEnrollment = await storage.updateEnrollment(parseInt(id), enrollmentData);
+      const updatedEnrollment = await storage.updateEnrollment(enrollmentId, enrollmentData);
       
       // If status has changed to completed, send notifications
       if (enrollmentData.status === "completed" && existingEnrollment.status !== "completed") {
@@ -136,7 +147,12 @@ export function registerEnrollmentRoutes(app: Express, isAuthenticated: any) {
   app.get("/api/enrollments/:id/answers", async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const answers = await storage.getAnswersByEnrollment(parseInt(id));
+      // Garantir que o id seja um número válido
+      const enrollmentId = Number(id);
+      if (isNaN(enrollmentId)) {
+        return res.status(400).json({ message: "Invalid enrollment ID" });
+      }
+      const answers = await storage.getAnswersByEnrollment(enrollmentId);
       res.json(answers);
     } catch (error) {
       console.error("Error fetching enrollment answers:", error);
@@ -148,9 +164,15 @@ export function registerEnrollmentRoutes(app: Express, isAuthenticated: any) {
   app.post("/api/enrollments/:id/answers", async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
+      // Garantir que o id seja um número válido
+      const enrollmentId = Number(id);
+      if (isNaN(enrollmentId)) {
+        return res.status(400).json({ message: "Invalid enrollment ID" });
+      }
+      
       const answerData = insertAnswerSchema.parse({
         ...req.body,
-        enrollmentId: parseInt(id)
+        enrollmentId: enrollmentId
       });
       
       const answer = await storage.createAnswer(answerData);
