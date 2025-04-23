@@ -215,61 +215,47 @@ export async function setupAuth(app: Express) {
   // Rota para solicitar redefinição de senha
   app.post("/api/auth/forgot-password", async (req, res) => {
     try {
-      console.log("Recebida solicitação de recuperação de senha:", req.body);
       const { email } = req.body;
       
       if (!email) {
-        console.log("Email não fornecido");
         return res.status(400).json({ message: "Email é obrigatório" });
       }
 
-      console.log("Verificando se o usuário existe:", email);
       // Verificar se o usuário existe
       const user = await storage.getUserByEmail(email);
       
       if (!user) {
-        console.log("Usuário não encontrado para o email:", email);
         // Por segurança, não informamos ao usuário que o email não existe
         return res.status(200).json({ 
           message: "Se o email estiver cadastrado, você receberá instruções para redefinir sua senha."
         });
       }
 
-      console.log("Usuário encontrado:", user.id, user.email);
-
       // Gerar token aleatório
       const token = randomBytes(40).toString('hex');
       const expiresAt = new Date();
       expiresAt.setHours(expiresAt.getHours() + 1); // Expira em 1 hora
 
-      console.log("Token gerado, tentando limpar tokens antigos");
-      
       try {
         // Deletar tokens expirados e já utilizados
         await storage.deleteExpiredPasswordResetTokens();
-        console.log("Tokens expirados removidos com sucesso");
       } catch (tokenError) {
         console.error("Erro ao limpar tokens expirados:", tokenError);
         // Continuar mesmo se houver erro na limpeza
       }
-
-      console.log("Salvando novo token para o usuário:", user.id);
       
       try {
         // Salvar token no banco de dados
-        const savedToken = await storage.createPasswordResetToken({
+        await storage.createPasswordResetToken({
           userId: user.id,
           token,
           expiresAt,
           used: false
         });
-        console.log("Token salvo com sucesso:", savedToken.id);
       } catch (tokenSaveError) {
         console.error("Erro ao salvar token de redefinição:", tokenSaveError);
         return res.status(500).json({ message: "Erro ao gerar token de redefinição" });
       }
-
-      console.log("Enviando email para:", user.email);
       
       try {
         // Enviar email com link para redefinição
@@ -280,48 +266,17 @@ export async function setupAuth(app: Express) {
           user.fullName
         );
 
-        console.log("Resultado do envio de email:", emailResult);
-
         if (!emailResult.success) {
+          // Logamos o erro para análise interna, mas retornamos sucesso para não revelar
+          // ao usuário se o email existe ou não
           console.error('Erro ao enviar email de redefinição de senha:', emailResult.error);
-          
-          // Mesmo com erro no email, retornamos sucesso para o usuário por segurança
-          // mas logamos o erro para análise interna
-          console.error("IMPORTANTE: O email não foi enviado, mas o token foi gerado com sucesso.");
-          console.error("O token para redefinição de senha é:", token);
-          console.error("Em um ambiente de produção, o usuário NÃO teria como redefinir a senha sem receber o email.");
-          
-          // Em ambiente de desenvolvimento, podemos usar este link para teste
-          const resetUrl = `${process.env.APP_URL || 'http://localhost:5000'}/reset-password?token=${token}`;
-          console.log("URL de redefinição para teste:", resetUrl);
-          
-          // Retornamos sucesso para evitar vazamento de informação
-          return res.status(200).json({ 
-            message: "Se o email estiver cadastrado, você receberá instruções para redefinir sua senha.",
-            dev_only_reset_url: resetUrl // Apenas para facilitar o teste em desenvolvimento
-          });
         }
       } catch (emailError) {
+        // Logamos o erro para análise interna, mas retornamos sucesso para não revelar
+        // ao usuário se o email existe ou não
         console.error("Erro ao enviar email:", emailError);
-        
-        // Mesmo com erro no email, retornamos sucesso para o usuário por segurança
-        // mas logamos o erro para análise interna
-        console.error("IMPORTANTE: O email não foi enviado, mas o token foi gerado com sucesso.");
-        console.error("O token para redefinição de senha é:", token);
-        
-        // Em ambiente de desenvolvimento, podemos usar este link para teste
-        const resetUrl = `${process.env.APP_URL || 'http://localhost:5000'}/reset-password?token=${token}`;
-        console.log("URL de redefinição para teste:", resetUrl);
-        
-        // Retornamos sucesso para evitar vazamento de informação
-        return res.status(200).json({ 
-          message: "Se o email estiver cadastrado, você receberá instruções para redefinir sua senha.",
-          dev_only_reset_url: resetUrl // Apenas para facilitar o teste em desenvolvimento
-        });
       }
 
-      console.log("Processo de recuperação de senha concluído com sucesso");
-      
       res.status(200).json({ 
         message: "Se o email estiver cadastrado, você receberá instruções para redefinir sua senha."
       });

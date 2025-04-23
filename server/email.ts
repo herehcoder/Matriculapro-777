@@ -24,7 +24,7 @@ export const emailService = {
    */
   async sendEmail(options: EmailOptions) {
     try {
-      const { to, subject, html, from = 'onboarding@resend.dev' } = options;
+      const { to, subject, html, from = 'hereh.com.br+noreply@gmail.com' } = options;
       
       console.log('Enviando email com as seguintes configurações:');
       console.log('- De:', from);

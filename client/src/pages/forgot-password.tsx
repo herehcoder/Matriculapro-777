@@ -33,21 +33,12 @@ export default function ForgotPassword() {
     },
   });
 
-  const [devResetLink, setDevResetLink] = useState<string | null>(null);
-
   const onSubmit = async (values: z.infer<typeof forgotPasswordSchema>) => {
     setIsSubmitting(true);
     try {
-      console.log("Enviando solicitação de recuperação para:", values.email);
-      const response = await axios.post("/api/auth/forgot-password", values);
-      console.log("Resposta:", response.data);
+      await axios.post("/api/auth/forgot-password", values);
       
       setSuccess(true);
-      
-      // Se estivermos em ambiente de desenvolvimento e o servidor retornar um link de redefinição
-      if (response.data.dev_only_reset_url) {
-        setDevResetLink(response.data.dev_only_reset_url);
-      }
       
       toast({
         title: "Email enviado",
@@ -90,20 +81,7 @@ export default function ForgotPassword() {
               <p className="mb-2 font-medium">Email enviado!</p>
               <p>Se o email estiver cadastrado, você receberá instruções para redefinir sua senha. Por favor, verifique sua caixa de entrada.</p>
             </div>
-            
-            {/* Mostrar link direto para redefinição em ambiente de desenvolvimento */}
-            {devResetLink && (
-              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-700 mt-4 dark:bg-yellow-900/20 dark:border-yellow-800 dark:text-yellow-400">
-                <p className="mb-2 font-medium">Link para desenvolvimento</p>
-                <p className="mb-2 text-sm">Como estamos em ambiente de desenvolvimento, você pode usar o link abaixo para redefinir sua senha:</p>
-                <div className="p-2 bg-white dark:bg-neutral-800 rounded border border-yellow-200 dark:border-yellow-800 text-xs overflow-auto">
-                  <a href={devResetLink} className="text-blue-600 dark:text-blue-400 break-all">
-                    {devResetLink}
-                  </a>
-                </div>
-                <p className="mt-2 text-xs">Este link só é exibido em ambiente de desenvolvimento.</p>
-              </div>
-            )}
+
             
             <Button asChild className="w-full">
               <Link href="/login">Voltar para o login</Link>
