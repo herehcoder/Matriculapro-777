@@ -1,0 +1,113 @@
+✅ Tarefas a serem implementadas:
+
+1. Integração Evolution API (WhatsApp)
+
+Criar webhook handlers para eventos em tempo real da API
+
+Adicionar sistema de filas para envio de mensagens (ex: com BullMQ ou outro)
+
+Criar mecanismo de retry para mensagens com falha
+
+Implementar logging completo de cada evento e mensagem (utilize winston ou similar)
+
+2. OCR e Processamento de Documentos
+
+Finalizar validação cruzada entre documentos enviados
+
+Integrar modelo de ML (pode usar TensorFlow.js ou lógica custom)
+
+Adicionar suporte a imagens de baixa qualidade
+
+Criar painel de correção manual no backend para documentos com erro
+
+3. Sistema de Pagamentos
+
+Implementar conciliação bancária automática
+
+Adicionar suporte a múltiplos gateways (Stripe + futuro gateway brasileiro)
+
+Adicionar sistema de parcelamento (parcelas no backend)
+
+Implementar geração de boletos e carnês (usar API como Gerencianet ou Asaas)
+
+4. Segurança e Auditoria
+
+Log completo das ações administrativas (auditoria por endpoint e usuário)
+
+Criptografia E2E para documentos sensíveis (usar crypto ou libs como libsodium)
+
+Criar rotinas de backup automático
+
+Validar campos sensíveis com regras personalizadas e regex
+
+5. Analytics e Relatórios
+
+Criar pipeline de ETL básico (usando cron jobs ou triggers SQL)
+
+Adicionar previsões de matrícula com ML (ex: regressão linear simples)
+
+Gerar dashboards customizáveis (ou export JSON/CSV)
+
+Exportar relatórios em .pdf, .xlsx, .csv
+
+6. Integrações
+
+Criar sistema de integração com ERPs escolares via API (simulado)
+
+Adicionar suporte a webhooks customizados por instituição
+
+Criar sistema de importação/exportação em .csv
+
+Adicionar API pública para alguns dados (com autenticação)
+
+💻 Frontend (React + TypeScript)
+Atualizar componentes para consumir os novos serviços:
+
+Webhooks de WhatsApp (mostrar histórico)
+
+Status e score do OCR/documentos
+
+Módulo de pagamentos com opções de boleto, cartão e parcelamento
+
+Painel administrativo com logs de auditoria
+
+Tela de dashboards e relatórios exportáveis
+
+Tela de correção manual de documentos
+
+Refatorar componentes com:
+
+Tratamento de erros por toast/context
+
+Mensagens de loading e feedbacks de sucesso/erro
+
+Hooks para chamada das novas rotas do backend
+
+Responsividade e acessibilidade básica
+
+🔐 Segurança e Preparação para Produção
+Validar e instalar jsonwebtoken para autenticação
+
+Criar middlewares de proteção nos endpoints
+
+Criar variáveis de ambiente seguras (usar .env no Replit)
+
+Implementar testes unitários e de integração (com Jest e Supertest)
+
+Documentar todas as rotas com Swagger (ou gerar Markdown em /docs)
+
+Adicionar monitoramento (ex: Sentry ou webhook próprio de erros)
+
+Implementar sistema de backup e restore manual do banco
+
+🧪 Testes:
+Validar com dados reais (documentos, pagamentos, WhatsApp)
+
+Verificar fallback para documentos corrompidos
+
+Garantir autenticação nos fluxos protegidos
+
+Testar envio de mensagens com falha e tentativa de reenvio
+
+🎯 Entregável:
+O projeto deve estar 100% funcional com todas as funcionalidades listadas, pronto para deploy, com rotas, componentes e serviços devidamente conectados, responsivos e seguros.

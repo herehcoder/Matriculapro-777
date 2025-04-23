@@ -1,1181 +1,1061 @@
-import { createWorker, createScheduler, Worker, Scheduler } from 'tesseract.js';
-import * as fs from 'fs';
-import * as path from 'path';
-import { v4 as uuidv4 } from 'uuid';
-import { storage } from '../storage';
+/**
+ * Serviço avançado de OCR com validação cruzada
+ * Implementa reconhecimento, extração e verificação de documentos
+ */
+
+import { createWorker, Worker, ImageLike } from 'tesseract.js';
 import { db } from '../db';
+import path from 'path';
+import fs from 'fs';
+import { v4 as uuidv4 } from 'uuid';
+import { logAction } from './securityService';
 
-// Interface para dados de correção manual
-export interface ManualCorrectionData {
-  documentId: string;
-  fields: Array<{
-    fieldName: string;
-    originalValue: string | null;
-    correctedValue: string;
-  }>;
-  reviewedBy: number;
-  reviewedAt: Date;
-  comments?: string;
-}
+// Tipos de documentos suportados
+export type DocumentType = 
+  'rg' | 
+  'cpf' | 
+  'address_proof' | 
+  'school_certificate' | 
+  'birth_certificate' | 
+  'other';
 
-/**
- * Processa um documento via OCR
- * @param filePath Caminho do arquivo a processar
- * @param userData Dados do usuário para validação cruzada (opcional)
- * @returns Resultado do processamento
- */
-export async function processDocument(
-  filePath: string,
-  userData?: any
-): Promise<any> {
-  try {
-    // Determinar tipo de documento baseado no nome do arquivo ou tipo MIME
-    let documentType = 'generic';
-    const fileName = path.basename(filePath).toLowerCase();
-    
-    if (fileName.includes('rg') || fileName.includes('identidade')) {
-      documentType = 'rg';
-    } else if (fileName.includes('cpf')) {
-      documentType = 'cpf';
-    } else if (fileName.includes('comprovante') && (fileName.includes('residencia') || fileName.includes('endereco'))) {
-      documentType = 'comprovante_residencia';
-    } else if (fileName.includes('historico') && fileName.includes('escolar')) {
-      documentType = 'historico_escolar';
-    } else if (fileName.includes('certidao') && fileName.includes('nascimento')) {
-      documentType = 'certidao_nascimento';
-    }
-    
-    // Processar o documento
-    await advancedOcrService.initialize();
-    const document = await advancedOcrService.processDocument(filePath, documentType);
-    
-    // Se tiver dados do usuário, realizar validação cruzada
-    let validation = null;
-    if (userData && document.extractedData) {
-      validation = validateAgainstUserData(document.extractedData, userData);
-    }
-    
-    return {
-      success: true,
-      document,
-      validation
-    };
-  } catch (error) {
-    console.error('Erro ao processar documento:', error);
-    return {
-      success: false,
-      error: error.message || 'Erro desconhecido ao processar documento'
-    };
-  }
-}
+// Status de validação de documentos
+export type ValidationStatus = 
+  'pending' | 
+  'valid' | 
+  'invalid' | 
+  'needs_review';
 
-/**
- * Valida dados extraídos contra dados fornecidos pelo usuário
- * @param extractedFields Campos extraídos do documento
- * @param userData Dados fornecidos pelo usuário
- * @returns Resultado da validação
- */
-export function validateAgainstUserData(
-  extractedFields: any,
-  userData: any
-): {
-  isValid: boolean;
-  score: number;
-  fieldScores: Record<string, number>;
-  message: string;
-} {
-  const scores: Record<string, number> = {};
-  let totalScore = 0;
-  let fieldsCount = 0;
-  
-  // Comparar nome (com mais peso)
-  if (extractedFields.name && userData.name) {
-    const nameScore = calculateStringSimilarity(
-      extractedFields.name.toLowerCase(),
-      userData.name.toLowerCase()
-    );
-    scores.name = nameScore;
-    totalScore += nameScore * 2; // Peso maior para o nome
-    fieldsCount += 2;
-  }
-  
-  // Comparar data de nascimento
-  if (extractedFields.birthDate && userData.birthDate) {
-    // Normalizar formato de data para comparação
-    const extractedDate = normalizeDate(extractedFields.birthDate);
-    const userDate = normalizeDate(userData.birthDate);
-    
-    const dateScore = extractedDate === userDate ? 1.0 : 0.0;
-    scores.birthDate = dateScore;
-    totalScore += dateScore;
-    fieldsCount += 1;
-  }
-  
-  // Comparar CPF
-  if (extractedFields.cpf && userData.cpf) {
-    // Remover formatação para comparação
-    const extractedCpf = extractedFields.cpf.replace(/\D/g, '');
-    const userCpf = userData.cpf.replace(/\D/g, '');
-    
-    const cpfScore = extractedCpf === userCpf ? 1.0 : 0.0;
-    scores.cpf = cpfScore;
-    totalScore += cpfScore * 1.5; // Peso maior para CPF
-    fieldsCount += 1.5;
-  }
-  
-  // Comparar RG
-  if (extractedFields.documentNumber && userData.rg) {
-    // Remover formatação para comparação
-    const extractedRg = extractedFields.documentNumber.replace(/\D/g, '');
-    const userRg = userData.rg.replace(/\D/g, '');
-    
-    const rgScore = extractedRg === userRg ? 1.0 : 0.0;
-    scores.rg = rgScore;
-    totalScore += rgScore;
-    fieldsCount += 1;
-  }
-  
-  // Comparar endereço (se existir)
-  if (extractedFields.street && userData.address) {
-    const addressScore = calculateStringSimilarity(
-      extractedFields.street.toLowerCase(),
-      userData.address.toLowerCase()
-    );
-    scores.address = addressScore;
-    totalScore += addressScore;
-    fieldsCount += 1;
-  }
-  
-  // Calcular score final normalizado
-  const finalScore = fieldsCount > 0 ? totalScore / fieldsCount : 0;
-  const isValid = finalScore >= 0.7; // Score mínimo para validação
-  
-  // Gerar mensagem de resultado
-  const message = generateValidationMessage(isValid, finalScore, scores);
-  
-  return {
-    isValid,
-    score: Math.round(finalScore * 100) / 100,
-    fieldScores: scores,
-    message
+// Status de extração de dados
+export type ExtractionStatus = 
+  'pending' | 
+  'completed' | 
+  'failed' | 
+  'partial';
+
+// Campos de validação para cada tipo de documento
+interface ValidationFields {
+  rg: {
+    number: string;
+    name: string;
+    birthDate?: string;
+    issueDate?: string;
+    father?: string;
+    mother?: string;
+  };
+  cpf: {
+    number: string;
+    name: string;
+  };
+  address_proof: {
+    name: string;
+    address: string;
+    city?: string;
+    state?: string;
+    zipCode?: string;
+    issueDate?: string;
+  };
+  school_certificate: {
+    name: string;
+    school: string;
+    grade?: string;
+    issueDate?: string;
+  };
+  birth_certificate: {
+    name: string;
+    birthDate: string;
+    father?: string;
+    mother?: string;
+    registry?: string;
+  };
+  other: {
+    [key: string]: string;
   };
 }
 
-/**
- * Registra correção manual de um documento
- * @param correctionData Dados da correção
- * @returns Sucesso da operação
- */
-export async function registerManualCorrection(
-  correctionData: ManualCorrectionData
-): Promise<boolean> {
-  try {
-    // Verificar se documento existe
-    const documentResult = await db.execute(
-      `SELECT * FROM ocr_documents WHERE id = $1`,
-      [correctionData.documentId]
-    );
-    
-    if (!documentResult.rows || documentResult.rows.length === 0) {
-      throw new Error('Documento não encontrado');
-    }
-    
-    // Obter dados extraídos originais
-    const extractedData = documentResult.rows[0].extracted_data;
-    
-    // Registrar cada correção
-    for (const field of correctionData.fields) {
-      // Registrar correção no banco
-      await db.execute(`
-        INSERT INTO ocr_manual_corrections (
-          document_id,
-          field_name,
-          original_value,
-          corrected_value,
-          reviewed_by,
-          reviewed_at,
-          comments,
-          created_at
-        )
-        VALUES (
-          $1, $2, $3, $4, $5, $6, $7, NOW()
-        )
-      `, [
-        correctionData.documentId,
-        field.fieldName,
-        field.originalValue,
-        field.correctedValue,
-        correctionData.reviewedBy,
-        correctionData.reviewedAt,
-        correctionData.comments || null
-      ]);
-      
-      // Atualizar dado extraído com valor corrigido
-      if (extractedData) {
-        extractedData[field.fieldName] = field.correctedValue;
-      }
-    }
-    
-    // Atualizar documento com dados corrigidos
-    await db.execute(`
-      UPDATE ocr_documents
-      SET 
-        extracted_data = $1,
-        status = 'verified',
-        updated_at = NOW()
-      WHERE id = $2
-    `, [JSON.stringify(extractedData), correctionData.documentId]);
-    
-    return true;
-  } catch (error) {
-    console.error('Erro ao registrar correção manual:', error);
-    return false;
-  }
+// Resultado da validação de um documento
+export interface ValidationResult {
+  id: string;
+  documentId: number;
+  documentType: DocumentType;
+  status: ValidationStatus;
+  confidence: number;
+  extractedData: any;
+  errors?: string[];
+  warnings?: string[];
+  crossValidation?: {
+    status: ValidationStatus;
+    matches: {
+      field: string;
+      match: boolean;
+      source: string;
+      confidence: number;
+    }[];
+  };
+  createdAt: Date;
+  updatedAt: Date;
 }
 
-/**
- * Normaliza uma data para formato padrão
- * @param dateStr String de data em vários formatos
- * @returns Data normalizada (YYYY-MM-DD)
- */
-function normalizeDate(dateStr: string): string {
-  try {
-    // Tentar vários formatos
-    const formats = [
-      /(\d{2})[-./](\d{2})[-./](\d{4})/, // DD/MM/YYYY
-      /(\d{2})[-./](\d{2})[-./](\d{2})/, // DD/MM/YY
-      /(\d{4})[-./](\d{2})[-./](\d{2})/, // YYYY/MM/DD
-    ];
-    
-    for (const format of formats) {
-      const match = dateStr.match(format);
-      if (match) {
-        if (format === formats[0]) {
-          // DD/MM/YYYY
-          return `${match[3]}-${match[2]}-${match[1]}`;
-        } else if (format === formats[1]) {
-          // DD/MM/YY
-          const year = parseInt(match[3]);
-          const fullYear = year < 50 ? 2000 + year : 1900 + year;
-          return `${fullYear}-${match[2]}-${match[1]}`;
-        } else {
-          // YYYY/MM/DD
-          return `${match[1]}-${match[2]}-${match[3]}`;
-        }
-      }
-    }
-    
-    // Se não conseguir interpretar, retornar original
-    return dateStr;
-  } catch (error) {
-    console.error('Erro ao normalizar data:', error);
-    return dateStr;
-  }
+// Configuração do serviço
+interface OCRServiceConfig {
+  workers?: number;
+  languages?: string[];
+  dataPath?: string;
+  inactiveMode?: boolean;
 }
 
-/**
- * Calcula similaridade entre duas strings
- * @param str1 Primeira string
- * @param str2 Segunda string
- * @returns Score de similaridade (0-1)
- */
-function calculateStringSimilarity(str1: string, str2: string): number {
-  // Implementação simples do algoritmo de Levenshtein distance
-  const track = Array(str2.length + 1).fill(null).map(() => 
-    Array(str1.length + 1).fill(null));
-  
-  for (let i = 0; i <= str1.length; i += 1) {
-    track[0][i] = i;
-  }
-  
-  for (let j = 0; j <= str2.length; j += 1) {
-    track[j][0] = j;
-  }
-  
-  for (let j = 1; j <= str2.length; j += 1) {
-    for (let i = 1; i <= str1.length; i += 1) {
-      const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
-      track[j][i] = Math.min(
-        track[j][i - 1] + 1, // deletar
-        track[j - 1][i] + 1, // inserir
-        track[j - 1][i - 1] + indicator, // substituir
-      );
-    }
-  }
-  
-  const distance = track[str2.length][str1.length];
-  const maxLength = Math.max(str1.length, str2.length);
-  
-  // Normalizar para valor entre 0 e 1
-  return maxLength > 0 ? 1 - distance / maxLength : 1;
-}
-
-/**
- * Gera uma mensagem descritiva para o resultado da validação
- * @param isValid Se a validação foi bem-sucedida
- * @param score Score global
- * @param fieldScores Scores por campo
- * @returns Mensagem de validação
- */
-function generateValidationMessage(
-  isValid: boolean,
-  score: number,
-  fieldScores: Record<string, number>
-): string {
-  const percentage = Math.round(score * 100);
-  
-  if (isValid) {
-    return `Documento validado com ${percentage}% de confiança. Os dados conferem com as informações fornecidas.`;
-  } else {
-    // Identificar campos problemáticos
-    const lowScoreFields = Object.entries(fieldScores)
-      .filter(([_, score]) => score < 0.7)
-      .map(([field, _]) => {
-        switch (field) {
-          case 'name': return 'nome';
-          case 'birthDate': return 'data de nascimento';
-          case 'cpf': return 'CPF';
-          case 'rg': return 'RG';
-          case 'address': return 'endereço';
-          default: return field;
-        }
-      });
-    
-    if (lowScoreFields.length > 0) {
-      return `Documento com ${percentage}% de confiança. Divergências encontradas em: ${lowScoreFields.join(', ')}. Por favor, revise manualmente.`;
-    } else {
-      return `Documento com ${percentage}% de confiança. Confiança abaixo do limiar de validação. Por favor, revise manualmente.`;
-    }
-  }
-}
-
-/**
- * Obtém o SQL para criar tabelas relacionadas ao OCR
- * @returns Script SQL para criação de tabelas
- */
-export function getOcrTablesSQL(): string {
-  return `
-    CREATE TABLE IF NOT EXISTS ocr_documents (
-      id VARCHAR(36) PRIMARY KEY,
-      enrollment_id INTEGER,
-      document_type VARCHAR(50) NOT NULL,
-      file_path VARCHAR(255) NOT NULL,
-      extracted_data JSONB NOT NULL,
-      original_text TEXT NOT NULL,
-      overall_confidence NUMERIC(5,2) NOT NULL,
-      processing_time_ms INTEGER NOT NULL,
-      status VARCHAR(20) NOT NULL DEFAULT 'pending',
-      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS ocr_validations (
-      id SERIAL PRIMARY KEY,
-      document_id VARCHAR(36) NOT NULL REFERENCES ocr_documents(id),
-      enrollment_id INTEGER,
-      validation_result JSONB NOT NULL,
-      score NUMERIC(5,2) NOT NULL,
-      is_valid BOOLEAN NOT NULL,
-      review_required BOOLEAN NOT NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS ocr_manual_corrections (
-      id SERIAL PRIMARY KEY,
-      document_id VARCHAR(36) NOT NULL REFERENCES ocr_documents(id),
-      field_name VARCHAR(50) NOT NULL,
-      original_value TEXT,
-      corrected_value TEXT NOT NULL,
-      reviewed_by INTEGER NOT NULL,
-      reviewed_at TIMESTAMP NOT NULL,
-      comments TEXT,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_ocr_documents_enrollment_id ON ocr_documents(enrollment_id);
-    CREATE INDEX IF NOT EXISTS idx_ocr_documents_status ON ocr_documents(status);
-    CREATE INDEX IF NOT EXISTS idx_ocr_validations_document_id ON ocr_validations(document_id);
-    CREATE INDEX IF NOT EXISTS idx_ocr_validations_enrollment_id ON ocr_validations(enrollment_id);
-    CREATE INDEX IF NOT EXISTS idx_ocr_manual_corrections_document_id ON ocr_manual_corrections(document_id);
-  `;
-}
-
-/**
- * Serviço de OCR avançado para processamento de documentos
- */
-export class AdvancedOcrService {
-  private scheduler: Scheduler | null = null;
+class AdvancedOcrService {
   private workers: Worker[] = [];
-  private initialized = false;
-  private workerCount = 0;
-  private uploadDir = path.join(process.cwd(), 'uploads', 'documents');
-  private inactiveMode = false;
+  private numWorkers: number = 2;
+  private languages: string[] = ['por'];
+  private dataPath: string;
+  private ready: boolean = false;
+  private inactiveMode: boolean = false;
+  
+  constructor(config?: OCRServiceConfig) {
+    this.numWorkers = config?.workers || 2;
+    this.languages = config?.languages || ['por'];
+    this.dataPath = config?.dataPath || path.join(process.cwd());
+    this.inactiveMode = config?.inactiveMode || false;
+  }
   
   /**
-   * Define modo inativo para o serviço
-   * @param inactive true para ativar modo inativo/fallback
+   * Inicializa o serviço de OCR
+   */
+  async initialize(): Promise<void> {
+    console.log('Inicializando serviço de OCR avançado...');
+    
+    try {
+      // Garantir que as tabelas existem
+      await this.ensureTables();
+      
+      // Se estiver em modo inativo, não inicializar workers
+      if (this.inactiveMode) {
+        console.log('OCR em modo inativo. Workers não serão inicializados.');
+        this.ready = true;
+        return;
+      }
+      
+      // Inicializar workers do Tesseract
+      for (let i = 0; i < this.numWorkers; i++) {
+        await this.initWorker(i);
+      }
+      
+      this.ready = true;
+      console.log('Serviço de OCR avançado inicializado com sucesso!');
+    } catch (error) {
+      console.error('Erro ao inicializar serviço OCR:', error);
+      
+      // Em caso de erro, ativar modo inativo
+      this.inactiveMode = true;
+      this.ready = true;
+      console.warn('OCR em modo inativo devido a erro de inicialização.');
+    }
+  }
+  
+  /**
+   * Define o modo inativo do serviço
+   * @param inactive Status do modo inativo
    */
   setInactiveMode(inactive: boolean): void {
     this.inactiveMode = inactive;
-    if (inactive) {
-      console.log('AdvancedOcrService ativou modo inativo (fallback)');
-    }
   }
   
   /**
-   * Verifica se o serviço está em modo inativo/fallback
-   * @returns true se estiver em modo inativo
+   * Verifica se o serviço está em modo inativo
+   * @returns Status do modo inativo
    */
   isInactiveMode(): boolean {
     return this.inactiveMode;
   }
   
   /**
-   * Verifica se o serviço foi inicializado
-   * @returns true se o serviço foi inicializado
+   * Obtém o status atual do serviço
+   * @returns Status do serviço OCR
    */
-  isInitialized(): boolean {
-    return this.initialized;
+  getStatus(): {
+    ready: boolean;
+    workers: number;
+    inactiveMode: boolean;
+    languages: string[];
+  } {
+    return {
+      ready: this.ready,
+      workers: this.workers.length,
+      inactiveMode: this.inactiveMode,
+      languages: this.languages
+    };
   }
   
   /**
-   * Obtém a quantidade de workers ativos
-   * @returns número de workers disponíveis
+   * Inicializa um worker do Tesseract
+   * @param index Índice do worker
    */
-  getWorkerCount(): number {
-    return this.workers.length;
+  private async initWorker(index: number): Promise<void> {
+    console.log(`Criando worker OCR #${index + 1}...`);
+    
+    // Criar worker sem logger customizado para evitar erro de serialização
+    const worker = await createWorker();
+    
+    // Tesseract.js 4.0 removeu os métodos de loadLanguage/initialize
+    // Apenas adicionamos o worker criado à lista
+    
+    this.workers.push(worker);
   }
   
   /**
-   * Inicializa o serviço de OCR
-   * @param workerCount Número de workers para processamento paralelo
-   * @returns Instância do serviço
+   * Garante que as tabelas necessárias existem no banco
    */
-  async initialize(workerCount = 2): Promise<AdvancedOcrService> {
-    if (this.initialized) {
-      return this;
-    }
-
-    try {
-      console.log('Inicializando serviço de OCR avançado...');
-      
-      // Garantir que o diretório de uploads existe
-      if (!fs.existsSync(this.uploadDir)) {
-        fs.mkdirSync(this.uploadDir, { recursive: true });
-      }
-      
-      try {
-        this.workerCount = workerCount;
-        this.scheduler = createScheduler();
-        
-        // Criar workers para processamento paralelo
-        for (let i = 0; i < workerCount; i++) {
-          console.log(`Criando worker OCR #${i + 1}...`);
-          const worker = await createWorker('por+eng', 1, {
-            logger: m => console.log(`OCR Worker #${i + 1}:`, m)
-          });
-          this.workers.push(worker);
-          this.scheduler.addWorker(worker);
-        }
-        
-        this.initialized = true;
-        this.inactiveMode = false;
-        console.log('Serviço de OCR avançado inicializado com sucesso!');
-      } catch (initError) {
-        console.warn(`Falha ao inicializar trabalhadores OCR: ${initError.message}`);
-        console.warn('OCR avançado será inicializado em modo inativo (fallback)');
-        this.inactiveMode = true;
-        this.initialized = true;
-      }
-      
-      return this;
-    } catch (error) {
-      console.error('Erro ao inicializar serviço de OCR:', error);
-      console.warn('OCR avançado será inicializado em modo inativo (fallback)');
-      this.inactiveMode = true;
-      this.initialized = true;
-      return this;
-    }
+  private async ensureTables(): Promise<void> {
+    // Tabela para documentos validados
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS document_validations (
+        id UUID PRIMARY KEY,
+        document_id INTEGER NOT NULL,
+        document_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        confidence FLOAT NOT NULL,
+        extracted_data JSONB,
+        errors JSONB,
+        warnings JSONB,
+        cross_validation JSONB,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+      )
+    `);
+    
+    // Tabela para metadados de documentos
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS document_metadata (
+        id SERIAL PRIMARY KEY,
+        document_id INTEGER NOT NULL,
+        field_name TEXT NOT NULL,
+        field_value TEXT,
+        confidence FLOAT,
+        source TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+      )
+    `);
   }
-
+  
   /**
-   * Processa um documento para extração de informações
-   * @param filePath Caminho do arquivo a ser processado
-   * @param documentType Tipo do documento (RG, CPF, comprovante de residência, etc)
-   * @param enrollmentId ID da matrícula associada (opcional)
-   * @returns Resultado do processamento OCR
-   */
-  async processDocument(
-    filePath: string,
-    documentType: string,
-    enrollmentId?: number
-  ): Promise<{
-    id: string;
-    documentType: string;
-    extractedData: any;
-    overallConfidence: number;
-    processingTimeMs: number;
-    originalText?: string;
-    filePath: string;
-    enrollmentId?: number;
-  }> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-
-    const startTime = Date.now();
-    console.log(`Iniciando processamento OCR para documento: ${filePath}`);
-
-    try {
-      // Verificar se o arquivo existe
-      if (!fs.existsSync(filePath)) {
-        throw new Error(`Arquivo não encontrado: ${filePath}`);
-      }
-
-      // Processar o documento
-      let result: { data: { text: string, confidence: number } };
-      let extractedData: any;
-      
-      if (this.inactiveMode || !this.scheduler) {
-        console.log('Processando documento em modo inativo (fallback)');
-        // Gerar um resultado básico usando informações do nome do arquivo
-        const fileName = path.basename(filePath);
-        const fileExt = path.extname(filePath).toLowerCase();
-        
-        // Detectar tipo de documento pelo nome do arquivo
-        const fileType = fileName.toLowerCase().includes('rg') ? 'RG' : 
-                         fileName.toLowerCase().includes('cpf') ? 'CPF' : 
-                         fileName.toLowerCase().includes('residencia') ? 'Comprovante de Residência' : 
-                         'Documento';
-        
-        result = {
-          data: {
-            text: `[Modo Inativo] ${fileType}: ${fileName}`,
-            confidence: 50.0 // 50% de confiança em modo inativo
-          }
-        };
-        
-        // Extrair informações básicas em modo inativo
-        extractedData = {
-          documentName: fileName,
-          documentType: documentType,
-          fileExtension: fileExt,
-          uploadPath: filePath,
-          confidence: {
-            overall: 0.5
-          }
-        };
-      } else {
-        // Executar OCR normal
-        result = await this.scheduler.addJob('recognize', filePath);
-        // Extrair informações específicas do documento
-        extractedData = this.extractDataByDocumentType(result.data.text, documentType);
-      }
-      
-      const processingTimeMs = Date.now() - startTime;
-
-      console.log(`OCR concluído em ${processingTimeMs}ms${this.inactiveMode ? ' (modo inativo)' : ` com confiança: ${result.data.confidence}%`}`);
-      
-      // Criar registro do documento processado
-      const documentId = uuidv4();
-      const documentRecord = {
-        id: documentId,
-        documentType,
-        extractedData,
-        overallConfidence: result.data.confidence,
-        processingTimeMs,
-        originalText: result.data.text,
-        filePath,
-        enrollmentId
-      };
-
-      // Salvar no banco de dados
-      if (storage.createOcrDocument) {
-        await storage.createOcrDocument(documentRecord);
-      }
-
-      return documentRecord;
-    } catch (error) {
-      console.error('Erro ao processar documento:', error);
-      
-      if (this.inactiveMode) {
-        // Criar uma resposta fallback em caso de erro no modo inativo
-        const fileName = path.basename(filePath);
-        const documentId = uuidv4();
-        const processingTimeMs = Date.now() - startTime;
-        
-        console.log(`Gerando resposta fallback para documento em modo inativo`);
-        
-        return {
-          id: documentId,
-          documentType,
-          extractedData: {
-            note: "Documento processado em modo fallback",
-            fileName: fileName
-          },
-          overallConfidence: 30.0,
-          processingTimeMs,
-          originalText: `[Fallback] Processamento em modo inativo para ${fileName}`,
-          filePath,
-          enrollmentId
-        };
-      }
-      
-      throw new Error(`Falha no processamento OCR: ${error.message}`);
-    }
-  }
-
-  /**
-   * Extrai dados específicos com base no tipo de documento
-   * @param text Texto extraído do documento
+   * Processa uma imagem de documento para extração de dados
+   * @param imagePathOrBuffer Caminho da imagem ou buffer
    * @param documentType Tipo do documento
-   * @returns Dados estruturados extraídos
-   */
-  private extractDataByDocumentType(text: string, documentType: string): any {
-    // Normalizar texto para facilitar extração
-    const normalizedText = this.normalizeText(text);
-
-    switch (documentType.toLowerCase()) {
-      case 'rg':
-        return this.extractRgData(normalizedText);
-      case 'cpf':
-        return this.extractCpfData(normalizedText);
-      case 'comprovante_residencia':
-        return this.extractAddressData(normalizedText);
-      case 'historico_escolar':
-        return this.extractSchoolRecordData(normalizedText);
-      case 'certidao_nascimento':
-        return this.extractBirthCertificateData(normalizedText);
-      default:
-        return this.extractGenericData(normalizedText);
-    }
-  }
-
-  /**
-   * Normaliza o texto para facilitar extração de dados
-   * @param text Texto a ser normalizado
-   * @returns Texto normalizado
-   */
-  private normalizeText(text: string): string {
-    return text
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '') // Remove acentos
-      .replace(/\s+/g, ' ')            // Normaliza espaços
-      .trim();
-  }
-
-  /**
-   * Extrai dados de um RG
-   * @param text Texto normalizado
-   * @returns Dados extraídos
-   */
-  private extractRgData(text: string): any {
-    const rgRegex = /rg[:\s]*([0-9]+[0-9x\-\.\/]*)/i;
-    const nameRegex = /nome[:\s]*([a-z\s]+)/i;
-    const birthDateRegex = /(nascimento|data\s+de\s+nascimento|nasc)[:\s]*([0-9]{2}[\/\.\-][0-9]{2}[\/\.\-][0-9]{2,4})/i;
-    const filiationRegex = /(filiacao|filho\s+de)[:\s]*([a-z\s]+)/i;
-    const cpfRegex = /cpf[:\s]*([0-9]{3}[\.|\s]?[0-9]{3}[\.|\s]?[0-9]{3}[-|\s]?[0-9]{2})/i;
-    
-    const rgMatch = text.match(rgRegex);
-    const nameMatch = text.match(nameRegex);
-    const birthDateMatch = text.match(birthDateRegex);
-    const filiationMatch = text.match(filiationRegex);
-    const cpfMatch = text.match(cpfRegex);
-    
-    return {
-      documentNumber: rgMatch ? rgMatch[1].replace(/\s+/g, '') : null,
-      name: nameMatch ? this.capitalizeWords(nameMatch[1]) : null,
-      birthDate: birthDateMatch ? birthDateMatch[2] : null,
-      filiation: filiationMatch ? this.capitalizeWords(filiationMatch[2]) : null,
-      cpf: cpfMatch ? cpfMatch[1].replace(/\D/g, '') : null,
-      confidence: {
-        documentNumber: rgMatch ? 0.8 : 0,
-        name: nameMatch ? 0.7 : 0,
-        birthDate: birthDateMatch ? 0.75 : 0,
-        filiation: filiationMatch ? 0.6 : 0,
-        cpf: cpfMatch ? 0.85 : 0
-      }
-    };
-  }
-
-  /**
-   * Extrai dados de um CPF
-   * @param text Texto normalizado
-   * @returns Dados extraídos
-   */
-  private extractCpfData(text: string): any {
-    const cpfRegex = /([0-9]{3}[\.|\s]?[0-9]{3}[\.|\s]?[0-9]{3}[-|\s]?[0-9]{2})/g;
-    const nameRegex = /nome[:\s]*([a-z\s]+)/i;
-    const birthDateRegex = /(nascimento|data\s+de\s+nascimento|nasc)[:\s]*([0-9]{2}[\/\.\-][0-9]{2}[\/\.\-][0-9]{2,4})/i;
-    
-    // Encontrar todos os números que se parecem com CPF
-    const cpfMatches = [...text.matchAll(cpfRegex)].map(match => match[1].replace(/\D/g, ''));
-    const nameMatch = text.match(nameRegex);
-    const birthDateMatch = text.match(birthDateRegex);
-    
-    // Validar qual é o número de CPF mais provável
-    let cpfNumber = cpfMatches.length > 0 ? cpfMatches[0] : null;
-    
-    return {
-      documentNumber: cpfNumber,
-      name: nameMatch ? this.capitalizeWords(nameMatch[1]) : null,
-      birthDate: birthDateMatch ? birthDateMatch[2] : null,
-      confidence: {
-        documentNumber: cpfNumber ? 0.9 : 0,
-        name: nameMatch ? 0.7 : 0,
-        birthDate: birthDateMatch ? 0.75 : 0
-      }
-    };
-  }
-
-  /**
-   * Extrai dados de um comprovante de residência
-   * @param text Texto normalizado
-   * @returns Dados extraídos
-   */
-  private extractAddressData(text: string): any {
-    const streetRegex = /((rua|r\.|avenida|av\.|alameda|al\.|praca|pc\.)\s+[a-z0-9\s]+),/i;
-    const numberRegex = /([nº°\.]\s*([0-9]+))/i;
-    const neighborhoodRegex = /(bairro|b\.)[:\s]*([a-z\s]+)/i;
-    const cityRegex = /(cidade|city)[:\s]*([a-z\s]+)/i;
-    const stateRegex = /(estado|uf|state)[:\s]*([a-z]{2})/i;
-    const zipRegex = /(cep|codigo postal)[:\s]*([0-9]{5}[-]?[0-9]{3})/i;
-    const nameRegex = /(cliente|consumidor|titular|nome)[:\s]*([a-z\s]+)/i;
-    
-    const streetMatch = text.match(streetRegex);
-    const numberMatch = text.match(numberRegex);
-    const neighborhoodMatch = text.match(neighborhoodRegex);
-    const cityMatch = text.match(cityRegex);
-    const stateMatch = text.match(stateRegex);
-    const zipMatch = text.match(zipRegex);
-    const nameMatch = text.match(nameRegex);
-    
-    return {
-      street: streetMatch ? this.capitalizeWords(streetMatch[1]) : null,
-      number: numberMatch ? numberMatch[2] : null,
-      neighborhood: neighborhoodMatch ? this.capitalizeWords(neighborhoodMatch[2]) : null,
-      city: cityMatch ? this.capitalizeWords(cityMatch[2]) : null,
-      state: stateMatch ? stateMatch[2].toUpperCase() : null,
-      zipCode: zipMatch ? zipMatch[2].replace(/\D/g, '') : null,
-      name: nameMatch ? this.capitalizeWords(nameMatch[2]) : null,
-      confidence: {
-        address: (streetMatch && numberMatch) ? 0.8 : 0.5,
-        name: nameMatch ? 0.7 : 0
-      }
-    };
-  }
-
-  /**
-   * Extrai dados de um histórico escolar
-   * @param text Texto normalizado
-   * @returns Dados extraídos
-   */
-  private extractSchoolRecordData(text: string): any {
-    const schoolNameRegex = /(escola|colegio|instituicao)[:\s]*([a-z\s]+)/i;
-    const studentNameRegex = /(aluno|estudante|nome)[:\s]*([a-z\s]+)/i;
-    const gradeRegex = /(serie|ano)[:\s]*([0-9][°ºa]?)(\s+ano)?/i;
-    const yearRegex = /(ano\s+letivo)[:\s]*([0-9]{4})/i;
-    
-    const schoolNameMatch = text.match(schoolNameRegex);
-    const studentNameMatch = text.match(studentNameRegex);
-    const gradeMatch = text.match(gradeRegex);
-    const yearMatch = text.match(yearRegex);
-    
-    // Extrair disciplinas e notas
-    const subjects: {name: string, grade: number}[] = [];
-    const subjectRegex = /(matematica|portugues|ciencias|historia|geografia|fisica|quimica|biologia|artes|educacao fisica|ingles)[:\s]*([0-9]{1,2}[,.][0-9])/gi;
-    
-    let match;
-    while ((match = subjectRegex.exec(text)) !== null) {
-      const subjectName = this.capitalizeWords(match[1]);
-      const grade = parseFloat(match[2].replace(',', '.'));
-      subjects.push({ name: subjectName, grade });
-    }
-    
-    return {
-      schoolName: schoolNameMatch ? this.capitalizeWords(schoolNameMatch[2]) : null,
-      studentName: studentNameMatch ? this.capitalizeWords(studentNameMatch[2]) : null,
-      grade: gradeMatch ? gradeMatch[2] : null,
-      year: yearMatch ? yearMatch[2] : null,
-      subjects: subjects.length > 0 ? subjects : null,
-      confidence: {
-        schoolName: schoolNameMatch ? 0.75 : 0,
-        studentName: studentNameMatch ? 0.8 : 0,
-        grade: gradeMatch ? 0.7 : 0,
-        year: yearMatch ? 0.85 : 0,
-        subjects: subjects.length > 0 ? 0.65 : 0
-      }
-    };
-  }
-
-  /**
-   * Extrai dados de uma certidão de nascimento
-   * @param text Texto normalizado
-   * @returns Dados extraídos
-   */
-  private extractBirthCertificateData(text: string): any {
-    const nameRegex = /(nome|registrado)[:\s]*([a-z\s]+)/i;
-    const birthDateRegex = /(nascimento|data\s+de\s+nascimento|nasc|nascido\s+em)[:\s]*([0-9]{2}[\/\.\-][0-9]{2}[\/\.\-][0-9]{2,4})/i;
-    const birthPlaceRegex = /(local\s+de\s+nascimento|local\s+nasc|municipio\s+de\s+nascimento)[:\s]*([a-z\s,]+)/i;
-    const motherRegex = /(mae|genitora)[:\s]*([a-z\s]+)/i;
-    const fatherRegex = /(pai|genitor)[:\s]*([a-z\s]+)/i;
-    const registerNumberRegex = /(registro|matricula)[:\s]*([0-9]+)/i;
-    
-    const nameMatch = text.match(nameRegex);
-    const birthDateMatch = text.match(birthDateRegex);
-    const birthPlaceMatch = text.match(birthPlaceRegex);
-    const motherMatch = text.match(motherRegex);
-    const fatherMatch = text.match(fatherRegex);
-    const registerNumberMatch = text.match(registerNumberRegex);
-    
-    return {
-      name: nameMatch ? this.capitalizeWords(nameMatch[2]) : null,
-      birthDate: birthDateMatch ? birthDateMatch[2] : null,
-      birthPlace: birthPlaceMatch ? this.capitalizeWords(birthPlaceMatch[2]) : null,
-      motherName: motherMatch ? this.capitalizeWords(motherMatch[2]) : null,
-      fatherName: fatherMatch ? this.capitalizeWords(fatherMatch[2]) : null,
-      registerNumber: registerNumberMatch ? registerNumberMatch[2] : null,
-      confidence: {
-        name: nameMatch ? 0.8 : 0,
-        birthDate: birthDateMatch ? 0.85 : 0,
-        birthPlace: birthPlaceMatch ? 0.7 : 0,
-        motherName: motherMatch ? 0.75 : 0,
-        fatherName: fatherMatch ? 0.7 : 0,
-        registerNumber: registerNumberMatch ? 0.9 : 0
-      }
-    };
-  }
-
-  /**
-   * Extrai dados genéricos de documentos não categorizados
-   * @param text Texto normalizado
-   * @returns Dados extraídos
-   */
-  private extractGenericData(text: string): any {
-    const nameRegex = /(nome)[:\s]*([a-z\s]+)/i;
-    const birthDateRegex = /(nascimento|data\s+de\s+nascimento|nasc)[:\s]*([0-9]{2}[\/\.\-][0-9]{2}[\/\.\-][0-9]{2,4})/i;
-    const rgRegex = /rg[:\s]*([0-9]+[0-9x\-\.\/]*)/i;
-    const cpfRegex = /cpf[:\s]*([0-9]{3}[\.|\s]?[0-9]{3}[\.|\s]?[0-9]{3}[-|\s]?[0-9]{2})/i;
-    const addressRegex = /(endereco|residencia)[:\s]*([a-z0-9\s,\.]+)/i;
-    
-    const nameMatch = text.match(nameRegex);
-    const birthDateMatch = text.match(birthDateRegex);
-    const rgMatch = text.match(rgRegex);
-    const cpfMatch = text.match(cpfRegex);
-    const addressMatch = text.match(addressRegex);
-    
-    return {
-      name: nameMatch ? this.capitalizeWords(nameMatch[2]) : null,
-      birthDate: birthDateMatch ? birthDateMatch[2] : null,
-      rg: rgMatch ? rgMatch[1].replace(/\s+/g, '') : null,
-      cpf: cpfMatch ? cpfMatch[1].replace(/\D/g, '') : null,
-      address: addressMatch ? this.capitalizeWords(addressMatch[2]) : null,
-      confidence: {
-        name: nameMatch ? 0.7 : 0,
-        birthDate: birthDateMatch ? 0.75 : 0,
-        rg: rgMatch ? 0.8 : 0,
-        cpf: cpfMatch ? 0.85 : 0,
-        address: addressMatch ? 0.6 : 0
-      }
-    };
-  }
-
-  /**
-   * Capitaliza a primeira letra de cada palavra
-   * @param text Texto a ser capitalizado
-   * @returns Texto com palavras capitalizadas
-   */
-  private capitalizeWords(text: string): string {
-    return text
-      .split(' ')
-      .map(word => {
-        if (word.length === 0) return '';
-        return word.charAt(0).toUpperCase() + word.slice(1);
-      })
-      .join(' ')
-      .trim();
-  }
-
-  /**
-   * Realiza validação cruzada entre documentos
-   * @param enrollmentId ID da matrícula
+   * @param documentId ID do documento no sistema
+   * @param options Opções adicionais
    * @returns Resultado da validação
    */
-  async crossValidateDocuments(enrollmentId: number): Promise<{
-    isValid: boolean;
-    score: number;
-    validationData: any;
-    reviewRequired: boolean;
-  }> {
-    try {
-      // Verificar se estamos em modo inativo
-      if (this.inactiveMode) {
-        console.log(`Validação cruzada em modo inativo para matrícula ${enrollmentId}`);
-        return {
-          isValid: true, // No modo inativo, sempre retorna válido para não bloquear o fluxo
-          score: 0.8,
-          validationData: { 
-            message: 'Validação realizada em modo inativo. Recomenda-se revisão manual dos documentos.',
-            fields: {
-              name: { score: 0.8, matches: [], discrepancies: [] },
-              birthDate: { score: 0.8, matches: [], discrepancies: [] },
-              documentNumber: { score: 0.9, matches: [], discrepancies: [] }
-            }
+  async processDocument(
+    imagePathOrBuffer: string | Buffer,
+    documentType: DocumentType,
+    documentId: number,
+    options: {
+      userId?: number;
+      enrollmentId?: number;
+      requiredFields?: string[];
+    } = {}
+  ): Promise<ValidationResult> {
+    // Verificar se o serviço está pronto
+    if (!this.ready) {
+      throw new Error('Serviço OCR não está inicializado.');
+    }
+    
+    // Gerar ID para o resultado da validação
+    const validationId = uuidv4();
+    
+    // Se em modo inativo, simular processo
+    if (this.inactiveMode) {
+      console.log(`[OCR Inativo] Simulando processamento de documento ${documentId} (${documentType})`);
+      
+      // Criar resultado simulado
+      const result: ValidationResult = {
+        id: validationId,
+        documentId,
+        documentType,
+        status: 'pending',
+        confidence: 0,
+        extractedData: {},
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      
+      // Registrar em log
+      if (options.userId) {
+        await logAction(
+          options.userId,
+          'document_process_simulated',
+          'document',
+          documentId.toString(),
+          { 
+            documentType,
+            validationId,
+            inactiveMode: true
           },
-          reviewRequired: true // Mas sempre requer revisão manual
-        };
+          'info'
+        );
       }
       
-      // Buscar todos os documentos da matrícula
-      const documentsResult = await db.execute(
-        `SELECT * FROM ocr_documents WHERE enrollment_id = $1`,
-        [enrollmentId]
-      );
+      return result;
+    }
+    
+    // Obter imagem para processamento
+    let imageBuffer: Buffer;
+    
+    if (typeof imagePathOrBuffer === 'string') {
+      imageBuffer = fs.readFileSync(imagePathOrBuffer);
+    } else {
+      imageBuffer = imagePathOrBuffer;
+    }
+    
+    try {
+      // Selecionar worker disponível (round-robin simples)
+      const workerIndex = documentId % this.workers.length;
+      const worker = this.workers[workerIndex];
       
-      const documents = documentsResult.rows;
+      // Executar OCR
+      const result = await worker.recognize(imageBuffer);
       
-      if (!documents || documents.length < 2) {
-        return {
-          isValid: false,
-          score: 0,
-          validationData: { message: 'Insuficiente documentos para validação cruzada' },
-          reviewRequired: true
-        };
+      // Dados extraídos e confiança
+      const { text, confidence } = result.data;
+      
+      // Estruturar dados baseado no tipo de documento
+      const extractedData = await this.extractDocumentData(text, documentType);
+      
+      // Calcular status inicial de validação
+      let status: ValidationStatus = 'pending';
+      const requiredFields = options.requiredFields || this.getRequiredFieldsForDocumentType(documentType);
+      
+      // Validar se campos obrigatórios foram extraídos
+      const missingFields = requiredFields.filter(field => {
+        const fieldPath = field.split('.');
+        let current = extractedData;
+        
+        for (const key of fieldPath) {
+          if (current === undefined || current[key] === undefined) {
+            return true;
+          }
+          current = current[key];
+        }
+        
+        return false;
+      });
+      
+      const warnings = [];
+      const errors = [];
+      
+      if (missingFields.length > 0) {
+        warnings.push(`Campos obrigatórios não encontrados: ${missingFields.join(', ')}`);
+        status = 'needs_review';
       }
-
-      // Extrair dados para comparação
-      const comparisonData = this.extractComparisonData(documents);
       
-      // Calcular score de similaridade
-      const validationResult = this.calculateSimilarityScore(comparisonData);
+      if (confidence < 65) {
+        warnings.push(`Baixa confiança na extração (${confidence.toFixed(2)}%)`);
+        status = 'needs_review';
+      }
       
-      // Registrar resultado da validação
-      if (storage.createOcrValidation) {
-        await storage.createOcrValidation({
-          documentId: documents[0].id,
-          enrollmentId,
-          validationResult: validationResult,
-          score: validationResult.score,
-          isValid: validationResult.isValid,
-          reviewRequired: validationResult.reviewRequired
-        });
+      // Salvar metadados extraídos
+      await this.saveDocumentMetadata(documentId, extractedData, confidence, 'ocr');
+      
+      // Realizar validação cruzada (se aplicável)
+      let crossValidation = undefined;
+      
+      if (options.enrollmentId) {
+        crossValidation = await this.performCrossValidation(documentId, documentType, extractedData, options.enrollmentId);
+        
+        // Atualizar status baseado na validação cruzada
+        if (crossValidation.status === 'invalid') {
+          status = 'needs_review';
+          errors.push('Inconsistências encontradas na validação cruzada');
+        }
+      }
+      
+      // Criar resultado completo
+      const validationResult: ValidationResult = {
+        id: validationId,
+        documentId,
+        documentType,
+        status,
+        confidence,
+        extractedData,
+        warnings: warnings.length > 0 ? warnings : undefined,
+        errors: errors.length > 0 ? errors : undefined,
+        crossValidation,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      
+      // Persistir resultado
+      await this.saveValidationResult(validationResult);
+      
+      // Registrar em log
+      if (options.userId) {
+        await logAction(
+          options.userId,
+          'document_processed',
+          'document',
+          documentId.toString(),
+          { 
+            documentType,
+            validationId,
+            status,
+            confidence
+          },
+          status === 'invalid' ? 'warning' : 'info'
+        );
       }
       
       return validationResult;
     } catch (error) {
-      console.error('Erro na validação cruzada:', error);
+      console.error(`Erro ao processar documento ${documentId}:`, error);
       
-      if (this.inactiveMode) {
-        // Fornecer resposta fallback em caso de erro no modo inativo
-        console.log('Usando resposta fallback para validação cruzada (modo inativo)');
-        return {
-          isValid: true,
-          score: 0.7,
-          validationData: {
-            message: 'Erro durante validação cruzada (modo inativo). Recomenda-se revisão manual.',
-            errorMessage: error.message
+      // Criar resultado de falha
+      const failedResult: ValidationResult = {
+        id: validationId,
+        documentId,
+        documentType,
+        status: 'needs_review',
+        confidence: 0,
+        extractedData: {},
+        errors: [error instanceof Error ? error.message : String(error)],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      
+      // Persistir resultado
+      await this.saveValidationResult(failedResult);
+      
+      // Registrar em log
+      if (options.userId) {
+        await logAction(
+          options.userId,
+          'document_process_failed',
+          'document',
+          documentId.toString(),
+          { 
+            documentType,
+            validationId,
+            error: error instanceof Error ? error.message : String(error)
           },
-          reviewRequired: true
+          'error'
+        );
+      }
+      
+      return failedResult;
+    }
+  }
+  
+  /**
+   * Atualiza manualmente o status de validação
+   * @param validationId ID da validação
+   * @param newStatus Novo status
+   * @param userId ID do usuário que fez a atualização
+   * @param notes Notas adicionais
+   * @returns Resultado atualizado
+   */
+  async updateValidationStatus(
+    validationId: string,
+    newStatus: ValidationStatus,
+    userId: number,
+    notes?: string
+  ): Promise<ValidationResult | null> {
+    try {
+      // Atualizar no banco
+      await db.execute(`
+        UPDATE document_validations 
+        SET 
+          status = $1,
+          updated_at = NOW(),
+          notes = $2
+        WHERE id = $3
+      `, [newStatus, notes || null, validationId]);
+      
+      // Buscar resultado atualizado
+      const result = await db.execute(`
+        SELECT * FROM document_validations
+        WHERE id = $1
+      `, [validationId]);
+      
+      if (!result.rows.length) {
+        return null;
+      }
+      
+      // Registrar em log
+      await logAction(
+        userId,
+        'document_validation_updated',
+        'document_validation',
+        validationId,
+        { 
+          newStatus,
+          notes
+        },
+        'info'
+      );
+      
+      // Converter para o formato esperado
+      const row = result.rows[0];
+      return {
+        id: row.id,
+        documentId: row.document_id,
+        documentType: row.document_type as DocumentType,
+        status: row.status as ValidationStatus,
+        confidence: row.confidence,
+        extractedData: row.extracted_data,
+        errors: row.errors,
+        warnings: row.warnings,
+        crossValidation: row.cross_validation,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      };
+    } catch (error) {
+      console.error(`Erro ao atualizar status de validação ${validationId}:`, error);
+      return null;
+    }
+  }
+  
+  /**
+   * Extrai estrutura de dados específica para cada tipo de documento
+   * @param text Texto extraído via OCR
+   * @param documentType Tipo do documento
+   * @returns Dados estruturados
+   */
+  private async extractDocumentData(text: string, documentType: DocumentType): Promise<any> {
+    // Normalizar texto
+    const normalizedText = text
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+    
+    // Estruturas de dados específicas por tipo de documento
+    switch (documentType) {
+      case 'rg': 
+        return this.extractRgData(normalizedText);
+      case 'cpf': 
+        return this.extractCpfData(normalizedText);
+      case 'address_proof': 
+        return this.extractAddressProofData(normalizedText);
+      case 'school_certificate': 
+        return this.extractSchoolCertificateData(normalizedText);
+      case 'birth_certificate': 
+        return this.extractBirthCertificateData(normalizedText);
+      default:
+        return { rawText: text };
+    }
+  }
+  
+  /**
+   * Extrai dados de um RG
+   * @param text Texto normalizado
+   * @returns Dados estruturados
+   */
+  private extractRgData(text: string): any {
+    // Expressões regulares para extração
+    const rgNumberRegex = /rg[:\s]*([0-9]{1,2}\.?[0-9]{3}\.?[0-9]{3}-?[0-9xX]?)/i;
+    const nameRegex = /nome[:\s]*([\p{L}\s]+)/ui;
+    const birthDateRegex = /nascimento[:\s]*([0-9]{2}\/[0-9]{2}\/[0-9]{4}|[0-9]{2}\.[0-9]{2}\.[0-9]{4})/i;
+    const issueDateRegex = /expedi[cç][aã]o[:\s]*([0-9]{2}\/[0-9]{2}\/[0-9]{4}|[0-9]{2}\.[0-9]{2}\.[0-9]{4})/i;
+    const fatherRegex = /pai[:\s]*([\p{L}\s]+)/ui;
+    const motherRegex = /m[ãa]e[:\s]*([\p{L}\s]+)/ui;
+    
+    // Extrair dados
+    const data: any = {};
+    
+    const rgMatch = text.match(rgNumberRegex);
+    if (rgMatch && rgMatch[1]) {
+      data.number = rgMatch[1].replace(/[^0-9xX]/g, '');
+    }
+    
+    const nameMatch = text.match(nameRegex);
+    if (nameMatch && nameMatch[1]) {
+      data.name = nameMatch[1].trim();
+    }
+    
+    const birthDateMatch = text.match(birthDateRegex);
+    if (birthDateMatch && birthDateMatch[1]) {
+      data.birthDate = birthDateMatch[1];
+    }
+    
+    const issueDateMatch = text.match(issueDateRegex);
+    if (issueDateMatch && issueDateMatch[1]) {
+      data.issueDate = issueDateMatch[1];
+    }
+    
+    const fatherMatch = text.match(fatherRegex);
+    if (fatherMatch && fatherMatch[1]) {
+      data.father = fatherMatch[1].trim();
+    }
+    
+    const motherMatch = text.match(motherRegex);
+    if (motherMatch && motherMatch[1]) {
+      data.mother = motherMatch[1].trim();
+    }
+    
+    return data;
+  }
+  
+  /**
+   * Extrai dados de um CPF
+   * @param text Texto normalizado
+   * @returns Dados estruturados
+   */
+  private extractCpfData(text: string): any {
+    // Expressões regulares para extração
+    const cpfNumberRegex = /([0-9]{3}\.?[0-9]{3}\.?[0-9]{3}-?[0-9]{2})/i;
+    const nameRegex = /nome[:\s]*([\p{L}\s]+)/ui;
+    
+    // Extrair dados
+    const data: any = {};
+    
+    const cpfMatch = text.match(cpfNumberRegex);
+    if (cpfMatch && cpfMatch[1]) {
+      data.number = cpfMatch[1].replace(/[^0-9]/g, '');
+    }
+    
+    const nameMatch = text.match(nameRegex);
+    if (nameMatch && nameMatch[1]) {
+      data.name = nameMatch[1].trim();
+    }
+    
+    return data;
+  }
+  
+  /**
+   * Extrai dados de um comprovante de endereço
+   * @param text Texto normalizado
+   * @returns Dados estruturados
+   */
+  private extractAddressProofData(text: string): any {
+    // Expressões regulares para extração
+    const nameRegex = /nome[:\s]*([\p{L}\s]+)/ui;
+    const addressRegex = /endere[çc]o[:\s]*([\p{L}\d\s,\.-]+)/ui;
+    const zipCodeRegex = /cep[:\s]*([0-9]{5}-?[0-9]{3})/i;
+    const cityRegex = /cidade[:\s]*([\p{L}\s]+)/ui;
+    const stateRegex = /estado[:\s]*([\p{L}\s]+)/ui;
+    
+    // Extrair dados
+    const data: any = {};
+    
+    const nameMatch = text.match(nameRegex);
+    if (nameMatch && nameMatch[1]) {
+      data.name = nameMatch[1].trim();
+    }
+    
+    const addressMatch = text.match(addressRegex);
+    if (addressMatch && addressMatch[1]) {
+      data.address = addressMatch[1].trim();
+    }
+    
+    const zipCodeMatch = text.match(zipCodeRegex);
+    if (zipCodeMatch && zipCodeMatch[1]) {
+      data.zipCode = zipCodeMatch[1];
+    }
+    
+    const cityMatch = text.match(cityRegex);
+    if (cityMatch && cityMatch[1]) {
+      data.city = cityMatch[1].trim();
+    }
+    
+    const stateMatch = text.match(stateRegex);
+    if (stateMatch && stateMatch[1]) {
+      data.state = stateMatch[1].trim();
+    }
+    
+    return data;
+  }
+  
+  /**
+   * Extrai dados de um certificado escolar
+   * @param text Texto normalizado
+   * @returns Dados estruturados
+   */
+  private extractSchoolCertificateData(text: string): any {
+    // Expressões regulares para extração
+    const nameRegex = /nome[:\s]*([\p{L}\s]+)/ui;
+    const schoolRegex = /escola[:\s]*([\p{L}\s]+)/ui;
+    const gradeRegex = /s[ée]rie[:\s]*([\p{L}\d\s]+)/ui;
+    const issueDateRegex = /data[:\s]*([0-9]{2}\/[0-9]{2}\/[0-9]{4}|[0-9]{2}\.[0-9]{2}\.[0-9]{4})/i;
+    
+    // Extrair dados
+    const data: any = {};
+    
+    const nameMatch = text.match(nameRegex);
+    if (nameMatch && nameMatch[1]) {
+      data.name = nameMatch[1].trim();
+    }
+    
+    const schoolMatch = text.match(schoolRegex);
+    if (schoolMatch && schoolMatch[1]) {
+      data.school = schoolMatch[1].trim();
+    }
+    
+    const gradeMatch = text.match(gradeRegex);
+    if (gradeMatch && gradeMatch[1]) {
+      data.grade = gradeMatch[1].trim();
+    }
+    
+    const issueDateMatch = text.match(issueDateRegex);
+    if (issueDateMatch && issueDateMatch[1]) {
+      data.issueDate = issueDateMatch[1];
+    }
+    
+    return data;
+  }
+  
+  /**
+   * Extrai dados de uma certidão de nascimento
+   * @param text Texto normalizado
+   * @returns Dados estruturados
+   */
+  private extractBirthCertificateData(text: string): any {
+    // Expressões regulares para extração
+    const nameRegex = /nome[:\s]*([\p{L}\s]+)/ui;
+    const birthDateRegex = /nascimento[:\s]*([0-9]{2}\/[0-9]{2}\/[0-9]{4}|[0-9]{2}\.[0-9]{2}\.[0-9]{4})/i;
+    const fatherRegex = /pai[:\s]*([\p{L}\s]+)/ui;
+    const motherRegex = /m[ãa]e[:\s]*([\p{L}\s]+)/ui;
+    const registryRegex = /registro[:\s]*([\p{L}\d\s]+)/ui;
+    
+    // Extrair dados
+    const data: any = {};
+    
+    const nameMatch = text.match(nameRegex);
+    if (nameMatch && nameMatch[1]) {
+      data.name = nameMatch[1].trim();
+    }
+    
+    const birthDateMatch = text.match(birthDateRegex);
+    if (birthDateMatch && birthDateMatch[1]) {
+      data.birthDate = birthDateMatch[1];
+    }
+    
+    const fatherMatch = text.match(fatherRegex);
+    if (fatherMatch && fatherMatch[1]) {
+      data.father = fatherMatch[1].trim();
+    }
+    
+    const motherMatch = text.match(motherRegex);
+    if (motherMatch && motherMatch[1]) {
+      data.mother = motherMatch[1].trim();
+    }
+    
+    const registryMatch = text.match(registryRegex);
+    if (registryMatch && registryMatch[1]) {
+      data.registry = registryMatch[1].trim();
+    }
+    
+    return data;
+  }
+  
+  /**
+   * Realiza validação cruzada entre documentos
+   * @param documentId ID do documento atual
+   * @param documentType Tipo do documento atual
+   * @param extractedData Dados extraídos
+   * @param enrollmentId ID da matrícula
+   * @returns Resultado da validação cruzada
+   */
+  private async performCrossValidation(
+    documentId: number,
+    documentType: DocumentType,
+    extractedData: any,
+    enrollmentId: number
+  ): Promise<any> {
+    try {
+      // Buscar outros documentos da mesma matrícula
+      const result = await db.execute(`
+        SELECT d.id, d.document_type, dm.field_name, dm.field_value
+        FROM documents d
+        JOIN document_metadata dm ON d.id = dm.document_id
+        WHERE d.enrollment_id = $1 AND d.id != $2
+      `, [enrollmentId, documentId]);
+      
+      if (!result.rows.length) {
+        return {
+          status: 'pending',
+          matches: []
         };
       }
       
-      throw new Error(`Falha na validação de documentos: ${error.message}`);
-    }
-  }
-
-  /**
-   * Extrai dados para comparação entre documentos
-   * @param documents Lista de documentos
-   * @returns Dados para comparação
-   */
-  private extractComparisonData(documents: any[]): any {
-    const comparisonFields = {
-      name: [],
-      birthDate: [],
-      documentNumber: [],
-      cpf: [],
-      address: [],
-      // Mais campos conforme necessário
-    };
-    
-    // Popula os campos de comparação a partir dos documentos
-    documents.forEach(doc => {
-      const data = typeof doc.extracted_data === 'string' 
-        ? JSON.parse(doc.extracted_data) 
-        : doc.extracted_data;
+      // Organizar metadados por documento e campo
+      const metadataByDocument: { [documentId: number]: { type: string, fields: { [field: string]: string } } } = {};
       
-      if (data.name) comparisonFields.name.push(data.name);
-      if (data.birthDate) comparisonFields.birthDate.push(data.birthDate);
-      if (data.documentNumber) comparisonFields.documentNumber.push(data.documentNumber);
-      if (data.cpf) comparisonFields.cpf.push(data.cpf);
-      
-      // Campos específicos por tipo de documento
-      if (doc.document_type === 'comprovante_residencia' && data.street) {
-        const address = [data.street, data.number, data.neighborhood, data.city, data.state]
-          .filter(Boolean)
-          .join(', ');
-        comparisonFields.address.push(address);
-      }
-    });
-    
-    return comparisonFields;
-  }
-
-  /**
-   * Calcula score de similaridade entre documentos
-   * @param comparisonData Dados para comparação
-   * @returns Resultado da validação
-   */
-  private calculateSimilarityScore(comparisonData: any): any {
-    const fieldScores: Record<string, { score: number, matches: string[], discrepancies: string[] }> = {};
-    let totalScore = 0;
-    let fieldsWithData = 0;
-    
-    // Calcula a pontuação para cada campo
-    Object.keys(comparisonData).forEach(field => {
-      const values = comparisonData[field].filter(Boolean);
-      
-      if (values.length < 2) {
-        fieldScores[field] = { score: 0, matches: [], discrepancies: [] };
-        return;
-      }
-      
-      fieldsWithData++;
-      
-      // Compara todos os valores entre si
-      const matches: string[] = [];
-      const discrepancies: string[] = [];
-      let fieldScore = 0;
-      
-      const baseValue = values[0];
-      let matchCount = 0;
-      
-      for (let i = 1; i < values.length; i++) {
-        const similarity = this.calculateStringSimilarity(baseValue, values[i]);
+      for (const row of result.rows) {
+        if (!metadataByDocument[row.id]) {
+          metadataByDocument[row.id] = {
+            type: row.document_type,
+            fields: {}
+          };
+        }
         
-        if (similarity > 0.8) {
-          matchCount++;
-          matches.push(values[i]);
-        } else {
-          discrepancies.push(values[i]);
+        metadataByDocument[row.id].fields[row.field_name] = row.field_value;
+      }
+      
+      // Mapeamento de campos comparáveis entre tipos de documentos
+      const comparableFields: { [key: string]: { [key: string]: string[] } } = {
+        rg: {
+          cpf: ['name'],
+          birth_certificate: ['name', 'birthDate', 'father', 'mother'],
+          address_proof: ['name'],
+          school_certificate: ['name']
+        },
+        cpf: {
+          rg: ['name'],
+          birth_certificate: ['name'],
+          address_proof: ['name'],
+          school_certificate: ['name']
+        },
+        birth_certificate: {
+          rg: ['name', 'birthDate', 'father', 'mother'],
+          cpf: ['name'],
+          address_proof: ['name'],
+          school_certificate: ['name']
+        },
+        address_proof: {
+          rg: ['name'],
+          cpf: ['name'],
+          birth_certificate: ['name'],
+          school_certificate: ['name']
+        },
+        school_certificate: {
+          rg: ['name'],
+          cpf: ['name'],
+          birth_certificate: ['name'],
+          address_proof: ['name']
+        }
+      };
+      
+      // Realizar comparações
+      const matches: { field: string; match: boolean; source: string; confidence: number }[] = [];
+      let totalFields = 0;
+      let matchedFields = 0;
+      
+      for (const otherDocId in metadataByDocument) {
+        const otherDoc = metadataByDocument[otherDocId];
+        const fieldToCompare = comparableFields[documentType]?.[otherDoc.type] || [];
+        
+        for (const field of fieldToCompare) {
+          if (extractedData[field] && otherDoc.fields[field]) {
+            totalFields++;
+            
+            const similarity = this.calculateStringSimilarity(
+              extractedData[field].toLowerCase(),
+              otherDoc.fields[field].toLowerCase()
+            );
+            
+            // Considerar match se similaridade > 80%
+            const isMatch = similarity > 0.8;
+            
+            if (isMatch) {
+              matchedFields++;
+            }
+            
+            matches.push({
+              field,
+              match: isMatch,
+              source: `${otherDoc.type}#${otherDocId}`,
+              confidence: similarity
+            });
+          }
         }
       }
       
-      fieldScore = matchCount / (values.length - 1);
-      fieldScores[field] = { score: fieldScore, matches, discrepancies };
-      totalScore += fieldScore;
-    });
-    
-    // Calcular score final
-    const finalScore = fieldsWithData > 0 ? totalScore / fieldsWithData : 0;
-    const isValid = finalScore >= 0.7;
-    const reviewRequired = finalScore < 0.9;
-    
-    return {
-      isValid,
-      score: finalScore,
-      fieldScores,
-      reviewRequired,
-      message: this.generateValidationMessage(isValid, finalScore, fieldScores)
-    };
+      // Calcular status geral
+      let status: ValidationStatus;
+      
+      if (totalFields === 0) {
+        status = 'pending'; // Não há dados para comparar
+      } else {
+        const matchRate = matchedFields / totalFields;
+        
+        if (matchRate >= 0.8) {
+          status = 'valid';
+        } else if (matchRate >= 0.6) {
+          status = 'needs_review';
+        } else {
+          status = 'invalid';
+        }
+      }
+      
+      return {
+        status,
+        matches
+      };
+    } catch (error) {
+      console.error('Erro na validação cruzada:', error);
+      return {
+        status: 'needs_review',
+        matches: [],
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
   }
-
+  
   /**
-   * Calcula similaridade entre duas strings
+   * Calcula a similaridade entre duas strings
    * @param str1 Primeira string
    * @param str2 Segunda string
-   * @returns Score de similaridade (0-1)
+   * @returns Similaridade (0-1)
    */
   private calculateStringSimilarity(str1: string, str2: string): number {
-    // Normaliza as strings
-    const s1 = this.normalizeText(str1);
-    const s2 = this.normalizeText(str2);
+    // Implementação de distância de Levenshtein normalizada
+    if (str1 === str2) return 1;
+    if (str1.length === 0) return 0;
+    if (str2.length === 0) return 0;
     
-    // Algoritmo de distância de Levenshtein
-    const track = Array(s2.length + 1).fill(null).map(() => 
-      Array(s1.length + 1).fill(null));
+    const matrix: number[][] = [];
     
-    for (let i = 0; i <= s1.length; i += 1) {
-      track[0][i] = i;
+    // Inicializar a matriz
+    for (let i = 0; i <= str1.length; i++) {
+      matrix[i] = [i];
     }
     
-    for (let j = 0; j <= s2.length; j += 1) {
-      track[j][0] = j;
+    for (let j = 0; j <= str2.length; j++) {
+      matrix[0][j] = j;
     }
     
-    for (let j = 1; j <= s2.length; j += 1) {
-      for (let i = 1; i <= s1.length; i += 1) {
-        const indicator = s1[i - 1] === s2[j - 1] ? 0 : 1;
-        track[j][i] = Math.min(
-          track[j][i - 1] + 1, // deletion
-          track[j - 1][i] + 1, // insertion
-          track[j - 1][i - 1] + indicator, // substitution
+    // Preencher a matriz
+    for (let i = 1; i <= str1.length; i++) {
+      for (let j = 1; j <= str2.length; j++) {
+        const cost = str1.charAt(i - 1) === str2.charAt(j - 1) ? 0 : 1;
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,     // Deleção
+          matrix[i][j - 1] + 1,     // Inserção
+          matrix[i - 1][j - 1] + cost // Substituição
         );
       }
     }
     
-    const maxLength = Math.max(s1.length, s2.length);
-    if (maxLength === 0) return 1; // Duas strings vazias são idênticas
+    // Calcular distância normalizada
+    const maxLength = Math.max(str1.length, str2.length);
+    const distance = matrix[str1.length][str2.length];
     
-    // Normaliza a distância para um score de similaridade (0-1)
-    return 1 - track[s2.length][s1.length] / maxLength;
+    return 1 - distance / maxLength;
   }
-
+  
   /**
-   * Gera uma mensagem descritiva para o resultado da validação
-   * @param isValid Se a validação foi bem-sucedida
-   * @param score Score global
-   * @param fieldScores Scores por campo
-   * @returns Mensagem de validação
+   * Salva metadados de documento no banco
+   * @param documentId ID do documento
+   * @param data Dados extraídos
+   * @param confidence Confiança da extração
+   * @param source Fonte dos dados
    */
-  private generateValidationMessage(
-    isValid: boolean, 
-    score: number, 
-    fieldScores: Record<string, { score: number, matches: string[], discrepancies: string[] }>
-  ): string {
-    if (isValid) {
-      if (score > 0.9) {
-        return 'Os documentos foram validados com alta confiança. As informações são consistentes entre os documentos.';
-      } else {
-        return 'Os documentos foram validados, mas existem pequenas inconsistências que podem requerer verificação manual.';
-      }
-    } else {
-      // Identificar campos com problemas
-      const problemFields = Object.entries(fieldScores)
-        .filter(([_, data]) => data.score < 0.7 && data.discrepancies.length > 0)
-        .map(([field]) => field);
+  private async saveDocumentMetadata(
+    documentId: number,
+    data: any,
+    confidence: number,
+    source: string
+  ): Promise<void> {
+    try {
+      // Converter objeto aninhado em lista de pares chave-valor
+      const flattenedData: { key: string; value: string }[] = [];
       
-      if (problemFields.length > 0) {
-        return `Validação falhou. Encontramos inconsistências nos seguintes campos: ${problemFields.join(', ')}. Por favor, revise os documentos.`;
-      } else {
-        return 'Validação falhou. Os documentos apresentam inconsistências significativas ou não há dados suficientes para comparação.';
+      const flatten = (obj: any, prefix = '') => {
+        for (const key in obj) {
+          const value = obj[key];
+          const newKey = prefix ? `${prefix}.${key}` : key;
+          
+          if (typeof value === 'object' && value !== null) {
+            flatten(value, newKey);
+          } else if (value !== undefined && value !== null) {
+            flattenedData.push({
+              key: newKey,
+              value: String(value)
+            });
+          }
+        }
+      };
+      
+      flatten(data);
+      
+      // Inserir metadados no banco
+      for (const { key, value } of flattenedData) {
+        await db.execute(`
+          INSERT INTO document_metadata (
+            document_id, field_name, field_value, confidence, source
+          ) VALUES (
+            $1, $2, $3, $4, $5
+          )
+        `, [documentId, key, value, confidence, source]);
       }
+    } catch (error) {
+      console.error('Erro ao salvar metadados do documento:', error);
     }
   }
-
+  
   /**
-   * Libera recursos utilizados pelo serviço
+   * Salva resultado de validação no banco
+   * @param result Resultado da validação
+   */
+  private async saveValidationResult(result: ValidationResult): Promise<void> {
+    try {
+      await db.execute(`
+        INSERT INTO document_validations (
+          id, document_id, document_type, status, confidence,
+          extracted_data, errors, warnings, cross_validation,
+          created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+        )
+      `, [
+        result.id,
+        result.documentId,
+        result.documentType,
+        result.status,
+        result.confidence,
+        JSON.stringify(result.extractedData),
+        result.errors ? JSON.stringify(result.errors) : null,
+        result.warnings ? JSON.stringify(result.warnings) : null,
+        result.crossValidation ? JSON.stringify(result.crossValidation) : null,
+        result.createdAt,
+        result.updatedAt
+      ]);
+    } catch (error) {
+      console.error('Erro ao salvar resultado de validação:', error);
+    }
+  }
+  
+  /**
+   * Retorna os campos obrigatórios para cada tipo de documento
+   * @param documentType Tipo do documento
+   * @returns Lista de campos obrigatórios
+   */
+  private getRequiredFieldsForDocumentType(documentType: DocumentType): string[] {
+    switch (documentType) {
+      case 'rg':
+        return ['number', 'name'];
+      case 'cpf':
+        return ['number', 'name'];
+      case 'address_proof':
+        return ['name', 'address'];
+      case 'school_certificate':
+        return ['name', 'school'];
+      case 'birth_certificate':
+        return ['name', 'birthDate'];
+      default:
+        return [];
+    }
+  }
+  
+  /**
+   * Encerra o serviço e libera recursos
    */
   async terminate(): Promise<void> {
-    if (!this.initialized) return;
-    
-    console.log('Finalizando serviço de OCR...');
-    
-    if (this.scheduler) {
-      for (const worker of this.workers) {
-        await worker.terminate();
-      }
-      this.workers = [];
-      this.scheduler = null;
+    if (this.inactiveMode) {
+      return;
     }
     
-    this.initialized = false;
-    console.log('Serviço de OCR finalizado');
+    for (const worker of this.workers) {
+      try {
+        await worker.terminate();
+      } catch (error) {
+        console.error('Erro ao encerrar worker OCR:', error);
+      }
+    }
+    
+    this.workers = [];
+    this.ready = false;
   }
 }
 
-// Instância global para uso em toda a aplicação
-const advancedOcrService = new AdvancedOcrService();
-
-export default advancedOcrService;
+// Exportar instância singleton
+export const advancedOcrService = new AdvancedOcrService();

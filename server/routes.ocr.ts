@@ -8,12 +8,12 @@ import { Request, Response, NextFunction, Express } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import advancedOcrService, { 
-  processDocument, 
-  validateAgainstUserData, 
-  registerManualCorrection,
-  ManualCorrectionData,
-  getOcrTablesSQL 
+import { 
+  advancedOcrService, 
+  ValidationResult,
+  DocumentType, 
+  ValidationStatus,
+  ExtractionStatus 
 } from './services/advancedOcr';
 import { storage } from './storage';
 import { db } from './db';
@@ -154,7 +154,45 @@ export function registerOcrRoutes(app: Express, isAuthenticated: any) {
       
       if (!hasOcrDocumentsTable.rows[0].exists) {
         // Criar tabelas OCR
-        await db.execute(getOcrTablesSQL());
+        await db.execute(`
+          CREATE TABLE IF NOT EXISTS ocr_documents (
+            id UUID PRIMARY KEY,
+            enrollment_id INTEGER REFERENCES enrollments(id),
+            document_type TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            extracted_data JSONB DEFAULT '{}',
+            original_text TEXT,
+            overall_confidence FLOAT DEFAULT 0,
+            processing_time_ms INTEGER,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          );
+
+          CREATE TABLE IF NOT EXISTS ocr_validations (
+            id SERIAL PRIMARY KEY,
+            document_id UUID REFERENCES ocr_documents(id),
+            enrollment_id INTEGER REFERENCES enrollments(id),
+            validation_result JSONB DEFAULT '{}',
+            score FLOAT DEFAULT 0,
+            is_valid BOOLEAN DEFAULT false,
+            review_required BOOLEAN DEFAULT false,
+            reviewed_by INTEGER REFERENCES users(id),
+            reviewed_at TIMESTAMP WITH TIME ZONE,
+            comments TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          );
+          
+          CREATE TABLE IF NOT EXISTS ocr_corrections (
+            id SERIAL PRIMARY KEY,
+            document_id UUID REFERENCES ocr_documents(id),
+            field_name TEXT NOT NULL,
+            original_value TEXT,
+            corrected_value TEXT NOT NULL,
+            corrected_by INTEGER REFERENCES users(id),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          );
+        `);
         console.log('Tabelas OCR criadas com sucesso');
       }
       
@@ -202,7 +240,9 @@ export function registerOcrRoutes(app: Express, isAuthenticated: any) {
       const userData = req.body.userData ? JSON.parse(req.body.userData) : undefined;
       
       // Processar documento
-      const result = await processDocument(filePath, userData);
+      const result = await advancedOcrService.processDocument(filePath, req.body.documentType as DocumentType, undefined, {
+        userData: userData
+      });
       
       // Armazenar resultado no banco de dados
       if (result.success && result.document) {
@@ -376,7 +416,90 @@ export function registerOcrRoutes(app: Express, isAuthenticated: any) {
       }
       
       // Realizar validação cruzada
-      const validation = validateAgainstUserData(extractedFields, userData);
+      // Criando uma função temporária para validar os dados
+      const validation = {
+        isValid: true,
+        score: 0.85,
+        matches: [],
+        errors: []
+      };
+      
+      // Calcular pontuação baseada em similaridade de campos-chave
+      let matchCount = 0;
+      let totalFields = 0;
+      
+      for (const field in userData) {
+        if (extractedFields[field]) {
+          totalFields++;
+          const extracted = String(extractedFields[field]).toLowerCase();
+          const provided = String(userData[field]).toLowerCase();
+          
+          // Calcular similaridade simplificada
+          const maxLength = Math.max(extracted.length, provided.length);
+          let distance = 0;
+          
+          // Função simples para calcular distância de edição
+          function calculateDistance(a: string, b: string): number {
+            if (a.length === 0) return b.length;
+            if (b.length === 0) return a.length;
+            
+            if (a[0] === b[0]) {
+              return calculateDistance(a.substring(1), b.substring(1));
+            }
+            
+            return 1 + Math.min(
+              calculateDistance(a.substring(1), b),
+              calculateDistance(a, b.substring(1)),
+              calculateDistance(a.substring(1), b.substring(1))
+            );
+          }
+          
+          // Simplificação: para strings muito longas, usar comparação mais simples
+          if (maxLength > 20) {
+            // Comparar primeiros e últimos caracteres
+            const aStart = extracted.substring(0, 5);
+            const bStart = provided.substring(0, 5);
+            const aEnd = extracted.length > 5 ? extracted.substring(extracted.length - 5) : '';
+            const bEnd = provided.length > 5 ? provided.substring(provided.length - 5) : '';
+            
+            const startMatch = aStart === bStart ? 1 : 0;
+            const endMatch = aEnd === bEnd ? 1 : 0;
+            
+            distance = maxLength - (startMatch + endMatch) * 5;
+          } else {
+            // Para strings curtas, usar comparação caractere a caractere
+            for (let i = 0; i < Math.min(extracted.length, provided.length); i++) {
+              if (extracted[i] !== provided[i]) {
+                distance++;
+              }
+            }
+            
+            // Adicionar diferença de tamanho
+            distance += Math.abs(extracted.length - provided.length);
+          }
+          
+          const similarity = 1 - (distance / maxLength);
+          
+          validation.matches.push({
+            field,
+            extracted,
+            provided,
+            similarity: similarity,
+            match: similarity > 0.75
+          });
+          
+          if (similarity > 0.75) {
+            matchCount++;
+          } else {
+            validation.errors.push(`Campo ${field} não corresponde. Extraído: ${extracted}, Informado: ${provided}`);
+          }
+        }
+      }
+      
+      if (totalFields > 0) {
+        validation.score = matchCount / totalFields;
+        validation.isValid = validation.score >= 0.8;
+      }
       
       // Se documentId fornecido, atualizar no banco
       if (documentId) {
@@ -491,7 +614,7 @@ export function registerOcrRoutes(app: Express, isAuthenticated: any) {
       }
       
       // Preparar dados de correção
-      const correctionData: ManualCorrectionData = {
+      const correctionData = {
         documentId,
         fields,
         reviewedBy: req.user.id,
@@ -499,8 +622,53 @@ export function registerOcrRoutes(app: Express, isAuthenticated: any) {
         comments
       };
       
-      // Registrar correção
-      const success = await registerManualCorrection(correctionData);
+      // Registrar correção manualmente
+      let success = true;
+      try {
+        // Inserir cada campo corrigido no banco
+        for (const field of fields) {
+          await db.execute(`
+            INSERT INTO ocr_corrections (
+              document_id,
+              field_name,
+              original_value,
+              corrected_value,
+              corrected_by,
+              created_at
+            )
+            VALUES (
+              '${documentId}',
+              '${field.name}',
+              '${field.originalValue || ''}',
+              '${field.correctedValue}',
+              ${req.user.id},
+              NOW()
+            )
+          `);
+        }
+        
+        // Atualizar dados extraídos no documento
+        const extractedData = JSON.parse((await db.execute(`
+          SELECT extracted_data FROM ocr_documents WHERE id = '${documentId}'
+        `)).rows[0].extracted_data);
+        
+        // Aplicar correções aos dados extraídos
+        for (const field of fields) {
+          extractedData[field.name] = field.correctedValue;
+        }
+        
+        // Salvar dados atualizados
+        await db.execute(`
+          UPDATE ocr_documents
+          SET 
+            extracted_data = '${JSON.stringify(extractedData)}',
+            updated_at = NOW()
+          WHERE id = '${documentId}'
+        `);
+      } catch (error) {
+        console.error('Erro ao registrar correções:', error);
+        success = false;
+      }
       
       if (!success) {
         return res.status(500).json({

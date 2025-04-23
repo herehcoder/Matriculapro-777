@@ -152,6 +152,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerEvolutionApiRoutes(app, isAuthenticated);
   registerOcrRoutes(app, isAuthenticated);
   registerEnhancedPaymentRoutes(app, isAuthenticated);
+  
+  // Registrar webhook handlers para Evolution API
+  // Importando diretamente usando imports ES6
+  try {
+    import('./routes.webhook.evolutionapi.js').then(module => {
+      module.registerEvolutionApiWebhookRoutes(app);
+      console.log("Rotas de webhook da Evolution API registradas com sucesso");
+    }).catch(error => {
+      console.error("Erro ao carregar módulo de webhook da Evolution API:", error);
+    });
+  } catch (error) {
+    console.error("Erro ao registrar rotas de webhook da Evolution API:", error);
+  }
 
   // Middleware for error handling
   const handleZodError = (
