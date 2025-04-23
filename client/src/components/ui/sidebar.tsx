@@ -2,7 +2,7 @@ import * as React from "react";
 import { Link, useRoute } from "wouter";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/hooks/use-auth";
 import {
   School,
   User,
@@ -25,7 +25,7 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 export function Sidebar({ className, isOpen, onClose, ...props }: SidebarProps) {
-  const { user, logout } = useAuth();
+  const { user, logoutMutation } = useAuth();
   const role = user?.role;
 
   return (
@@ -145,7 +145,7 @@ export function Sidebar({ className, isOpen, onClose, ...props }: SidebarProps) 
             variant="ghost"
             className="w-full justify-start px-3 py-2 text-sm font-medium rounded-lg text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
             onClick={() => {
-              logout();
+              logoutMutation.mutate();
               if (onClose) onClose();
             }}
           >

@@ -83,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     onSuccess: (user: User) => {
       // Atualizar o cache com os dados do usuário
-      queryClient.setQueryData(["/api/user"], user);
+      queryClient.setQueryData(["/api/auth/me"], user);
       
       // Forçar uma refetch para garantir que os dados estejam atualizados
       refetch();
@@ -126,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return await res.json();
     },
     onSuccess: (user: User) => {
-      queryClient.setQueryData(["/api/user"], user);
+      queryClient.setQueryData(["/api/auth/me"], user);
       refetch();
       
       toast({
@@ -152,7 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     },
     onSuccess: () => {
-      queryClient.setQueryData(["/api/user"], null);
+      queryClient.setQueryData(["/api/auth/me"], null);
       refetch();
       
       toast({
