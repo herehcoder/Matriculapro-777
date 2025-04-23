@@ -11,6 +11,7 @@ import StudentDashboard from "@/pages/dashboard/student";
 import EnrollmentPage from "@/pages/enrollment/index";
 import EnrollmentSuccessPage from "@/pages/enrollment/success";
 import ChatbotPage from "@/pages/chatbot/index";
+import ChatPage from "@/pages/chat/index";
 import SchoolsPage from "@/pages/schools/index";
 import NewSchoolPage from "@/pages/schools/new";
 import LeadsPage from "@/pages/leads/index";
@@ -91,6 +92,7 @@ function Router() {
         <Route path="/enrollments/:enrollmentId" component={EnrollmentViewPage} />
         <Route path="/form-questions" component={FormQuestionsPage} />
         <Route path="/chatbot" component={ChatbotPage} />
+        <Route path="/chat" component={ChatPage} />
         <Route path="/schools" component={SchoolsPage} />
         <Route path="/schools/new" component={NewSchoolPage} />
         <Route path="/leads" component={LeadsPage} />

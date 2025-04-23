@@ -57,11 +57,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Register notification routes
   registerNotificationRoutes(app, isAuthenticated);
   
-  // Register enrollment, course, document, and question routes
+  // Register enrollment, course, document, message, and question routes
   registerEnrollmentRoutes(app, isAuthenticated);
   registerCourseRoutes(app, isAuthenticated);
   registerQuestionRoutes(app, isAuthenticated);
   registerDocumentRoutes(app);
+  registerMessageRoutes(app, isAuthenticated);
 
   // Middleware for error handling
   const handleZodError = (
