@@ -3,465 +3,518 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { apiRequest, queryClient } from '@/lib/queryClient';
-import { z } from 'zod';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm } from 'react-hook-form';
-
+import {
+  QrCode,
+  RotateCw,
+  Loader2,
+  Smartphone,
+  Save,
+  Phone,
+  Unplug,
+  Power,
+  Webhook
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, AlertCircle, CheckCircle2, RefreshCw, QrCode } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
+import { z } from 'zod';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
 
-// Schema para validação do formulário
-const connectionSchema = z.object({
-  instanceName: z.string().min(3, {
-    message: 'O nome da instância deve ter pelo menos 3 caracteres'
-  }),
-});
-
-type ConnectionFormValues = z.infer<typeof connectionSchema>;
+interface WhatsAppInstance {
+  id: number;
+  instanceId: string;
+  instanceToken: string;
+  status: string;
+  qrCode?: string;
+  phoneNumber?: string;
+  schoolId: number;
+  lastConnection?: string;
+  webhookUrl?: string;
+}
 
 interface WhatsAppConnectionProps {
   schoolId: number;
-  onConnected?: () => void;
 }
 
-const WhatsAppConnection: React.FC<WhatsAppConnectionProps> = ({ schoolId, onConnected }) => {
-  const { toast } = useToast();
-  const [qrCode, setQrCode] = useState<string | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<string>('disconnected');
-  const [activeTab, setActiveTab] = useState<string>('setup');
-  const [statusPolling, setStatusPolling] = useState<NodeJS.Timeout | null>(null);
+const formSchema = z.object({
+  instanceId: z.string().min(3, 'O ID da instância deve ter pelo menos 3 caracteres'),
+  instanceToken: z.string().min(3, 'O token da instância é obrigatório'),
+  webhookUrl: z.string().url('URL inválida').optional().or(z.literal(''))
+});
+
+const WhatsAppConnection: React.FC<WhatsAppConnectionProps> = ({ schoolId }) => {
   const { user } = useAuth();
-
-  // Buscar configuração global para usar como base
-  const { data: globalConfig, isLoading: isLoadingConfig } = useQuery({
-    queryKey: ['/api/admin/whatsapp/config'],
-    queryFn: async () => {
-      try {
-        const response = await apiRequest('GET', '/api/admin/whatsapp/config');
-        if (!response.ok) {
-          throw new Error('Falha ao carregar configurações');
-        }
-        return await response.json();
-      } catch (error) {
-        console.error('Erro ao buscar configuração do WhatsApp:', error);
-        throw error;
-      }
-    },
-    enabled: user?.role === 'admin'
-  });
-
-  // Buscar instância existente para esta escola
-  const { 
-    data: instance, 
+  const { toast } = useToast();
+  const [qrCodePolling, setQrCodePolling] = useState<NodeJS.Timeout | null>(null);
+  
+  // Buscar configuração
+  const {
+    data: instance,
     isLoading: isLoadingInstance,
+    error: instanceError,
     refetch: refetchInstance
-  } = useQuery({
+  } = useQuery<WhatsAppInstance>({
     queryKey: ['/api/whatsapp/instance', schoolId],
     queryFn: async () => {
-      const response = await apiRequest('GET', `/api/whatsapp/instances/school/${schoolId}`);
+      const response = await apiRequest('GET', `/api/whatsapp/instance/school/${schoolId}`);
       if (!response.ok) {
-        if (response.status === 404) {
-          return null;
-        }
-        throw new Error('Falha ao carregar instância');
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Erro ao buscar instância do WhatsApp');
       }
       return await response.json();
     }
-  });
-
-  // Mutation para criar uma instância
-  const createInstanceMutation = useMutation({
-    mutationFn: async (data: ConnectionFormValues) => {
-      // Use as configurações globais ou valores padrão
-      const apiBaseUrl = globalConfig?.apiBaseUrl || 'https://api.evolution.com';
-      const apiKey = globalConfig?.apiKey || '';
-      const webhookUrl = globalConfig?.webhookUrl || '';
-
-      const payload = {
-        schoolId,
-        name: data.instanceName,
-        apiKey,
-        baseUrl: apiBaseUrl,
-        webhook: webhookUrl,
-        settings: {
-          autoReply: false,
-          notifyOnMessage: true,
-          syncContacts: true,
-        }
-      };
-
-      const response = await apiRequest('POST', '/api/whatsapp/instances', payload);
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Falha ao criar instância');
-      }
-      
-      return await response.json();
-    },
-    onSuccess: () => {
-      toast({
-        title: 'Instância criada',
-        description: 'A instância do WhatsApp foi criada com sucesso.',
-      });
-      refetchInstance();
-      setActiveTab('qrcode');
-    },
-    onError: (error) => {
-      toast({
-        title: 'Erro',
-        description: error.message || 'Ocorreu um erro ao criar a instância.',
-        variant: 'destructive',
-      });
-    }
-  });
-
-  // Mutation para obter QR Code
-  const getQrCodeMutation = useMutation({
-    mutationFn: async () => {
-      if (!instance?.id) {
-        throw new Error('Instância não encontrada');
-      }
-      
-      const response = await apiRequest('GET', `/api/whatsapp/instances/${instance.id}/qrcode`);
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Falha ao obter QR Code');
-      }
-      
-      return await response.json();
-    },
-    onSuccess: (data) => {
-      setQrCode(data.base64);
-      startStatusPolling();
-    },
-    onError: (error) => {
-      toast({
-        title: 'Erro',
-        description: error.message || 'Ocorreu um erro ao obter o QR Code.',
-        variant: 'destructive',
-      });
-    }
-  });
-
-  // Mutation para verificar status
-  const checkStatusMutation = useMutation({
-    mutationFn: async () => {
-      if (!instance?.id) {
-        throw new Error('Instância não encontrada');
-      }
-      
-      const response = await apiRequest('GET', `/api/whatsapp/instances/${instance.id}/status`);
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Falha ao verificar status');
-      }
-      
-      return await response.json();
-    },
-    onSuccess: (data) => {
-      setConnectionStatus(data.status);
-      
-      if (data.status === 'connected') {
-        stopStatusPolling();
-        setQrCode(null);
-        
-        toast({
-          title: 'Conectado com sucesso',
-          description: 'Seu WhatsApp está conectado e pronto para uso.',
-        });
-        
-        if (onConnected) {
-          onConnected();
-        }
-      }
-    }
-  });
-
-  // Mutation para reiniciar a conexão
-  const restartConnectionMutation = useMutation({
-    mutationFn: async () => {
-      if (!instance?.id) {
-        throw new Error('Instância não encontrada');
-      }
-      
-      const response = await apiRequest('POST', `/api/whatsapp/instances/${instance.id}/restart`);
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Falha ao reiniciar conexão');
-      }
-      
-      return await response.json();
-    },
-    onSuccess: () => {
-      toast({
-        title: 'Reiniciando',
-        description: 'A conexão está sendo reiniciada. Por favor, aguarde.',
-      });
-      setTimeout(() => {
-        getQrCodeMutation.mutate();
-      }, 2000);
-    },
-    onError: (error) => {
-      toast({
-        title: 'Erro',
-        description: error.message || 'Ocorreu um erro ao reiniciar a conexão.',
-        variant: 'destructive',
-      });
-    }
-  });
-
-  // Polling de status
-  const startStatusPolling = () => {
-    if (statusPolling) {
-      clearInterval(statusPolling);
-    }
-    
-    const interval = setInterval(() => {
-      checkStatusMutation.mutate();
-    }, 3000); // A cada 3 segundos
-    
-    setStatusPolling(interval);
-  };
-
-  const stopStatusPolling = () => {
-    if (statusPolling) {
-      clearInterval(statusPolling);
-      setStatusPolling(null);
-    }
-  };
-
-  // Limpar polling ao desmontar
-  useEffect(() => {
-    return () => {
-      if (statusPolling) {
-        clearInterval(statusPolling);
-      }
-    };
-  }, [statusPolling]);
-
-  // Formulário
-  const form = useForm<ConnectionFormValues>({
-    resolver: zodResolver(connectionSchema),
-    defaultValues: {
-      instanceName: `Escola ${schoolId} WhatsApp`,
-    },
   });
   
-  const onSubmit = (values: ConnectionFormValues) => {
-    createInstanceMutation.mutate(values);
+  const form = useForm<z.infer<typeof formSchema>>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      instanceId: '',
+      instanceToken: '',
+      webhookUrl: ''
+    }
+  });
+  
+  // Atualizar valores do formulário quando os dados da instância forem carregados
+  useEffect(() => {
+    if (instance) {
+      form.reset({
+        instanceId: instance.instanceId,
+        instanceToken: instance.instanceToken,
+        webhookUrl: instance.webhookUrl || ''
+      });
+    }
+  }, [instance, form]);
+  
+  // Mutation para salvar/atualizar instância
+  const saveInstanceMutation = useMutation({
+    mutationFn: async (values: z.infer<typeof formSchema>) => {
+      const url = instance ? 
+        `/api/whatsapp/instance/${instance.id}` : 
+        '/api/whatsapp/instance';
+        
+      const method = instance ? 'PATCH' : 'POST';
+      
+      const response = await apiRequest(method, url, {
+        ...values,
+        schoolId
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Erro ao salvar instância do WhatsApp');
+      }
+      
+      return await response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: 'Sucesso',
+        description: instance ? 'Instância atualizada com sucesso' : 'Instância criada com sucesso',
+      });
+      
+      refetchInstance();
+    },
+    onError: (error) => {
+      toast({
+        title: 'Erro',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
+  });
+  
+  // Mutation para conectar a instância
+  const connectInstanceMutation = useMutation({
+    mutationFn: async () => {
+      if (!instance) throw new Error('Nenhuma instância configurada');
+      
+      const response = await apiRequest('POST', `/api/whatsapp/instance/${instance.id}/connect`, {});
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Erro ao conectar instância do WhatsApp');
+      }
+      
+      return await response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: 'Iniciando conexão',
+        description: 'Gerando QR Code para conectar dispositivo',
+      });
+      
+      // Iniciar polling do QR Code
+      startQrCodePolling();
+    },
+    onError: (error) => {
+      toast({
+        title: 'Erro',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
+  });
+  
+  // Mutation para desconectar a instância
+  const disconnectInstanceMutation = useMutation({
+    mutationFn: async () => {
+      if (!instance) throw new Error('Nenhuma instância configurada');
+      
+      const response = await apiRequest('POST', `/api/whatsapp/instance/${instance.id}/disconnect`, {});
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Erro ao desconectar instância do WhatsApp');
+      }
+      
+      return await response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: 'Desconectado',
+        description: 'A instância foi desconectada com sucesso',
+      });
+      
+      // Parar polling do QR Code
+      stopQrCodePolling();
+      
+      // Atualizar dados da instância
+      refetchInstance();
+    },
+    onError: (error) => {
+      toast({
+        title: 'Erro',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
+  });
+  
+  // Iniciar polling do QR Code
+  const startQrCodePolling = () => {
+    if (qrCodePolling) {
+      clearInterval(qrCodePolling);
+    }
+    
+    // Polling a cada 5 segundos
+    const interval = setInterval(() => {
+      refetchInstance();
+      
+      // Se a instância já está conectada, parar o polling
+      if (instance?.status === 'connected') {
+        stopQrCodePolling();
+      }
+    }, 5000);
+    
+    setQrCodePolling(interval);
   };
-
-  if (isLoadingInstance && user?.role === 'admin' && isLoadingConfig) {
+  
+  // Parar polling do QR Code
+  const stopQrCodePolling = () => {
+    if (qrCodePolling) {
+      clearInterval(qrCodePolling);
+      setQrCodePolling(null);
+    }
+  };
+  
+  // Limpar polling quando componente é desmontado
+  useEffect(() => {
+    return () => {
+      if (qrCodePolling) {
+        clearInterval(qrCodePolling);
+      }
+    };
+  }, [qrCodePolling]);
+  
+  // Iniciar polling se a instância estiver no status 'connecting'
+  useEffect(() => {
+    if (instance?.status === 'connecting') {
+      startQrCodePolling();
+    }
+  }, [instance?.status]);
+  
+  const onSubmit = (values: z.infer<typeof formSchema>) => {
+    saveInstanceMutation.mutate(values);
+  };
+  
+  // Formatando o telefone
+  const formatPhone = (phone?: string) => {
+    if (!phone) return '';
+    
+    // Remove caracteres não numéricos
+    const cleaned = phone.replace(/\D/g, '');
+    
+    // Verifica se é um número brasileiro (com 55 na frente)
+    if (cleaned.startsWith('55') && cleaned.length >= 12) {
+      const countryCode = cleaned.slice(0, 2);
+      const areaCode = cleaned.slice(2, 4);
+      const firstPart = cleaned.slice(4, 9);
+      const secondPart = cleaned.slice(9, 13);
+      
+      return `+${countryCode} (${areaCode}) ${firstPart}-${secondPart}`;
+    }
+    
+    return phone;
+  };
+  
+  // Verificar se o usuário tem permissão
+  const canManageInstance = user?.role === 'admin' || user?.role === 'school';
+  
+  if (!canManageInstance) {
     return (
-      <div className="flex justify-center items-center min-h-[200px]">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
+      <Alert variant="destructive">
+        <AlertTitle>Acesso negado</AlertTitle>
+        <AlertDescription>
+          Você não tem permissão para gerenciar instâncias do WhatsApp.
+        </AlertDescription>
+      </Alert>
     );
   }
-
-  // Se já existe uma instância, mostre a interface de conexão
-  if (instance) {
+  
+  // Renderiza o status da instância
+  const renderStatus = (status?: string) => {
+    if (!status) return null;
+    
+    const statusMap: Record<string, { color: string; label: string }> = {
+      connected: { color: 'bg-green-500', label: 'Conectado' },
+      connecting: { color: 'bg-yellow-500', label: 'Conectando' },
+      disconnected: { color: 'bg-red-500', label: 'Desconectado' },
+      error: { color: 'bg-red-500', label: 'Erro' }
+    };
+    
+    const statusInfo = statusMap[status] || { color: 'bg-gray-500', label: status };
+    
     return (
+      <Badge variant="outline" className="ml-2">
+        <div className={`w-2 h-2 rounded-full ${statusInfo.color} mr-2`} />
+        {statusInfo.label}
+      </Badge>
+    );
+  };
+  
+  return (
+    <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Conexão WhatsApp</CardTitle>
-          <CardDescription>
-            Conecte seu celular ao WhatsApp para enviar e receber mensagens.
-            Status: <span className={
-              connectionStatus === 'connected' ? 'text-green-500 font-semibold' :
-              connectionStatus === 'connecting' ? 'text-yellow-500 font-semibold' :
-              'text-red-500 font-semibold'
-            }>
-              {connectionStatus === 'connected' ? 'Conectado' :
-              connectionStatus === 'connecting' ? 'Conectando...' :
-              connectionStatus === 'qrcode' ? 'Aguardando Leitura do QR Code' : 
-              'Desconectado'}
-            </span>
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Conexão com WhatsApp</CardTitle>
+              <CardDescription>
+                Configure e conecte sua instância do WhatsApp
+              </CardDescription>
+            </div>
+            {instance && renderStatus(instance.status)}
+          </div>
         </CardHeader>
-        
         <CardContent>
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid grid-cols-2 w-[300px]">
-              <TabsTrigger value="qrcode">QR Code</TabsTrigger>
-              <TabsTrigger value="status">Detalhes</TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="qrcode" className="pt-4">
-              {connectionStatus === 'connected' ? (
-                <Alert>
-                  <CheckCircle2 className="h-4 w-4" />
-                  <AlertTitle>Conectado</AlertTitle>
-                  <AlertDescription>
-                    Seu WhatsApp está conectado. Você pode começar a enviar e receber mensagens.
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <div className="space-y-4">
-                  {qrCode ? (
-                    <div className="flex flex-col items-center">
-                      <div 
-                        className="border p-4 rounded-md bg-white"
-                        dangerouslySetInnerHTML={{ __html: qrCode }}
-                      />
-                      <p className="text-sm text-muted-foreground mt-2">
-                        Escaneie o QR Code com seu WhatsApp
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="flex justify-center">
-                      <Button 
-                        onClick={() => getQrCodeMutation.mutate()}
-                        disabled={getQrCodeMutation.isPending}
-                      >
-                        {getQrCodeMutation.isPending ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Carregando QR Code...
-                          </>
-                        ) : (
-                          <>
-                            <QrCode className="mr-2 h-4 w-4" />
-                            Gerar QR Code
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </TabsContent>
-            
-            <TabsContent value="status" className="pt-4">
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Nome da Instância</Label>
-                    <p className="text-sm">{instance.name}</p>
+          {isLoadingInstance ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            </div>
+          ) : instanceError ? (
+            <Alert variant="destructive" className="mb-6">
+              <AlertTitle>Erro ao carregar instância</AlertTitle>
+              <AlertDescription>
+                {instanceError instanceof Error ? instanceError.message : 'Erro desconhecido'}
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <div className="space-y-6">
+              <Form {...form}>
+                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FormField
+                      control={form.control}
+                      name="instanceId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>ID da Instância</FormLabel>
+                          <FormControl>
+                            <Input placeholder="escola123" {...field} />
+                          </FormControl>
+                          <FormDescription>
+                            Identificador único para sua instância
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    
+                    <FormField
+                      control={form.control}
+                      name="instanceToken"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Token da Instância</FormLabel>
+                          <FormControl>
+                            <Input type="password" placeholder="Token de autenticação" {...field} />
+                          </FormControl>
+                          <FormDescription>
+                            Token gerado pela Evolution API
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
                   </div>
-                  <div>
-                    <Label>Status</Label>
-                    <p className="text-sm">{
-                      connectionStatus === 'connected' ? 'Conectado' :
-                      connectionStatus === 'connecting' ? 'Conectando...' :
-                      connectionStatus === 'qrcode' ? 'Aguardando Leitura do QR Code' : 
-                      'Desconectado'
-                    }</p>
-                  </div>
-                </div>
-                
-                <div className="flex justify-end space-x-2">
-                  <Button 
-                    variant="outline"
-                    onClick={() => checkStatusMutation.mutate()}
-                    disabled={checkStatusMutation.isPending}
-                  >
-                    {checkStatusMutation.isPending ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Verificando...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4" />
-                        Verificar Status
-                      </>
-                    )}
-                  </Button>
                   
-                  <Button 
-                    variant="destructive"
-                    onClick={() => restartConnectionMutation.mutate()}
-                    disabled={restartConnectionMutation.isPending}
-                  >
-                    {restartConnectionMutation.isPending ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Reiniciando...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4" />
-                        Reiniciar Conexão
-                      </>
+                  <FormField
+                    control={form.control}
+                    name="webhookUrl"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>URL do Webhook (opcional)</FormLabel>
+                        <FormControl>
+                          <div className="flex items-center space-x-2">
+                            <Webhook className="w-4 h-4 text-muted-foreground" />
+                            <Input placeholder="https://seu-dominio.com/webhook/escola" {...field} />
+                          </div>
+                        </FormControl>
+                        <FormDescription>
+                          URL para receber notificações de mensagens. Se não informado, será usado o webhook global.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
                     )}
-                  </Button>
-                </div>
-              </div>
-            </TabsContent>
-          </Tabs>
+                  />
+                  
+                  <div className="flex justify-end">
+                    <Button 
+                      type="submit" 
+                      disabled={saveInstanceMutation.isPending || !form.formState.isDirty}
+                    >
+                      {saveInstanceMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="mr-2 h-4 w-4" />
+                      )}
+                      {instance ? 'Atualizar Configuração' : 'Salvar Configuração'}
+                    </Button>
+                  </div>
+                </form>
+              </Form>
+              
+              {instance && (
+                <>
+                  <Separator />
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="text-lg font-medium mb-2">Status da Conexão</h3>
+                      
+                      {instance.status === 'connected' ? (
+                        <div className="bg-muted p-4 rounded-md">
+                          <div className="flex items-center mb-2">
+                            <Smartphone className="h-5 w-5 mr-2 text-green-500" />
+                            <span className="font-medium">Dispositivo Conectado</span>
+                          </div>
+                          
+                          {instance.phoneNumber && (
+                            <div className="text-muted-foreground flex items-center">
+                              <Phone className="h-4 w-4 mr-2" />
+                              <span>{formatPhone(instance.phoneNumber)}</span>
+                            </div>
+                          )}
+                          
+                          {instance.lastConnection && (
+                            <div className="text-sm text-muted-foreground mt-2">
+                              Última conexão: {new Date(instance.lastConnection).toLocaleString()}
+                            </div>
+                          )}
+                        </div>
+                      ) : instance.status === 'connecting' && instance.qrCode ? (
+                        <div className="bg-muted p-4 rounded-md text-center">
+                          <div className="mb-4">
+                            <h4 className="font-medium mb-1">Escaneie o QR Code com seu WhatsApp</h4>
+                            <p className="text-sm text-muted-foreground">
+                              Abra o WhatsApp no seu celular, toque em Menu ou Configurações e selecione "WhatsApp Web"
+                            </p>
+                          </div>
+                          
+                          <div className="max-w-xs mx-auto bg-white p-4 rounded-md mb-4">
+                            <img 
+                              src={`data:image/png;base64,${instance.qrCode}`} 
+                              alt="QR Code para conexão" 
+                              className="w-full h-auto"
+                            />
+                          </div>
+                          
+                          <div className="flex justify-center">
+                            <Button 
+                              variant="outline" 
+                              onClick={() => refetchInstance()}
+                              size="sm"
+                            >
+                              <RotateCw className="h-4 w-4 mr-2" />
+                              Atualizar QR Code
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-muted p-4 rounded-md">
+                          <p className="text-muted-foreground mb-2">
+                            Nenhum dispositivo conectado. Clique no botão abaixo para iniciar a conexão.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="flex justify-end space-x-2">
+                      {instance.status === 'connected' ? (
+                        <Button 
+                          variant="destructive" 
+                          onClick={() => disconnectInstanceMutation.mutate()}
+                          disabled={disconnectInstanceMutation.isPending}
+                        >
+                          {disconnectInstanceMutation.isPending ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Unplug className="mr-2 h-4 w-4" />
+                          )}
+                          Desconectar Dispositivo
+                        </Button>
+                      ) : (
+                        <Button 
+                          variant="default" 
+                          onClick={() => connectInstanceMutation.mutate()}
+                          disabled={
+                            connectInstanceMutation.isPending || 
+                            instance.status === 'connecting' ||
+                            !instance.instanceId ||
+                            !instance.instanceToken
+                          }
+                        >
+                          {connectInstanceMutation.isPending || instance.status === 'connecting' ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Power className="mr-2 h-4 w-4" />
+                          )}
+                          {instance.status === 'connecting' ? 'Conectando...' : 'Iniciar Conexão'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
-    );
-  }
-
-  // Se não existe instância, mostre o formulário de configuração
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Configurar WhatsApp</CardTitle>
-        <CardDescription>
-          Configure uma instância de WhatsApp para esta escola.
-        </CardDescription>
-      </CardHeader>
-      
-      <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)}>
-          <CardContent className="space-y-4">
-            {!globalConfig && user?.role === 'admin' && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertTitle>Configuração Global Necessária</AlertTitle>
-                <AlertDescription>
-                  Você precisa configurar os parâmetros globais do WhatsApp primeiro.
-                  Acesse a página de configuração do WhatsApp na área administrativa.
-                </AlertDescription>
-              </Alert>
-            )}
-
-            <FormField
-              control={form.control}
-              name="instanceName"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Nome da Instância</FormLabel>
-                  <FormControl>
-                    <Input {...field} placeholder="Ex: WhatsApp Escola Principal" />
-                  </FormControl>
-                  <FormDescription>
-                    Um nome para identificar esta instância do WhatsApp.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </CardContent>
-          
-          <CardFooter>
-            <Button 
-              type="submit" 
-              disabled={createInstanceMutation.isPending || (user?.role === 'admin' && !globalConfig)}
-              className="w-full"
-            >
-              {createInstanceMutation.isPending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Criando...
-                </>
-              ) : (
-                'Criar Instância de WhatsApp'
-              )}
-            </Button>
-          </CardFooter>
-        </form>
-      </Form>
-    </Card>
+    </div>
   );
 };
 

@@ -1,675 +1,679 @@
-import { Router, Request, Response, NextFunction, Express } from 'express';
+import { Request, Response, NextFunction } from 'express';
+import { Express, Router } from 'express';
 import { z } from 'zod';
-import { storage } from './storage';
-import { insertWhatsappInstanceSchema, insertWhatsappContactSchema, insertWhatsappMessageSchema } from '../shared/whatsapp.schema';
-import { EvolutionApiClient } from './utils/evolution-api';
+import { db } from './db';
+import { whatsappInstances, whatsappApiConfigs } from '../shared/whatsapp-config.schema';
+import { eq, and } from 'drizzle-orm';
+import { sendUserNotification, NotificationPayload } from './pusher';
 
-// Função principal para registrar as rotas do WhatsApp
-export function registerWhatsAppRoutes(app: Express) {
-  const router = Router();
-
-// Adicionar interface para estender o Request
 interface ExtendedRequest extends Request {
   whatsappInstance?: any;
 }
 
-// Middleware para verificar se a escola tem permissão para acessar uma instância de WhatsApp
+/**
+ * Middleware para verificar acesso à instância de WhatsApp
+ */
 const ensureWhatsappInstanceAccess = async (req: ExtendedRequest, res: Response, next: NextFunction) => {
-  if (!req.isAuthenticated()) {
-    return res.status(401).json({ message: 'Não autenticado' });
-  }
-
-  const instanceId = parseInt(req.params.instanceId);
-
-  if (isNaN(instanceId)) {
-    return res.status(400).json({ message: 'ID da instância inválido' });
-  }
-
   try {
-    const instance = await storage.getWhatsappInstance(instanceId);
-
+    const instanceId = req.params.instanceId;
+    const user = req.user;
+    
+    if (!user) {
+      return res.status(401).json({ message: 'Não autorizado' });
+    }
+    
+    const [instance] = await db
+      .select()
+      .from(whatsappInstances)
+      .where(eq(whatsappInstances.instanceId, instanceId));
+      
     if (!instance) {
       return res.status(404).json({ message: 'Instância não encontrada' });
     }
-
-    // Permitir acesso se for admin ou se pertencer à escola
-    if (req.user?.role === 'admin' || (req.user?.role === 'school' && req.user?.schoolId === instance.schoolId)) {
+    
+    // Verifica se o usuário tem acesso à instância
+    if (user.role === 'admin' || (user.role === 'school' && user.schoolId === instance.schoolId)) {
       req.whatsappInstance = instance;
-      return next();
+      next();
+    } else {
+      res.status(403).json({ message: 'Acesso negado a esta instância' });
     }
-
-    return res.status(403).json({ message: 'Acesso negado' });
   } catch (error) {
     console.error('Erro ao verificar acesso à instância:', error);
-    return res.status(500).json({ message: 'Erro interno do servidor' });
+    res.status(500).json({ message: 'Erro interno do servidor' });
   }
 };
 
-// Utilitário para criar cliente Evolution API a partir de uma instância
-const createEvolutionClient = (instance) => {
-  return new EvolutionApiClient(
-    instance.baseUrl,
-    instance.apiKey,
-    `edumatrik_${instance.schoolId}`
-  );
-};
-
-// Middleware para verificar permissão escola ou admin
+/**
+ * Middleware para verificar se o usuário é admin ou escola
+ */
 const ensureSchoolOrAdmin = (req: Request, res: Response, next: NextFunction) => {
-  if (!req.isAuthenticated()) {
-    return res.status(401).json({ message: "Unauthorized - Please log in" });
+  const user = req.user;
+  
+  if (!user) {
+    return res.status(401).json({ message: 'Não autorizado' });
   }
   
-  const user = req.user as any;
   if (user.role === 'admin' || user.role === 'school') {
-    return next();
+    next();
+  } else {
+    res.status(403).json({ message: 'Acesso negado. Apenas administradores ou escolas podem acessar este recurso.' });
   }
-  
-  res.status(403).json({ message: "Forbidden - Insufficient permissions" });
 };
 
-// Middleware para verificar autenticação
+/**
+ * Middleware para verificar se o usuário está autenticado
+ */
 const ensureAuthenticated = (req: Request, res: Response, next: NextFunction) => {
-  if (req.isAuthenticated()) {
-    return next();
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ message: 'Não autorizado' });
   }
-  
-  res.status(401).json({ message: "Unauthorized - Please log in" });
+  next();
 };
 
-// Listar todas as instâncias de WhatsApp (admin) ou apenas da escola (school)
-router.get('/instances', ensureAuthenticated, async (req, res) => {
-  try {
-    if (req.user.role === 'admin') {
-      const instances = await storage.listWhatsappInstances();
-      return res.json(instances);
-    } else if (req.user.role === 'school') {
-      const instance = await storage.getWhatsappInstanceBySchool(req.user.schoolId);
-      return res.json(instance ? [instance] : []);
-    } else {
-      return res.status(403).json({ message: 'Acesso negado' });
-    }
-  } catch (error) {
-    console.error('Erro ao listar instâncias:', error);
-    return res.status(500).json({ message: 'Erro interno do servidor' });
-  }
-});
-
-// Obter uma instância específica
-router.get('/instances/:instanceId', ensureWhatsappInstanceAccess, async (req: ExtendedRequest, res: Response) => {
-  return res.json(req.whatsappInstance);
-});
-
-// Criar uma nova instância para a escola
-router.post('/instances', ensureSchoolOrAdmin, async (req, res) => {
-  try {
-    // Validar entrada
-    let schoolId = req.user.schoolId;
-    
-    // Se for admin, pode criar para qualquer escola
-    if (req.user.role === 'admin' && req.body.schoolId) {
-      schoolId = req.body.schoolId;
-    }
-    
-    if (!schoolId) {
-      return res.status(400).json({ message: 'ID da escola não especificado' });
-    }
-    
-    // Verificar se já existe uma instância para esta escola
-    const existingInstance = await storage.getWhatsappInstanceBySchool(schoolId);
-    if (existingInstance) {
-      return res.status(400).json({ message: 'Esta escola já possui uma instância configurada' });
-    }
-    
-    // Validar dados com Zod
-    const instanceData = insertWhatsappInstanceSchema.parse({
-      ...req.body,
-      schoolId,
-      name: req.body.name || `Instância WhatsApp Escola ${schoolId}`,
-      status: 'disconnected'
-    });
-    
-    // Criar a instância no banco de dados
-    const instance = await storage.createWhatsappInstance(instanceData);
-    
-    // Tentar criar a instância na Evolution API
-    try {
-      const client = createEvolutionClient(instance);
-      await client.createInstance();
-      
-      // Configurar webhook se fornecido
-      if (instance.webhook) {
-        await client.setWebhook(instance.webhook);
-      }
-      
-      return res.status(201).json(instance);
-    } catch (apiError) {
-      console.error('Erro ao criar instância na Evolution API:', apiError);
-      
-      // Atualizar status para 'error'
-      await storage.updateWhatsappInstanceStatus(instance.id, 'error');
-      
-      // Ainda retornamos 201 porque o registro foi criado no banco
-      // mas incluímos informação sobre o erro na API
-      return res.status(201).json({ ...instance, apiError: 'Erro ao criar instância na Evolution API' });
-    }
-  } catch (error) {
-    console.error('Erro ao criar instância:', error);
-    if (error.errors) {
-      return res.status(400).json({ message: 'Dados inválidos', errors: error.errors });
-    }
-    return res.status(500).json({ message: 'Erro interno do servidor' });
-  }
-});
-
-// Atualizar uma instância
-router.put('/instances/:instanceId', ensureWhatsappInstanceAccess, async (req: ExtendedRequest, res: Response) => {
-  try {
-    const instanceId = parseInt(req.params.instanceId);
-    const instance = req.whatsappInstance;
-    
-    // Validar dados com Zod (parcial para permitir update)
-    const updateSchema = insertWhatsappInstanceSchema.partial().omit({ schoolId: true });
-    const updateData = updateSchema.parse(req.body);
-    
-    // Atualizar no banco de dados
-    const updatedInstance = await storage.updateWhatsappInstance(instanceId, updateData);
-    
-    // Se o webhook foi alterado, atualizar na Evolution API
-    if (updateData.webhook && updateData.webhook !== instance.webhook) {
-      try {
-        const client = createEvolutionClient(updatedInstance);
-        await client.setWebhook(updateData.webhook);
-      } catch (apiError) {
-        console.error('Erro ao atualizar webhook na Evolution API:', apiError);
-      }
-    }
-    
-    return res.json(updatedInstance);
-  } catch (error) {
-    console.error('Erro ao atualizar instância:', error);
-    if (error.errors) {
-      return res.status(400).json({ message: 'Dados inválidos', errors: error.errors });
-    }
-    return res.status(500).json({ message: 'Erro interno do servidor' });
-  }
-});
-
-// Excluir uma instância
-router.delete('/instances/:instanceId', ensureWhatsappInstanceAccess, async (req, res) => {
-  try {
-    const instanceId = parseInt(req.params.instanceId);
-    const instance = req.whatsappInstance;
-    
-    // Tentar excluir na Evolution API primeiro
-    try {
-      const client = createEvolutionClient(instance);
-      await client.delete();
-    } catch (apiError) {
-      console.error('Erro ao excluir instância na Evolution API:', apiError);
-      // Continuamos mesmo com erro na API
-    }
-    
-    // Excluir do banco de dados
-    await storage.deleteWhatsappInstance(instanceId);
-    
-    return res.sendStatus(204);
-  } catch (error) {
-    console.error('Erro ao excluir instância:', error);
-    return res.status(500).json({ message: 'Erro interno do servidor' });
-  }
-});
-
-// Obter QR Code para autenticação
-router.get('/instances/:instanceId/qrcode', ensureWhatsappInstanceAccess, async (req, res) => {
-  try {
-    const instance = req.whatsappInstance;
-    
-    const client = createEvolutionClient(instance);
-    const qrcode = await client.getQRCode();
-    
-    // Atualizar status e QR code no banco
-    await storage.updateWhatsappInstanceStatus(instance.id, 'qrcode', qrcode.base64);
-    
-    return res.json(qrcode);
-  } catch (error) {
-    console.error('Erro ao obter QR code:', error);
-    return res.status(500).json({ message: 'Erro ao obter QR code' });
-  }
-});
-
-// Obter status da instância
-router.get('/instances/:instanceId/status', ensureWhatsappInstanceAccess, async (req, res) => {
-  try {
-    const instance = req.whatsappInstance;
-    
-    const client = createEvolutionClient(instance);
-    const status = await client.getStatus();
-    
-    // Atualizar status no banco
-    await storage.updateWhatsappInstanceStatus(instance.id, status.status, status.qrcode);
-    
-    return res.json(status);
-  } catch (error) {
-    console.error('Erro ao obter status:', error);
-    return res.status(500).json({ message: 'Erro ao obter status' });
-  }
-});
-
-// Desconectar instância
-router.post('/instances/:instanceId/disconnect', ensureWhatsappInstanceAccess, async (req, res) => {
-  try {
-    const instance = req.whatsappInstance;
-    
-    const client = createEvolutionClient(instance);
-    await client.disconnect();
-    
-    // Atualizar status no banco
-    await storage.updateWhatsappInstanceStatus(instance.id, 'disconnected');
-    
-    return res.sendStatus(200);
-  } catch (error) {
-    console.error('Erro ao desconectar:', error);
-    return res.status(500).json({ message: 'Erro ao desconectar instância' });
-  }
-});
-
-// Reiniciar instância
-router.post('/instances/:instanceId/restart', ensureWhatsappInstanceAccess, async (req, res) => {
-  try {
-    const instance = req.whatsappInstance;
-    
-    const client = createEvolutionClient(instance);
-    await client.restart();
-    
-    // Atualizar status no banco
-    await storage.updateWhatsappInstanceStatus(instance.id, 'connecting');
-    
-    return res.sendStatus(200);
-  } catch (error) {
-    console.error('Erro ao reiniciar:', error);
-    return res.status(500).json({ message: 'Erro ao reiniciar instância' });
-  }
-});
-
-// Obter contatos da instância
-router.get('/instances/:instanceId/contacts', ensureWhatsappInstanceAccess, async (req, res) => {
-  try {
-    const instanceId = parseInt(req.params.instanceId);
-    
-    // Buscar contatos do banco de dados
-    const contacts = await storage.listWhatsappContacts(instanceId);
-    
-    // Opcionalmente sincroniza com a API se solicitado
-    const sync = req.query.sync === 'true';
-    if (sync) {
-      try {
-        const instance = req.whatsappInstance;
-        const client = createEvolutionClient(instance);
-        const apiContacts = await client.getContacts();
-        
-        // TODO: Sincronizar contatos da API com o banco de dados
-        // Isso deve ser implementado como uma tarefa em background
-        
-      } catch (apiError) {
-        console.error('Erro ao sincronizar contatos:', apiError);
-      }
-    }
-    
-    return res.json(contacts);
-  } catch (error) {
-    console.error('Erro ao listar contatos:', error);
-    return res.status(500).json({ message: 'Erro interno do servidor' });
-  }
-});
-
-// Obter mensagens de um contato
-router.get('/instances/:instanceId/contacts/:contactId/messages', ensureWhatsappInstanceAccess, async (req, res) => {
-  try {
-    const contactId = parseInt(req.params.contactId);
-    const limit = parseInt(req.query.limit?.toString() || '50');
-    const offset = parseInt(req.query.offset?.toString() || '0');
-    
-    if (isNaN(contactId)) {
-      return res.status(400).json({ message: 'ID do contato inválido' });
-    }
-    
-    // Verificar se o contato pertence a esta instância
-    const contact = await storage.getWhatsappContact(contactId);
-    if (!contact || contact.instanceId !== req.whatsappInstance.id) {
-      return res.status(404).json({ message: 'Contato não encontrado' });
-    }
-    
-    const messages = await storage.listWhatsappMessagesByContact(contactId, limit, offset);
-    return res.json(messages);
-  } catch (error) {
-    console.error('Erro ao obter mensagens:', error);
-    return res.status(500).json({ message: 'Erro interno do servidor' });
-  }
-});
-
-// Enviar mensagem de texto
-router.post('/instances/:instanceId/send-message', ensureWhatsappInstanceAccess, async (req, res) => {
-  try {
-    const schema = z.object({
-      phone: z.string().min(10, 'Número de telefone inválido'),
-      message: z.string().min(1, 'Mensagem não pode ser vazia'),
-      options: z.object({
-        delay: z.number().optional(),
-        presence: z.enum(['composing', 'recording', 'paused']).optional(),
-        quotedMessageId: z.string().optional()
-      }).optional()
-    });
-    
-    const data = schema.parse(req.body);
-    const instance = req.whatsappInstance;
-    
-    // Enviar mensagem via Evolution API
-    const client = createEvolutionClient(instance);
-    const apiResponse = await client.sendMessage({
-      phone: data.phone,
-      message: data.message,
-      options: data.options
-    });
-    
-    // Busca ou cria o contato
-    let contact = await storage.getWhatsappContactByPhone(instance.id, data.phone);
-    if (!contact) {
-      contact = await storage.createWhatsappContact({
-        instanceId: instance.id,
-        phone: data.phone,
-        name: null,
-        isGroup: false
-      });
-    }
-    
-    // Registra a mensagem no banco de dados
-    const message = await storage.createWhatsappMessage({
-      instanceId: instance.id,
-      contactId: contact.id,
-      externalId: apiResponse.key?.id,
-      direction: 'outbound',
-      content: data.message,
-      status: 'sent',
-      sentAt: new Date()
-    });
-    
-    return res.status(201).json({ message, apiResponse });
-  } catch (error) {
-    console.error('Erro ao enviar mensagem:', error);
-    if (error.errors) {
-      return res.status(400).json({ message: 'Dados inválidos', errors: error.errors });
-    }
-    return res.status(500).json({ message: 'Erro interno do servidor' });
-  }
-});
-
-// Enviar mídia (imagem, vídeo, áudio, documento)
-router.post('/instances/:instanceId/send-media', ensureWhatsappInstanceAccess, async (req, res) => {
-  try {
-    const schema = z.object({
-      phone: z.string().min(10, 'Número de telefone inválido'),
-      mediaType: z.enum(['image', 'video', 'audio', 'document'], { 
-        errorMap: () => ({ message: 'Tipo de mídia inválido' }) 
-      }),
-      media: z.string().min(1, 'Mídia não pode ser vazia'),
-      caption: z.string().optional(),
-      fileName: z.string().optional()
-    });
-    
-    const data = schema.parse(req.body);
-    const instance = req.whatsappInstance;
-    
-    // Enviar mídia via Evolution API
-    const client = createEvolutionClient(instance);
-    const apiResponse = await client.sendMedia({
-      phone: data.phone,
-      mediaType: data.mediaType,
-      media: data.media,
-      caption: data.caption,
-      fileName: data.fileName
-    });
-    
-    // Busca ou cria o contato
-    let contact = await storage.getWhatsappContactByPhone(instance.id, data.phone);
-    if (!contact) {
-      contact = await storage.createWhatsappContact({
-        instanceId: instance.id,
-        phone: data.phone,
-        name: null,
-        isGroup: false
-      });
-    }
-    
-    // Registra a mensagem no banco de dados
-    const message = await storage.createWhatsappMessage({
-      instanceId: instance.id,
-      contactId: contact.id,
-      externalId: apiResponse.key?.id,
-      direction: 'outbound',
-      content: data.caption || '',
-      mediaType: data.mediaType,
-      mediaUrl: data.media,
-      status: 'sent',
-      sentAt: new Date(),
-      metadata: { fileName: data.fileName }
-    });
-    
-    return res.status(201).json({ message, apiResponse });
-  } catch (error) {
-    console.error('Erro ao enviar mídia:', error);
-    if (error.errors) {
-      return res.status(400).json({ message: 'Dados inválidos', errors: error.errors });
-    }
-    return res.status(500).json({ message: 'Erro interno do servidor' });
-  }
-});
-
-// Webhook para receber eventos da Evolution API
-router.post('/webhook', async (req, res) => {
-  try {
-    // Validar a estrutura do webhook
-    const webhook = z.object({
-      event: z.enum(['message', 'status', 'connection', 'qrcode']),
-      instance: z.string(),
-      data: z.any()
-    }).parse(req.body);
-    
-    console.log(`Webhook recebido: ${webhook.event} para ${webhook.instance}`);
-    
-    // Extrair ID da escola do nome da instância (formato: edumatrik_X)
-    const schoolId = parseInt(webhook.instance.split('_')[1]);
-    if (isNaN(schoolId)) {
-      console.error(`ID de escola inválido no nome da instância: ${webhook.instance}`);
-      return res.sendStatus(200); // Sempre retorna 200 para o webhook
-    }
-    
-    // Buscar a instância correspondente
-    const instance = await storage.getWhatsappInstanceBySchool(schoolId);
-    if (!instance) {
-      console.error(`Instância não encontrada para escola: ${schoolId}`);
-      return res.sendStatus(200);
-    }
-    
-    // Processar diferentes tipos de eventos
-    switch (webhook.event) {
-      case 'message':
-        await processMessageWebhook(instance, webhook.data);
-        break;
-      case 'status':
-        await processStatusWebhook(instance, webhook.data);
-        break;
-      case 'connection':
-        await processConnectionWebhook(instance, webhook.data);
-        break;
-      case 'qrcode':
-        await processQrcodeWebhook(instance, webhook.data);
-        break;
-    }
-    
-    return res.sendStatus(200);
-  } catch (error) {
-    console.error('Erro ao processar webhook:', error);
-    return res.sendStatus(200); // Sempre retorna 200 para o webhook
-  }
-});
-
-// Lista de conversas
-router.get('/instances/:instanceId/conversations', ensureWhatsappInstanceAccess, async (req: ExtendedRequest, res: Response) => {
-  try {
-    const instanceId = parseInt(req.params.instanceId);
-    const conversations = await storage.listWhatsappConversations(instanceId);
-    return res.json(conversations);
-  } catch (error) {
-    console.error('Erro ao listar conversas:', error);
-    return res.status(500).json({ message: 'Erro interno do servidor' });
-  }
-});
-
-  // Registrar o router com o app principal
-  app.use('/api/whatsapp', router);
-
-  // Implementar funções de processamento de webhooks
-  // Estas funções são chamadas pelo endpoint /api/whatsapp/webhook
+/**
+ * Registra rotas do WhatsApp para escolas e usuários
+ */
+export function registerWhatsAppRoutes(app: Express) {
+  const router = Router();
   
-  // Função para processar mensagens recebidas
-  function processMessageWebhook(instance: any, data: any) {
+  // Middleware de autenticação
+  router.use(ensureAuthenticated);
+  
+  /**
+   * @route GET /api/whatsapp/instance/status/:schoolId
+   * @desc Verifica se a escola tem uma instância conectada
+   * @access Private
+   */
+  router.get('/instance/status/:schoolId', ensureSchoolOrAdmin, async (req: Request, res: Response) => {
     try {
-      // Verificar se não é uma mensagem de status
-      if (data.typeMessage === 'status') {
-        return processStatusWebhook(instance, data);
-      }
-
-      // Ignorar mensagens enviadas pelo próprio sistema
-      if (data.fromMe) {
-        console.log('Ignorando mensagem enviada pelo próprio sistema');
-        return;
-      }
-
-      // Extrair número de telefone e normalizar
-      let phone = data.from || data.sender || '';
-      if (phone.includes('@')) {
-        phone = phone.split('@')[0];
+      const schoolId = parseInt(req.params.schoolId);
+      
+      // Verifica se o usuário tem acesso à escola
+      if (req.user.role !== 'admin' && req.user.schoolId !== schoolId) {
+        return res.status(403).json({ message: 'Acesso negado a esta escola' });
       }
       
-      if (!phone) {
-        console.error('Telefone não encontrado na mensagem:', data);
-        return;
+      // Busca instância da escola
+      const [instance] = await db
+        .select()
+        .from(whatsappInstances)
+        .where(eq(whatsappInstances.schoolId, schoolId));
+      
+      if (!instance) {
+        return res.json({ connected: false });
       }
-
-      // Obter ou criar contato
-      const getOrCreateContact = async () => {
-        let contact = await storage.getWhatsappContactByPhone(instance.id, phone);
-        if (!contact) {
-          const name = data.pushName || data.notifyName || data.sender || phone;
-          contact = await storage.createWhatsappContact({
-            instanceId: instance.id,
-            phone,
-            name,
-            isGroup: phone.includes('-') // Grupos geralmente têm '-' no id
-          });
-        }
-        return contact;
-      };
-
-      // Armazenar mensagem no banco de dados
-      getOrCreateContact().then(contact => {
-        const messageData: any = {
-          instanceId: instance.id,
-          contactId: contact.id,
-          externalId: data.key?.id || data.id,
-          direction: 'inbound',
-          status: 'received',
-          receivedAt: new Date(),
-          metadata: {}
-        };
-
-        // Extrair conteúdo baseado no tipo de mensagem
-        if (data.hasMedia) {
-          messageData.mediaType = data.type;
-          messageData.mediaUrl = data.mediaUrl || null;
-          messageData.content = data.caption || data.text || null;
-          messageData.metadata.fileName = data.fileName || null;
-        } else {
-          messageData.content = data.body || data.text || null;
-        }
+      
+      return res.json({ connected: instance.status === 'connected' });
+    } catch (error) {
+      console.error('Erro ao verificar status da instância:', error);
+      res.status(500).json({ message: 'Erro interno do servidor' });
+    }
+  });
+  
+  /**
+   * @route GET /api/whatsapp/instance/school/:schoolId
+   * @desc Busca a instância de WhatsApp de uma escola
+   * @access Private
+   */
+  router.get('/instance/school/:schoolId', ensureSchoolOrAdmin, async (req: Request, res: Response) => {
+    try {
+      const schoolId = parseInt(req.params.schoolId);
+      
+      // Verifica se o usuário tem acesso à escola
+      if (req.user.role !== 'admin' && req.user.schoolId !== schoolId) {
+        return res.status(403).json({ message: 'Acesso negado a esta escola' });
+      }
+      
+      // Busca instância da escola
+      const [instance] = await db
+        .select()
+        .from(whatsappInstances)
+        .where(eq(whatsappInstances.schoolId, schoolId));
+      
+      if (!instance) {
+        return res.status(404).json({ message: 'Instância não encontrada' });
+      }
+      
+      // Se for admin, retorna todas as informações
+      // Se for escola, oculta o token
+      if (req.user.role === 'admin') {
+        return res.json(instance);
+      } else {
+        const { instanceToken, ...instanceWithoutToken } = instance;
+        return res.json({
+          ...instanceWithoutToken,
+          instanceToken: instanceToken ? '••••••••' : '',
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao buscar instância:', error);
+      res.status(500).json({ message: 'Erro interno do servidor' });
+    }
+  });
+  
+  /**
+   * @route POST /api/whatsapp/instance
+   * @desc Cria uma nova instância de WhatsApp
+   * @access Private
+   */
+  router.post('/instance', ensureSchoolOrAdmin, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        instanceId: z.string().min(3, 'ID da instância deve ter no mínimo 3 caracteres'),
+        instanceToken: z.string().min(3, 'Token da instância é obrigatório'),
+        schoolId: z.number().int().positive('ID da escola é obrigatório'),
+        webhookUrl: z.string().url('URL inválida').optional().or(z.literal('')),
+      });
+      
+      const validatedData = schema.parse(req.body);
+      
+      // Verifica se o usuário tem acesso à escola
+      if (req.user.role !== 'admin' && req.user.schoolId !== validatedData.schoolId) {
+        return res.status(403).json({ message: 'Acesso negado a esta escola' });
+      }
+      
+      // Verifica se já existe uma instância com este ID
+      const [existingInstance] = await db
+        .select()
+        .from(whatsappInstances)
+        .where(eq(whatsappInstances.instanceId, validatedData.instanceId));
+      
+      if (existingInstance) {
+        return res.status(400).json({ message: 'Já existe uma instância com este ID' });
+      }
+      
+      // Verifica se a escola já tem uma instância
+      const [schoolInstance] = await db
+        .select()
+        .from(whatsappInstances)
+        .where(eq(whatsappInstances.schoolId, validatedData.schoolId));
+      
+      if (schoolInstance) {
+        return res.status(400).json({ message: 'Esta escola já possui uma instância de WhatsApp' });
+      }
+      
+      // Cria a instância
+      const [newInstance] = await db
+        .insert(whatsappInstances)
+        .values({
+          instanceId: validatedData.instanceId,
+          instanceToken: validatedData.instanceToken,
+          schoolId: validatedData.schoolId,
+          status: 'disconnected',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          webhookUrl: validatedData.webhookUrl || null,
+        })
+        .returning();
+      
+      // Se for admin, retorna todas as informações
+      // Se for escola, oculta o token
+      if (req.user.role === 'admin') {
+        return res.status(201).json(newInstance);
+      } else {
+        const { instanceToken, ...instanceWithoutToken } = newInstance;
+        return res.status(201).json({
+          ...instanceWithoutToken,
+          instanceToken: '••••••••',
+        });
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          message: 'Dados inválidos', 
+          errors: error.errors 
+        });
+      }
+      
+      console.error('Erro ao criar instância:', error);
+      res.status(500).json({ message: 'Erro interno do servidor' });
+    }
+  });
+  
+  /**
+   * @route PATCH /api/whatsapp/instance/:id
+   * @desc Atualiza uma instância de WhatsApp
+   * @access Private
+   */
+  router.patch('/instance/:id', ensureSchoolOrAdmin, async (req: Request, res: Response) => {
+    try {
+      const instanceId = parseInt(req.params.id);
+      
+      const schema = z.object({
+        instanceId: z.string().min(3, 'ID da instância deve ter no mínimo 3 caracteres'),
+        instanceToken: z.string().min(3, 'Token da instância é obrigatório'),
+        schoolId: z.number().int().positive('ID da escola é obrigatório').optional(),
+        webhookUrl: z.string().url('URL inválida').optional().or(z.literal('')),
+      });
+      
+      const validatedData = schema.parse(req.body);
+      
+      // Busca a instância
+      const [instance] = await db
+        .select()
+        .from(whatsappInstances)
+        .where(eq(whatsappInstances.id, instanceId));
+      
+      if (!instance) {
+        return res.status(404).json({ message: 'Instância não encontrada' });
+      }
+      
+      // Verifica se o usuário tem acesso à instância
+      if (req.user.role !== 'admin' && req.user.schoolId !== instance.schoolId) {
+        return res.status(403).json({ message: 'Acesso negado a esta instância' });
+      }
+      
+      // Se o ID da instância for alterado, verifica se já existe outra com este ID
+      if (validatedData.instanceId !== instance.instanceId) {
+        const [existingInstance] = await db
+          .select()
+          .from(whatsappInstances)
+          .where(eq(whatsappInstances.instanceId, validatedData.instanceId));
         
-        return storage.createWhatsappMessage(messageData);
-      })
-      .then(() => {
-        console.log(`Mensagem recebida de ${phone} armazenada`);
-      })
-      .catch(error => {
-        console.error('Erro ao salvar mensagem:', error);
+        if (existingInstance && existingInstance.id !== instanceId) {
+          return res.status(400).json({ message: 'Já existe uma instância com este ID' });
+        }
+      }
+      
+      // Atualiza a instância
+      const [updatedInstance] = await db
+        .update(whatsappInstances)
+        .set({
+          instanceId: validatedData.instanceId,
+          instanceToken: validatedData.instanceToken,
+          updatedAt: new Date(),
+          webhookUrl: validatedData.webhookUrl || null,
+        })
+        .where(eq(whatsappInstances.id, instanceId))
+        .returning();
+      
+      // Se for admin, retorna todas as informações
+      // Se for escola, oculta o token
+      if (req.user.role === 'admin') {
+        return res.json(updatedInstance);
+      } else {
+        const { instanceToken, ...instanceWithoutToken } = updatedInstance;
+        return res.json({
+          ...instanceWithoutToken,
+          instanceToken: '••••••••',
+        });
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          message: 'Dados inválidos', 
+          errors: error.errors 
+        });
+      }
+      
+      console.error('Erro ao atualizar instância:', error);
+      res.status(500).json({ message: 'Erro interno do servidor' });
+    }
+  });
+  
+  /**
+   * @route POST /api/whatsapp/instance/:id/connect
+   * @desc Conecta uma instância de WhatsApp
+   * @access Private
+   */
+  router.post('/instance/:id/connect', ensureSchoolOrAdmin, async (req: Request, res: Response) => {
+    try {
+      const instanceId = parseInt(req.params.id);
+      
+      // Busca a instância
+      const [instance] = await db
+        .select()
+        .from(whatsappInstances)
+        .where(eq(whatsappInstances.id, instanceId));
+      
+      if (!instance) {
+        return res.status(404).json({ message: 'Instância não encontrada' });
+      }
+      
+      // Verifica se o usuário tem acesso à instância
+      if (req.user.role !== 'admin' && req.user.schoolId !== instance.schoolId) {
+        return res.status(403).json({ message: 'Acesso negado a esta instância' });
+      }
+      
+      // Busca a configuração da API
+      const [apiConfig] = await db.select().from(whatsappApiConfigs);
+      
+      if (!apiConfig) {
+        return res.status(404).json({ message: 'Configuração da API não encontrada' });
+      }
+      
+      // Em um cenário real, aqui faria uma chamada para a Evolution API
+      // para iniciar a conexão e gerar o QR Code
+      
+      // Simulação: atualiza o estado da instância para "connecting"
+      const [updatedInstance] = await db
+        .update(whatsappInstances)
+        .set({
+          status: 'connecting',
+          qrCode: 'iVBORw0KGgoAAAANSUhEUgAAAJQAAACUCAYAAAB1PADUAAAAAXNSR0IArs4c6QAABYBJREFUeF7t3d1u4zAMBOD0/R+6PftjBFuiaJIVMbnNCUjN+TjOBgWa18vH14evEQI/IxBTMfz5+Wmqar2ua1PPKZM2U/S1fJnQUOJn9kO9lNLQEA3iGBTlW+NjQEABpZKgnZTzUIYbqDm9nIdiQkGgmkBOKCYUBKoJrCbUjguR6udTc3BdUnxd8qwuT1VJBqC5sqnKq3Y91P/oVesqLxtVoHQdlI+GCbWQgGXzsvkeXwZKA1CBmhP4PgPVS6h5vMz+0K9BxUm23hmt0ssBReNkHb+4a+FHG5ZA6yxg8RKAWvwDwkwGoGY/fDYCCihhpJdPJxSNE9TWhBpEi9UWBNh0xU1XYuEEcshGJEE9+chbNwHlK295ElADy5d2UtZD0UlZD6WXQdmXlDFM6qH0Mij7UrLlMixYEGTT1Syv5RwKKKDcDkVDPaeWZb7lMfWkFQXUK7XrQBVvXHOzAKXjsXnLi4tLdY2qqGrJUrnTfN4+UpZ/dQiUqlTLaqh6pW93Q8/8+1qqF2pZ5tzzVEZlZfzKvJSBsqIB1Jt7qEqwV89lZfzKvJSB6gULKKBsT6iPdlLOQw2sgKX5ZUIxoepvpRxm2nOhZDyU+8o3DfQ8T21BajQrJ0XjVZc8Ww9lRavZ92O3PECNFHAGNJXfzk7Kptuc5W2yvfFFggTdgzIVIu63C/QKpNnLFVBMKAi0EmBCeS0JgQECgBoAhWmeAFDPM+WKAQKAGgCFaZ4AUM8z5YoBAoAaAIVpngBQzzPlggECOaD6ztX6a6lN5PwHs1nLMo/P0wcTygH7HAGgnmPJVY8RANRjnDjrIQKAeggTJz1EAFAPYeKkhwgA6iFMnPQQAUA9hImTHiIAqIcwcdJDBAD1ECZOTF54AapDYHRCJc+DsEKa8tl1siqyKt9m+WYBStlVBVAVWZVvs3yzAKVsswCVVWRVvs3yzQKUss0CVFaRVfk2y7d3QlXr+v39nTpWylaQNF5VviMHN3sbZSt8NF4VUNpcLVAAKonkBwWodwE1AmmmrwKlHB7LtOel6rMMbxagal95FXLKAagvJlSWQPnXQ1WAgMqKqL7lMaFaBIBiQikuQNkwUPZHlHZSdjVZPg+VKa6XtUioB5IFqoOHPEA922rZmqpsUFnHAGqEnq2HaiFUJdRPF1A5CxSgqoTKBnXs8kZWRfvDhyPXM6GYUFMIVMtW+8pjQtVFV9+DTECdKmQEakeTBai1QGXdSalKzqq0yrfZ8WzLiz+FrYCyIa2A0i2x2UrLl3LlXZSyN8vXOb4ZLEAdGwGgNP/tFR1QC6CqOylbD9uUAFDHL3lMqCNNQAFK60X5rCwSYEK1UJlQTCg+gx0g0LvlZQUz8p40Ml6Wz7UzXrLnpbYgRmB7R76KlbZ/1UHkp8yt4tJ5q3Kzfll+o+dVvlX5xkAp4IACVIvAH/1s5vPKL6t5TChbtIBqKQHKbqVkvmJCxZuuUZCZvkooi8cHU5/Bso7JfNn2UDqJ9slOlU/bVOVTlW/VL8snO5+q5zJfVT7tx4QaIMiEGoDUmJhQmwSpOynroZhQehlUvmIzHzSNfDahvk+37j+3IM6M13wsLc9P31PWegAKUO4dCg0T1M5DAcpueQDqOOVZ0LDuBYEBAkANgMI0TwCo55lyxQABQA2AwjRPAKjnmXLFAAFADYDCNE8AqOeZcsUAAUANgMI0TwCo55lyxQCBvxpYm8/e51rUAAAAAElFTkSuQmCC', // QR Code de exemplo
+          updatedAt: new Date(),
+        })
+        .where(eq(whatsappInstances.id, instanceId))
+        .returning();
+        
+      res.json({
+        success: true,
+        instance: updatedInstance
       });
     } catch (error) {
-      console.error('Erro ao processar mensagem do webhook:', error);
+      console.error('Erro ao conectar instância:', error);
+      res.status(500).json({ message: 'Erro interno do servidor' });
     }
-  }
-
-  // Função para processar status de mensagens
-  function processStatusWebhook(instance: any, data: any) {
+  });
+  
+  /**
+   * @route POST /api/whatsapp/instance/:id/disconnect
+   * @desc Desconecta uma instância de WhatsApp
+   * @access Private
+   */
+  router.post('/instance/:id/disconnect', ensureSchoolOrAdmin, async (req: Request, res: Response) => {
     try {
-      // Atualizar status de mensagem enviada
-      const externalId = data.key?.id || data.id;
-      if (!externalId) {
-        console.error('ID externo não encontrado para atualização de status:', data);
-        return;
+      const instanceId = parseInt(req.params.id);
+      
+      // Busca a instância
+      const [instance] = await db
+        .select()
+        .from(whatsappInstances)
+        .where(eq(whatsappInstances.id, instanceId));
+      
+      if (!instance) {
+        return res.status(404).json({ message: 'Instância não encontrada' });
       }
-
-      // Mapear status para nosso formato interno
-      let status = 'sent';
-      if (data.status === 'DELIVERY_ACK') {
-        status = 'delivered';
-      } else if (data.status === 'READ') {
-        status = 'read';
-      } else if (data.status === 'FAIL') {
-        status = 'failed';
+      
+      // Verifica se o usuário tem acesso à instância
+      if (req.user.role !== 'admin' && req.user.schoolId !== instance.schoolId) {
+        return res.status(403).json({ message: 'Acesso negado a esta instância' });
       }
-
-      // Atualizar no banco de dados
-      storage.updateWhatsappMessageStatus(externalId, status)
-        .then(() => {
-          console.log(`Status da mensagem ${externalId} atualizado para ${status}`);
+      
+      // Busca a configuração da API
+      const [apiConfig] = await db.select().from(whatsappApiConfigs);
+      
+      if (!apiConfig) {
+        return res.status(404).json({ message: 'Configuração da API não encontrada' });
+      }
+      
+      // Em um cenário real, aqui faria uma chamada para a Evolution API
+      // para desconectar a instância
+      
+      // Simulação: atualiza o estado da instância para "disconnected"
+      const [updatedInstance] = await db
+        .update(whatsappInstances)
+        .set({
+          status: 'disconnected',
+          qrCode: null,
+          phoneNumber: null,
+          lastConnection: new Date(),
+          updatedAt: new Date(),
         })
-        .catch(error => {
-          console.error('Erro ao atualizar status:', error);
-        });
+        .where(eq(whatsappInstances.id, instanceId))
+        .returning();
+        
+      res.json({
+        success: true,
+        instance: updatedInstance
+      });
     } catch (error) {
-      console.error('Erro ao processar status do webhook:', error);
+      console.error('Erro ao desconectar instância:', error);
+      res.status(500).json({ message: 'Erro interno do servidor' });
     }
-  }
-
-  // Função para processar status de conexão
-  function processConnectionWebhook(instance: any, data: any) {
+  });
+  
+  /**
+   * @route GET /api/whatsapp/contacts/:schoolId
+   * @desc Lista contatos (estudantes/leads) para uma escola
+   */
+  router.get('/contacts/:schoolId', ensureSchoolOrAdmin, async (req: Request, res: Response) => {
     try {
-      // Atualizar status da conexão no banco de dados
-      const status = data.state === 'open' ? 'connected' : 'disconnected';
-      storage.updateWhatsappInstanceStatus(instance.id, status)
-        .then(() => {
-          console.log(`Status da instância ${instance.id} atualizado para ${status}`);
-        })
-        .catch(error => {
-          console.error('Erro ao atualizar status de conexão:', error);
-        });
+      const schoolId = parseInt(req.params.schoolId);
+      const type = req.query.type || 'students';
+      
+      // Verifica se o usuário tem acesso à escola
+      if (req.user.role !== 'admin' && req.user.schoolId !== schoolId) {
+        return res.status(403).json({ message: 'Acesso negado a esta escola' });
+      }
+      
+      // Simula lista de contatos
+      // Em produção, isso viria do banco de dados
+      const contacts = [];
+      
+      if (type === 'students') {
+        contacts.push(
+          {
+            id: 1,
+            name: 'João Silva',
+            phone: '5511987654321',
+            status: 'online',
+            lastMessage: 'Olá, como posso ajudar?',
+            lastMessageTime: '10:30',
+            unreadCount: 2,
+            type: 'student'
+          },
+          {
+            id: 2,
+            name: 'Maria Oliveira',
+            phone: '5511912345678',
+            status: 'offline',
+            lastMessage: 'Ok, obrigado!',
+            lastMessageTime: '09:15',
+            type: 'student'
+          }
+        );
+      } else if (type === 'leads') {
+        contacts.push(
+          {
+            id: 3,
+            name: 'Pedro Santos',
+            phone: '5511955443322',
+            status: 'online',
+            lastMessage: 'Gostaria de informações sobre o curso',
+            lastMessageTime: '11:45',
+            unreadCount: 1,
+            type: 'lead'
+          },
+          {
+            id: 4,
+            name: 'Ana Ferreira',
+            phone: '5511922334455',
+            status: 'offline',
+            type: 'lead'
+          }
+        );
+      }
+      
+      res.json(contacts);
     } catch (error) {
-      console.error('Erro ao processar status de conexão do webhook:', error);
+      console.error('Erro ao buscar contatos:', error);
+      res.status(500).json({ message: 'Erro interno do servidor' });
     }
-  }
-
-  // Função para processar QR codes
-  function processQrcodeWebhook(instance: any, data: any) {
+  });
+  
+  /**
+   * @route GET /api/whatsapp/messages/:schoolId/:contactId
+   * @desc Lista mensagens entre a escola e um contato
+   */
+  router.get('/messages/:schoolId/:contactId', ensureSchoolOrAdmin, async (req: Request, res: Response) => {
     try {
-      // Atualizar QR code no banco de dados
-      storage.updateWhatsappInstanceStatus(instance.id, 'qrcode', data.qrcode)
-        .then(() => {
-          console.log(`QR code atualizado para instância ${instance.id}`);
-        })
-        .catch(error => {
-          console.error('Erro ao atualizar QR code:', error);
-        });
+      const schoolId = parseInt(req.params.schoolId);
+      const contactId = parseInt(req.params.contactId);
+      const type = req.query.type || 'student';
+      
+      // Verifica se o usuário tem acesso à escola
+      if (req.user.role !== 'admin' && req.user.schoolId !== schoolId) {
+        return res.status(403).json({ message: 'Acesso negado a esta escola' });
+      }
+      
+      // Simula lista de mensagens
+      // Em produção, isso viria do banco de dados
+      const now = new Date();
+      const messages = [
+        {
+          id: 1,
+          content: 'Olá, como posso ajudar?',
+          timestamp: new Date(now.getTime() - 3600000).toISOString(), // 1 hora atrás
+          direction: 'outgoing',
+          status: 'read'
+        },
+        {
+          id: 2,
+          content: 'Gostaria de informações sobre o curso de Matemática',
+          timestamp: new Date(now.getTime() - 3500000).toISOString(),
+          direction: 'incoming',
+          status: 'read'
+        },
+        {
+          id: 3,
+          content: 'Claro! O curso tem duração de 6 meses e as aulas são às segundas e quartas.',
+          timestamp: new Date(now.getTime() - 3400000).toISOString(),
+          direction: 'outgoing',
+          status: 'read'
+        },
+        {
+          id: 4,
+          content: 'Qual o valor?',
+          timestamp: new Date(now.getTime() - 3300000).toISOString(),
+          direction: 'incoming',
+          status: 'read'
+        },
+        {
+          id: 5,
+          content: 'O investimento é de R$ 500,00 mensais, com material didático incluso.',
+          timestamp: new Date(now.getTime() - 3200000).toISOString(),
+          direction: 'outgoing',
+          status: 'read'
+        },
+        {
+          id: 6,
+          content: 'Entendi. Vou pensar e te retorno em breve.',
+          timestamp: new Date(now.getTime() - 3100000).toISOString(),
+          direction: 'incoming',
+          status: 'read'
+        },
+        {
+          id: 7,
+          content: 'Ok! Estou à disposição para mais informações.',
+          timestamp: new Date(now.getTime() - 3000000).toISOString(),
+          direction: 'outgoing',
+          status: 'read'
+        }
+      ];
+      
+      res.json(messages);
     } catch (error) {
-      console.error('Erro ao processar QR code do webhook:', error);
+      console.error('Erro ao buscar mensagens:', error);
+      res.status(500).json({ message: 'Erro interno do servidor' });
     }
-  }
+  });
+  
+  /**
+   * @route POST /api/whatsapp/message
+   * @desc Envia uma mensagem para um contato
+   */
+  router.post('/message', ensureSchoolOrAdmin, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        schoolId: z.number().int().positive('ID da escola é obrigatório'),
+        contactId: z.number().int().positive('ID do contato é obrigatório'),
+        contactType: z.enum(['student', 'lead']),
+        content: z.string().min(1, 'Conteúdo da mensagem é obrigatório'),
+      });
+      
+      const validatedData = schema.parse(req.body);
+      
+      // Verifica se o usuário tem acesso à escola
+      if (req.user.role !== 'admin' && req.user.schoolId !== validatedData.schoolId) {
+        return res.status(403).json({ message: 'Acesso negado a esta escola' });
+      }
+      
+      // Em produção, aqui enviaria a mensagem através da Evolution API
+      // e salvaria no banco de dados
+      
+      // Simula envio de mensagem
+      const now = new Date();
+      const message = {
+        id: 100,
+        content: validatedData.content,
+        timestamp: now.toISOString(),
+        direction: 'outgoing',
+        status: 'sent'
+      };
+      
+      // Enviar notificação para o aluno (em produção)
+      if (validatedData.contactType === 'student') {
+        // Simula envio de notificação para o aluno
+        // Aqui seria necessário buscar o ID do usuário do aluno
+        const studentUserId = 10; // Exemplo
+        
+        const notification: NotificationPayload = {
+          title: 'Nova mensagem',
+          message: `Você recebeu uma nova mensagem de ${req.user.fullName}`,
+          type: 'message',
+          data: {
+            senderId: req.user.id,
+            senderName: req.user.fullName,
+            content: validatedData.content,
+          }
+        };
+        
+        // Em produção, enviaria a notificação
+        // await sendUserNotification(studentUserId, notification);
+      }
+      
+      res.json(message);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          message: 'Dados inválidos', 
+          errors: error.errors 
+        });
+      }
+      
+      console.error('Erro ao enviar mensagem:', error);
+      res.status(500).json({ message: 'Erro interno do servidor' });
+    }
+  });
+  
+  /**
+   * @route POST /api/whatsapp/webhook/:schoolId
+   * @desc Recebe webhooks do WhatsApp para uma escola específica
+   * @access Public
+   */
+  app.post('/api/whatsapp/webhook/:schoolId', async (req: Request, res: Response) => {
+    try {
+      const schoolId = parseInt(req.params.schoolId);
+      
+      // Em produção, aqui verificaria a assinatura do webhook
+      // para garantir que a requisição veio da Evolution API
+      
+      // Simula recebimento de webhook
+      console.log(`Recebido webhook para a escola ${schoolId}:`, req.body);
+      
+      // Processa o webhook de acordo com o tipo
+      const eventType = req.body.type;
+      
+      if (eventType === 'message') {
+        // Em produção, aqui processaria a mensagem recebida
+        const message = req.body.message;
+        
+        // Salvar mensagem no banco de dados
+        // ...
+        
+        // Notificar usuários relevantes
+        // ...
+      }
+      
+      res.sendStatus(200);
+    } catch (error) {
+      console.error('Erro ao processar webhook:', error);
+      res.status(500).json({ message: 'Erro interno do servidor' });
+    }
+  });
+  
+  // Registra o roteador
+  app.use('/api/whatsapp', router);
 }
