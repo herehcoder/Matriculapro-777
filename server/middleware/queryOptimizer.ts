@@ -234,42 +234,80 @@ export async function createPerformanceIndices() {
     
     // Índices para tabelas principais
     
+    // Função auxiliar para verificar existência de tabela
+    async function tableExists(tableName: string): Promise<boolean> {
+      try {
+        // Evita usar parâmetros para impedir erros de binding no PostgreSQL/Neon
+        const query = `SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = '${tableName}'
+        ) as "exists"`;
+        
+        const result = await db.execute(query);
+        return result[0]?.exists === true;
+      } catch (error) {
+        console.warn(`Erro ao verificar existência da tabela ${tableName}:`, error);
+        return false;
+      }
+    }
+
     // Usuários
-    await createIndexIfNotExists('users', 'email');
-    await createIndexIfNotExists('users', 'username');
-    await createIndexIfNotExists('users', 'role');
+    if (await tableExists('users')) {
+      await createIndexIfNotExists('users', 'email');
+      await createIndexIfNotExists('users', 'username');
+      await createIndexIfNotExists('users', 'role');
+    }
     
     // Escolas
-    await createIndexIfNotExists('schools', 'name');
-    await createIndexIfNotExists('schools', 'status');
+    if (await tableExists('schools')) {
+      await createIndexIfNotExists('schools', 'name');
+      await createIndexIfNotExists('schools', 'status');
+    }
     
     // Matrículas
-    await createIndexIfNotExists('enrollments', 'student_id');
-    await createIndexIfNotExists('enrollments', 'school_id');
-    await createIndexIfNotExists('enrollments', 'status');
-    await createIndexIfNotExists('enrollments', 'created_at');
+    if (await tableExists('enrollments')) {
+      await createIndexIfNotExists('enrollments', 'student_id');
+      await createIndexIfNotExists('enrollments', 'school_id');
+      await createIndexIfNotExists('enrollments', 'status');
+      await createIndexIfNotExists('enrollments', 'created_at');
+    }
     
     // Estudantes
-    await createIndexIfNotExists('students', 'school_id');
-    await createIndexIfNotExists('students', 'email');
-    await createIndexIfNotExists('students', 'cpf');
+    if (await tableExists('students')) {
+      await createIndexIfNotExists('students', 'school_id');
+      await createIndexIfNotExists('students', 'email');
+      await createIndexIfNotExists('students', 'cpf');
+    }
     
     // Documentos
-    await createIndexIfNotExists('documents', 'enrollment_id');
-    await createIndexIfNotExists('documents', 'document_type');
-    await createIndexIfNotExists('documents', 'validation_status');
+    if (await tableExists('documents')) {
+      await createIndexIfNotExists('documents', 'enrollment_id');
+      await createIndexIfNotExists('documents', 'document_type');
+      await createIndexIfNotExists('documents', 'validation_status');
+    }
     
     // WhatsApp
-    await createIndexIfNotExists('whatsapp_instances', 'school_id');
-    await createIndexIfNotExists('whatsapp_contacts', 'phone');
-    await createIndexIfNotExists('whatsapp_contacts', 'instance_id');
-    await createIndexIfNotExists('whatsapp_messages', 'contact_id');
-    await createIndexIfNotExists('whatsapp_messages', 'external_id');
+    if (await tableExists('whatsapp_instances')) {
+      await createIndexIfNotExists('whatsapp_instances', 'school_id');
+    }
+    
+    if (await tableExists('whatsapp_contacts')) {
+      await createIndexIfNotExists('whatsapp_contacts', 'phone');
+      await createIndexIfNotExists('whatsapp_contacts', 'instance_id');
+    }
+    
+    if (await tableExists('whatsapp_messages')) {
+      await createIndexIfNotExists('whatsapp_messages', 'contact_id');
+      await createIndexIfNotExists('whatsapp_messages', 'external_id');
+    }
     
     // Pagamentos
-    await createIndexIfNotExists('payments', 'enrollment_id');
-    await createIndexIfNotExists('payments', 'status');
-    await createIndexIfNotExists('payments', 'payment_method');
+    if (await tableExists('payments')) {
+      await createIndexIfNotExists('payments', 'enrollment_id');
+      await createIndexIfNotExists('payments', 'status');
+      await createIndexIfNotExists('payments', 'payment_method');
+    }
     
     console.log(`Índices criados/verificados: ${indicesCreated.length}`);
     return indicesCreated;
