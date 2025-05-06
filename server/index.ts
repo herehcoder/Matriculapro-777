@@ -10,6 +10,7 @@ import { mlService } from './services/mlService';
 import { analyticsService } from './services/analyticsService';
 import { paymentProcessor } from './services/paymentProcessor';
 import { advancedOcrService } from './services/advancedOcr';
+import { initializeMonitoring } from './routes.monitoring.init';
 
 const app = express();
 app.use(express.json());
@@ -91,6 +92,9 @@ app.use('/uploads', express.static(uploadsDir));
     ]);
 
     const server = await registerRoutes(app);
+    
+    // Inicializar o sistema de monitoramento
+    initializeMonitoring(app, server);
 
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
       const status = err.status || err.statusCode || 500;

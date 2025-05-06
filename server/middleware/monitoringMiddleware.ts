@@ -1,100 +1,64 @@
 /**
- * Middleware para monitoramento de requisições HTTP
+ * Middleware para monitoramento de requisições e conexões
  */
 
 import { Request, Response, NextFunction } from 'express';
 import monitoringService from '../services/monitoringService';
 
 /**
- * Middleware para rastrear métricas de requisição
- * @param req Requisição Express
- * @param res Resposta Express
- * @param next Função next
+ * Middleware para rastrear requisições HTTP
+ * @param req Requisição
+ * @param res Resposta
+ * @param next Próximo middleware
  */
-export function requestTracker(req: Request, res: Response, next: NextFunction): void {
-  // Marcar início da requisição
+export const requestTracker = (req: Request, res: Response, next: NextFunction) => {
+  // Ignorar requisições estáticas e de assets
+  if (
+    req.path.startsWith('/assets/') || 
+    req.path.startsWith('/@vite/') || 
+    req.path.startsWith('/node_modules/') ||
+    req.path.endsWith('.ico') ||
+    req.path.endsWith('.js') ||
+    req.path.endsWith('.css') ||
+    req.path.endsWith('.png') ||
+    req.path.endsWith('.jpg') ||
+    req.path.endsWith('.svg')
+  ) {
+    return next();
+  }
+
+  const endpoint = `${req.method} ${req.path}`;
   const startTime = Date.now();
   
-  // Guardar método e caminho originais
-  const method = req.method;
-  const path = req.path;
-  
-  // Quando a resposta for enviada, registrar métricas
+  // Interceptar finalização da resposta
   res.on('finish', () => {
-    // Calcular tempo de resposta
     const responseTime = Date.now() - startTime;
+    const statusCode = res.statusCode;
+    const isError = statusCode >= 400;
     
-    // Registrar requisição no monitoramento
-    monitoringService.trackRequest(
-      method,
-      path,
-      res.statusCode,
-      responseTime
-    );
-    
-    // Registrar no console se for uma requisição lenta (> 1000ms)
-    if (responseTime > 1000) {
-      console.warn(`Requisição lenta: ${method} ${path} - ${responseTime}ms`);
-    }
+    // Registrar estatísticas da requisição
+    monitoringService.trackRequest(endpoint, responseTime, isError);
   });
   
-  // Continuar para o próximo middleware
   next();
-}
-
-/**
- * Middleware para rastrear consultas ao banco de dados
- * Esta função deve ser usada como um wrapper em torno de db.execute
- * @param query Consulta SQL
- * @param params Parâmetros da consulta
- * @param originalFunction Função original de execução do banco de dados
- * @returns Resultado da consulta
- */
-export function dbQueryTracker<T>(
-  query: string,
-  params: any[] = [],
-  originalFunction: (query: string, params: any[]) => Promise<T>
-): Promise<T> {
-  const startTime = Date.now();
-  
-  return originalFunction(query, params)
-    .then(result => {
-      // Calcular tempo de execução
-      const duration = Date.now() - startTime;
-      
-      // Registrar consulta no monitoramento
-      monitoringService.trackDbQuery(query, duration);
-      
-      return result;
-    })
-    .catch(error => {
-      // Calcular tempo de execução mesmo em caso de erro
-      const duration = Date.now() - startTime;
-      
-      // Registrar consulta no monitoramento
-      monitoringService.trackDbQuery(query, duration);
-      
-      // Re-lançar erro
-      throw error;
-    });
-}
+};
 
 /**
  * Middleware para rastrear conexões WebSocket
- * @param socket Socket WebSocket
- * @param next Função next
+ * Este é exportado para uso com eventos de WebSocket
  */
-export function websocketTracker(socket: any, next: NextFunction): void {
-  // Registrar nova conexão
-  monitoringService.trackConnection(true);
-  
-  // Registrar desconexão quando o socket for fechado
-  socket.on('close', () => {
-    monitoringService.trackConnection(false);
-  });
-  
-  // Continuar para o próximo middleware
-  next();
-}
-
-export default { requestTracker, dbQueryTracker, websocketTracker };
+export const websocketTracker = {
+  /**
+   * Rastrear nova conexão
+   * @param socket Socket WebSocket
+   */
+  connection: (socket: any) => {
+    // Rastrear conexão
+    monitoringService.trackConnection(true);
+    
+    // Rastrear desconexão quando o socket for fechado
+    socket.on('close', () => {
+      monitoringService.trackConnection(false);
+    });
+  }
+};

@@ -215,7 +215,12 @@ export default function MonitoringDashboard() {
                   <div className="text-2xl font-bold">{metrics.cpuUsage}%</div>
                   <Cpu className="h-4 w-4 text-muted-foreground" />
                 </div>
-                <Progress value={metrics.cpuUsage} className="h-2 mt-2" indicatorClassName={getProgressColor(metrics.cpuUsage)} />
+                <div className="h-2 mt-2 bg-muted rounded-full">
+                  <div 
+                    className={`h-full rounded-full ${getProgressColor(metrics.cpuUsage)}`} 
+                    style={{ width: `${metrics.cpuUsage}%` }}
+                  />
+                </div>
               </CardContent>
             </Card>
             
@@ -229,7 +234,12 @@ export default function MonitoringDashboard() {
                   <div className="text-2xl font-bold">{metrics.memoryUsage}%</div>
                   <HardDrive className="h-4 w-4 text-muted-foreground" />
                 </div>
-                <Progress value={metrics.memoryUsage} className="h-2 mt-2" indicatorClassName={getProgressColor(metrics.memoryUsage)} />
+                <div className="h-2 mt-2 bg-muted rounded-full">
+                  <div 
+                    className={`h-full rounded-full ${getProgressColor(metrics.memoryUsage)}`} 
+                    style={{ width: `${metrics.memoryUsage}%` }}
+                  />
+                </div>
               </CardContent>
             </Card>
             
@@ -433,25 +443,28 @@ export default function MonitoringDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredEndpoints.map(endpoint => (
-                        <tr key={endpoint} className="border-b hover:bg-muted/50">
-                          <td className="px-4 py-2 font-medium">{endpoint}</td>
-                          <td className="px-4 py-2">{requestStats[endpoint].count}</td>
-                          <td className="px-4 py-2">{requestStats[endpoint].errors}</td>
-                          <td className="px-4 py-2">
-                            <span className={requestStats[endpoint].errors > 0 ? 'text-red-500' : 'text-green-500'}>
-                              {requestStats[endpoint].count > 0 
-                                ? ((requestStats[endpoint].errors / requestStats[endpoint].count) * 100).toFixed(2) 
-                                : '0.00'}%
-                            </span>
-                          </td>
-                          <td className="px-4 py-2">
-                            <span className={getAverageResponseTime(endpoint) > 500 ? 'text-yellow-500' : 'text-green-500'}>
-                              {getAverageResponseTime(endpoint)}ms
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {filteredEndpoints.map(endpoint => {
+                        const stats = requestStats?.[endpoint] || { count: 0, errors: 0, totalResponseTime: 0 };
+                        return (
+                          <tr key={endpoint} className="border-b hover:bg-muted/50">
+                            <td className="px-4 py-2 font-medium">{endpoint}</td>
+                            <td className="px-4 py-2">{stats.count}</td>
+                            <td className="px-4 py-2">{stats.errors}</td>
+                            <td className="px-4 py-2">
+                              <span className={stats.errors > 0 ? 'text-red-500' : 'text-green-500'}>
+                                {stats.count > 0 
+                                  ? ((stats.errors / stats.count) * 100).toFixed(2) 
+                                  : '0.00'}%
+                              </span>
+                            </td>
+                            <td className="px-4 py-2">
+                              <span className={getAverageResponseTime(endpoint) > 500 ? 'text-yellow-500' : 'text-green-500'}>
+                                {getAverageResponseTime(endpoint)}ms
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
