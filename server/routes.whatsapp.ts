@@ -174,11 +174,11 @@ export function registerWhatsAppRoutes(app: Express) {
         return res.status(403).json({ message: 'Acesso negado a esta escola' });
       }
       
-      // Verifica se já existe uma instância com este ID
+      // Verifica se já existe uma instância com esta chave
       const [existingInstance] = await db
         .select()
         .from(whatsappInstances)
-        .where(eq(whatsappInstances.instanceId, validatedData.instanceId));
+        .where(eq(whatsappInstances.instanceKey, validatedData.instanceId));
       
       if (existingInstance) {
         return res.status(400).json({ message: 'Já existe uma instância com este ID' });
@@ -198,25 +198,24 @@ export function registerWhatsAppRoutes(app: Express) {
       const [newInstance] = await db
         .insert(whatsappInstances)
         .values({
-          instanceId: validatedData.instanceId,
-          instanceToken: validatedData.instanceToken,
+          name: validatedData.instanceId, // Usar instanceId como nome da instância
+          instanceKey: validatedData.instanceToken, // Usar instanceToken como chave
           schoolId: validatedData.schoolId,
           status: 'disconnected',
           createdAt: new Date(),
-          updatedAt: new Date(),
-          webhookUrl: validatedData.webhookUrl || null,
+          updatedAt: new Date()
         })
         .returning();
       
       // Se for admin, retorna todas as informações
-      // Se for escola, oculta o token
+      // Se for escola, oculta a chave
       if (req.user.role === 'admin') {
         return res.status(201).json(newInstance);
       } else {
-        const { instanceToken, ...instanceWithoutToken } = newInstance;
+        const { instanceKey, ...instanceWithoutKey } = newInstance;
         return res.status(201).json({
-          ...instanceWithoutToken,
-          instanceToken: '••••••••',
+          ...instanceWithoutKey,
+          instanceKey: '••••••••',
         });
       }
     } catch (error) {
@@ -281,23 +280,22 @@ export function registerWhatsAppRoutes(app: Express) {
       const [updatedInstance] = await db
         .update(whatsappInstances)
         .set({
-          instanceId: validatedData.instanceId,
-          instanceToken: validatedData.instanceToken,
-          updatedAt: new Date(),
-          webhookUrl: validatedData.webhookUrl || null,
+          name: validatedData.instanceId, // Usar instanceId como nome da instância
+          instanceKey: validatedData.instanceToken, // Usar instanceToken como chave
+          updatedAt: new Date()
         })
         .where(eq(whatsappInstances.id, instanceId))
         .returning();
       
       // Se for admin, retorna todas as informações
-      // Se for escola, oculta o token
+      // Se for escola, oculta a chave
       if (req.user.role === 'admin') {
         return res.json(updatedInstance);
       } else {
-        const { instanceToken, ...instanceWithoutToken } = updatedInstance;
+        const { instanceKey, ...instanceWithoutKey } = updatedInstance;
         return res.json({
-          ...instanceWithoutToken,
-          instanceToken: '••••••••',
+          ...instanceWithoutKey,
+          instanceKey: '••••••••',
         });
       }
     } catch (error) {
