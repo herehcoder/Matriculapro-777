@@ -6,6 +6,8 @@
 import { db } from '../db';
 import { mlService } from './mlService';
 import { analyticsService } from './analyticsService';
+import { sendUserNotification, sendSchoolNotification } from '../pusher';
+import * as emailService from '../email';
 
 /**
  * Obtém métricas avançadas de conversão (leads para matrículas)
