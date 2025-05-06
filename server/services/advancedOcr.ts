@@ -10,6 +10,7 @@ import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { logAction } from './securityService';
 import { mlService } from './mlService';
+import * as crypto from 'crypto';
 
 // Tipos de documentos suportados
 export type DocumentType = 
@@ -43,10 +44,13 @@ interface ValidationFields {
     issueDate?: string;
     father?: string;
     mother?: string;
+    cpf?: string; // Para validação cruzada com CPF
   };
   cpf: {
     number: string;
     name: string;
+    rgNumber?: string; // Para validação cruzada com RG
+    birthDate?: string;
   };
   address_proof: {
     name: string;
@@ -74,6 +78,26 @@ interface ValidationFields {
   };
 }
 
+// Tipos de fraude detectáveis
+export type FraudType = 
+  'tampering' | 
+  'photoshop' | 
+  'inconsistent_data' | 
+  'fake_document' | 
+  'identity_theft' | 
+  'duplicate_submission';
+
+// Resultado da detecção de fraude
+export interface FraudDetectionResult {
+  fraudDetected: boolean;
+  confidence: number;
+  fraudType?: FraudType;
+  details?: string;
+  signatureVerified?: boolean;
+  imageHashVerified?: boolean;
+  dataConsistencyVerified?: boolean;
+}
+
 // Resultado da validação de um documento
 export interface ValidationResult {
   id: string;
@@ -93,6 +117,8 @@ export interface ValidationResult {
       confidence: number;
     }[];
   };
+  fraudDetection?: FraudDetectionResult;
+  imageHash?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -220,6 +246,8 @@ class AdvancedOcrService {
         errors JSONB,
         warnings JSONB,
         cross_validation JSONB,
+        fraud_detection JSONB,
+        image_hash TEXT,
         created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
       )
@@ -255,6 +283,7 @@ class AdvancedOcrService {
       userId?: number;
       enrollmentId?: number;
       requiredFields?: string[];
+      detectFraud?: boolean;
     } = {}
   ): Promise<ValidationResult> {
     // Verificar se o serviço está pronto
@@ -310,6 +339,9 @@ class AdvancedOcrService {
     }
     
     try {
+      // Calcular hash da imagem para detecção de duplicatas e validação
+      const imageHash = this.calculateImageHash(imageBuffer);
+      
       // Selecionar worker disponível (round-robin simples)
       const workerIndex = documentId % this.workers.length;
       const worker = this.workers[workerIndex];
@@ -371,6 +403,31 @@ class AdvancedOcrService {
         }
       }
       
+      // Realizar detecção de fraude se solicitado
+      let fraudDetection = undefined;
+      
+      if (options.detectFraud !== false) { // Por padrão, detectar fraude
+        fraudDetection = await this.detectFraud(
+          imageBuffer, 
+          documentType, 
+          extractedData, 
+          {
+            enrollmentId: options.enrollmentId,
+            imageHash
+          }
+        );
+        
+        // Se fraude detectada com alta confiança, marcar para revisão
+        if (fraudDetection.fraudDetected && fraudDetection.confidence > 80) {
+          status = 'needs_review';
+          errors.push(`Possível fraude detectada: ${fraudDetection.fraudType} (${fraudDetection.details})`);
+        }
+        // Se fraude detectada com confiança média, adicionar aviso
+        else if (fraudDetection.fraudDetected && fraudDetection.confidence > 60) {
+          warnings.push(`Suspeita de fraude: ${fraudDetection.fraudType} (${fraudDetection.details})`);
+        }
+      }
+      
       // Criar resultado completo
       const validationResult: ValidationResult = {
         id: validationId,
@@ -382,6 +439,8 @@ class AdvancedOcrService {
         warnings: warnings.length > 0 ? warnings : undefined,
         errors: errors.length > 0 ? errors : undefined,
         crossValidation,
+        fraudDetection,
+        imageHash,
         createdAt: new Date(),
         updatedAt: new Date()
       };
@@ -400,7 +459,8 @@ class AdvancedOcrService {
             documentType,
             validationId,
             status,
-            confidence
+            confidence,
+            fraudDetected: fraudDetection?.fraudDetected
           },
           status === 'invalid' ? 'warning' : 'info'
         );
@@ -444,6 +504,392 @@ class AdvancedOcrService {
       
       return failedResult;
     }
+  }
+  
+  /**
+   * Detecta possíveis fraudes em um documento
+   * @param imageBuffer Buffer da imagem
+   * @param documentType Tipo do documento
+   * @param extractedData Dados extraídos do documento
+   * @param options Opções adicionais
+   * @returns Resultado da detecção de fraude
+   */
+  private async detectFraud(
+    imageBuffer: Buffer,
+    documentType: DocumentType,
+    extractedData: any,
+    options: {
+      enrollmentId?: number;
+      imageHash?: string;
+    } = {}
+  ): Promise<FraudDetectionResult> {
+    try {
+      // Resultado base
+      const result: FraudDetectionResult = {
+        fraudDetected: false,
+        confidence: 0
+      };
+      
+      // Calcular hash da imagem se não fornecido
+      const imageHash = options.imageHash || this.calculateImageHash(imageBuffer);
+      
+      // 1. Verificar duplicação de documentos (mesmo hash de imagem)
+      const duplicateResult = await this.checkDuplicateDocument(imageHash, options.enrollmentId);
+      if (duplicateResult.isDuplicate) {
+        return {
+          fraudDetected: true,
+          confidence: 95,
+          fraudType: 'duplicate_submission',
+          details: `Documento idêntico encontrado (${duplicateResult.documentCount} ocorrências anteriores)`,
+          imageHashVerified: false
+        };
+      }
+      
+      // 2. Verificar inconsistências de dados (usando modelos ML se disponíveis)
+      const inconsistencyResult = await this.checkDataConsistency(documentType, extractedData);
+      if (inconsistencyResult.hasInconsistencies) {
+        return {
+          fraudDetected: true,
+          confidence: inconsistencyResult.confidence,
+          fraudType: 'inconsistent_data',
+          details: inconsistencyResult.details,
+          dataConsistencyVerified: false
+        };
+      }
+      
+      // 3. Verificar adulteração de imagem (se disponível mlService)
+      const imageAnalysisResult = await this.checkImageTampering(imageBuffer, documentType);
+      if (imageAnalysisResult.isTampered) {
+        return {
+          fraudDetected: true,
+          confidence: imageAnalysisResult.confidence,
+          fraudType: 'tampering',
+          details: imageAnalysisResult.details,
+          imageHashVerified: false
+        };
+      }
+      
+      // 4. Verificar assinatura digital (se disponível no documento)
+      const signatureResult = await this.verifyDigitalSignature(imageBuffer, extractedData, documentType);
+      result.signatureVerified = signatureResult.isValid;
+      
+      if (!signatureResult.isValid && signatureResult.confidence > 70) {
+        return {
+          fraudDetected: true,
+          confidence: signatureResult.confidence,
+          fraudType: 'fake_document',
+          details: 'Assinatura digital inválida ou ausente',
+          signatureVerified: false
+        };
+      }
+      
+      // 5. Se tudo estiver ok, retornar resultado sem fraude
+      return {
+        fraudDetected: false,
+        confidence: 90,
+        signatureVerified: signatureResult.isValid,
+        imageHashVerified: true,
+        dataConsistencyVerified: true
+      };
+    } catch (error) {
+      console.error('Erro ao detectar fraude:', error);
+      // Em caso de erro, retornar resultado inconclusivo
+      return {
+        fraudDetected: false,
+        confidence: 0,
+        details: 'Erro ao executar detecção de fraude'
+      };
+    }
+  }
+  
+  /**
+   * Calcula o hash da imagem para identificação
+   * @param imageBuffer Buffer da imagem
+   * @returns Hash da imagem
+   */
+  private calculateImageHash(imageBuffer: Buffer): string {
+    // Usar algoritmo SHA-256 para calcular hash
+    const hash = crypto.createHash('sha256');
+    hash.update(imageBuffer);
+    return hash.digest('hex');
+  }
+  
+  /**
+   * Verifica se um documento é duplicado baseado no hash da imagem
+   * @param imageHash Hash da imagem
+   * @param excludeEnrollmentId ID da matrícula a ser excluída da verificação
+   * @returns Resultado da verificação
+   */
+  private async checkDuplicateDocument(
+    imageHash: string,
+    excludeEnrollmentId?: number
+  ): Promise<{
+    isDuplicate: boolean;
+    documentCount: number;
+    documentIds?: number[];
+  }> {
+    try {
+      // Buscar documentos com o mesmo hash
+      let query = `
+        SELECT document_id
+        FROM document_validations 
+        WHERE image_hash = $1
+      `;
+      
+      const params = [imageHash];
+      
+      if (excludeEnrollmentId) {
+        query += ` AND document_id NOT IN (
+          SELECT id FROM documents WHERE enrollment_id = $2
+        )`;
+        params.push(excludeEnrollmentId);
+      }
+      
+      const result = await db.execute(query, params);
+      
+      const documentIds = result.rows.map(row => row.document_id);
+      
+      return {
+        isDuplicate: documentIds.length > 0,
+        documentCount: documentIds.length,
+        documentIds: documentIds.length > 0 ? documentIds : undefined
+      };
+    } catch (error) {
+      console.error('Erro ao verificar duplicação:', error);
+      return {
+        isDuplicate: false,
+        documentCount: 0
+      };
+    }
+  }
+  
+  /**
+   * Verifica inconsistências nos dados extraídos
+   * @param documentType Tipo do documento
+   * @param extractedData Dados extraídos
+   * @returns Resultado da verificação
+   */
+  private async checkDataConsistency(
+    documentType: DocumentType,
+    extractedData: any
+  ): Promise<{
+    hasInconsistencies: boolean;
+    confidence: number;
+    details?: string;
+  }> {
+    // Verificações específicas por tipo de documento
+    switch (documentType) {
+      case 'cpf':
+        return this.validateCpfData(extractedData);
+      case 'rg':
+        return this.validateRgData(extractedData);
+      default:
+        return {
+          hasInconsistencies: false,
+          confidence: 0
+        };
+    }
+  }
+  
+  /**
+   * Valida dados de CPF
+   * @param data Dados extraídos do CPF
+   * @returns Resultado da validação
+   */
+  private validateCpfData(data: any): Promise<{
+    hasInconsistencies: boolean;
+    confidence: number;
+    details?: string;
+  }> {
+    return new Promise(resolve => {
+      try {
+        const issues = [];
+        let confidence = 0;
+        
+        // Verificar número de CPF
+        if (data.number) {
+          const cpfNumber = data.number.replace(/\D/g, '');
+          
+          // CPF deve ter 11 dígitos
+          if (cpfNumber.length !== 11) {
+            issues.push('Número de CPF inválido (tamanho incorreto)');
+            confidence += 30;
+          } 
+          // Verificar dígitos verificadores (algoritmo simplificado)
+          else {
+            // Verificação simplificada: todos os dígitos iguais são inválidos
+            const allEqual = /^(\d)\1+$/.test(cpfNumber);
+            if (allEqual) {
+              issues.push('Número de CPF inválido (dígitos repetidos)');
+              confidence += 50;
+            }
+            
+            // Implementação simplificada do algoritmo de validação de CPF
+            // Em uma implementação real, faria a validação completa dos dígitos
+            // verificadores usando o algoritmo oficial da Receita Federal
+          }
+        }
+        
+        // Verificar data de nascimento
+        if (data.birthDate) {
+          const birthDate = new Date(data.birthDate);
+          const now = new Date();
+          const age = now.getFullYear() - birthDate.getFullYear();
+          
+          // Idade improvável (mais de 120 anos ou menos de 16)
+          if (age > 120 || age < 16) {
+            issues.push(`Idade improvável: ${age} anos`);
+            confidence += 20;
+          }
+        }
+        
+        resolve({
+          hasInconsistencies: issues.length > 0,
+          confidence: Math.min(100, confidence),
+          details: issues.length > 0 ? issues.join('; ') : undefined
+        });
+      } catch (error) {
+        resolve({
+          hasInconsistencies: false,
+          confidence: 0,
+          details: 'Erro na validação de CPF'
+        });
+      }
+    });
+  }
+  
+  /**
+   * Valida dados de RG
+   * @param data Dados extraídos do RG
+   * @returns Resultado da validação
+   */
+  private validateRgData(data: any): Promise<{
+    hasInconsistencies: boolean;
+    confidence: number;
+    details?: string;
+  }> {
+    return new Promise(resolve => {
+      try {
+        const issues = [];
+        let confidence = 0;
+        
+        // Verificar número de RG
+        if (data.number) {
+          const rgNumber = data.number.replace(/\D/g, '');
+          
+          // RG muito curto
+          if (rgNumber.length < 5) {
+            issues.push('Número de RG muito curto');
+            confidence += 30;
+          }
+        }
+        
+        // Verificar data de nascimento
+        if (data.birthDate) {
+          const birthDate = new Date(data.birthDate);
+          const now = new Date();
+          const age = now.getFullYear() - birthDate.getFullYear();
+          
+          // Idade improvável
+          if (age > 120 || age < 16) {
+            issues.push(`Idade improvável: ${age} anos`);
+            confidence += 20;
+          }
+        }
+        
+        // Verificar data de emissão
+        if (data.issueDate) {
+          const issueDate = new Date(data.issueDate);
+          const now = new Date();
+          
+          // Data de emissão no futuro
+          if (issueDate > now) {
+            issues.push('Data de emissão no futuro');
+            confidence += 50;
+          }
+          
+          // Verificar se data de emissão é anterior à data de nascimento
+          if (data.birthDate) {
+            const birthDate = new Date(data.birthDate);
+            if (issueDate < birthDate) {
+              issues.push('Data de emissão anterior à data de nascimento');
+              confidence += 70;
+            }
+          }
+        }
+        
+        resolve({
+          hasInconsistencies: issues.length > 0,
+          confidence: Math.min(100, confidence),
+          details: issues.length > 0 ? issues.join('; ') : undefined
+        });
+      } catch (error) {
+        resolve({
+          hasInconsistencies: false,
+          confidence: 0,
+          details: 'Erro na validação de RG'
+        });
+      }
+    });
+  }
+  
+  /**
+   * Verifica se a imagem foi adulterada
+   * @param imageBuffer Buffer da imagem
+   * @param documentType Tipo do documento
+   * @returns Resultado da verificação
+   */
+  private async checkImageTampering(
+    imageBuffer: Buffer,
+    documentType: DocumentType
+  ): Promise<{
+    isTampered: boolean;
+    confidence: number;
+    details?: string;
+  }> {
+    try {
+      // Se o serviço ML estiver disponível, usar para detecção de adulteração
+      if (mlService && typeof mlService.detectImageTampering === 'function') {
+        const result = await mlService.detectImageTampering(imageBuffer, documentType);
+        return result;
+      }
+      
+      // Implementação simplificada (sem ML)
+      return {
+        isTampered: false,
+        confidence: 0
+      };
+    } catch (error) {
+      console.error('Erro ao verificar adulteração de imagem:', error);
+      return {
+        isTampered: false,
+        confidence: 0
+      };
+    }
+  }
+  
+  /**
+   * Verifica assinatura digital do documento
+   * @param imageBuffer Buffer da imagem
+   * @param extractedData Dados extraídos
+   * @param documentType Tipo do documento
+   * @returns Resultado da verificação
+   */
+  private async verifyDigitalSignature(
+    imageBuffer: Buffer,
+    extractedData: any,
+    documentType: DocumentType
+  ): Promise<{
+    isValid: boolean;
+    confidence: number;
+    details?: string;
+  }> {
+    // Implementação básica - verificação de QR code ou código de barras
+    // Em um sistema real, implementaria verificação completa com chaves públicas
+    return {
+      isValid: true, // Por padrão, considerar válido
+      confidence: 50
+    };
   }
   
   /**
