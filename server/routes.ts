@@ -19,6 +19,8 @@ import { registerAdminWhatsAppRoutes } from "./routes.admin.whatsapp";
 import { registerEvolutionApiRoutes } from "./routes.evolution";
 import { registerOcrRoutes } from "./routes.ocr";
 import { registerEnhancedPaymentRoutes } from "./routes.payment.enhanced";
+// Importar rotas de monitoramento
+import { registerMonitoringRoutes } from "./routes.monitoring";
 import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
@@ -128,6 +130,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.status(401).json({ message: "Unauthorized - Please log in" });
   };
   
+  // Middleware to check specific roles
+  const hasRole = (roles: string[]) => {
+    return (req: Request, res: Response, next: NextFunction) => {
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Unauthorized - Please log in" });
+      }
+      
+      const user = req.user as any;
+      if (roles.includes(user.role)) {
+        return next();
+      }
+      
+      res.status(403).json({ message: "Forbidden - Insufficient permissions" });
+    };
+  };
+  
   // Register notification routes
   registerNotificationRoutes(app, isAuthenticated);
   
@@ -152,6 +170,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerEvolutionApiRoutes(app, isAuthenticated);
   registerOcrRoutes(app, isAuthenticated);
   registerEnhancedPaymentRoutes(app, isAuthenticated);
+  
+  // Registrar rotas de monitoramento
+  app.use('/api/monitoring', isAuthenticated, hasRole(["admin"]), registerMonitoringRoutes());
   
   // Registrar webhook handlers para Evolution API
   // Importando diretamente usando imports ES6
@@ -182,22 +203,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } else {
       next(err);
     }
-  };
-
-  // Middleware to check specific roles
-  const hasRole = (roles: string[]) => {
-    return (req: Request, res: Response, next: NextFunction) => {
-      if (!req.isAuthenticated()) {
-        return res.status(401).json({ message: "Unauthorized - Please log in" });
-      }
-      
-      const user = req.user as any;
-      if (roles.includes(user.role)) {
-        return next();
-      }
-      
-      res.status(403).json({ message: "Forbidden - Insufficient permissions" });
-    };
   };
 
   // All authentication routes are now handled by setupAuth
