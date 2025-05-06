@@ -1,831 +1,765 @@
 /**
- * Serviço para processamento de webhooks da Evolution API
- * Implementa handlers para diferentes tipos de eventos recebidos
+ * Serviço de Webhooks da Evolution API
+ * Responsável por processar eventos recebidos da Evolution API do WhatsApp
  */
 
 import { db } from '../db';
-import { eq, and, desc } from 'drizzle-orm';
-import { whatsappInstances, whatsappContacts, whatsappMessages } from '../../shared/whatsapp.schema';
-import { sendUserNotification, sendSchoolNotification, NotificationPayload } from '../pusher';
+import { whatsappInstances, whatsappContacts, whatsappMessages } from '@shared/whatsapp.schema';
+import { eq, and } from 'drizzle-orm';
+import { cacheService } from './cacheService';
 import { ocrService } from './ocrService';
+import { whatsappTemplateService } from './whatsappTemplateService';
+import { advancedOcrService } from './advancedOcr';
+import { intelligentChatbot } from './intelligentChatbot';
 import { logAction } from './securityService';
-import evolutionApiService from './evolutionApi';
-import path from 'path';
-import fs from 'fs';
-import { promisify } from 'util';
-import fetch from 'node-fetch';
-import { v4 as uuidv4 } from 'uuid';
+import { sendUserNotification, sendSchoolNotification } from '../pusher';
 
-const writeFileAsync = promisify(fs.writeFile);
-const mkdirAsync = promisify(fs.mkdir);
+// Cache TTL para instâncias e contatos (10 minutos)
+const CACHE_TTL = 600;
 
-// Diretório para armazenamento temporário de arquivos
-const TEMP_MEDIA_DIR = path.join(process.cwd(), 'uploads', 'temp');
+// Tipos de mensagens e eventos que podemos receber da Evolution API
+enum WebhookEventType {
+  MESSAGE = 'messages.upsert',
+  MESSAGE_ACK = 'message.ack',
+  CONNECTION_UPDATE = 'connection.update',
+  QR_CODE = 'qr.update',
+  GROUP_UPDATE = 'group.update',
+  PRESENCE_UPDATE = 'presence.update',
+  UNREAD_MESSAGES = 'messages.unread.update',
+  READY = 'ready',
+  CALL_UPDATE = 'call.update',
+  TYPING = 'typing'
+}
 
-// Tipos de eventos do webhook
-export type WebhookEventType = 
-  'connection.update' | 
-  'qr.update' | 
-  'messages.upsert' | 
-  'messages.update' | 
-  'messages.delete';
-
-// Estrutura de dados do webhook
-export interface WebhookPayload {
-  event: WebhookEventType;
-  instance: {
-    instanceName: string;
-    instanceId: string;
+// Interface para o payload de mensagem recebida
+interface MessagePayload {
+  key: {
+    remoteJid: string;
+    fromMe: boolean;
+    id: string;
   };
-  data: any;
+  pushName?: string;
+  message: any; // Conteúdo da mensagem (texto, mídia, etc)
+  messageTimestamp: number;
+  messageType?: string;
+  instanceKey?: string;
 }
 
-// Resposta do processamento de webhook
-export interface WebhookProcessResult {
-  processed: boolean;
-  message?: string;
-  data?: any;
+// Interface para evento de atualização de status de mensagem
+interface MessageAckPayload {
+  key: {
+    remoteJid: string;
+    fromMe: boolean;
+    id: string;
+  };
+  update: {
+    status: 'error' | 'pending' | 'server' | 'delivered' | 'read';
+  };
+  instanceKey?: string;
 }
 
-/**
- * Processa webhook da Evolution API
- * @param payload Dados do webhook
- * @returns Resultado do processamento
- */
-export async function processWebhook(payload: WebhookPayload): Promise<WebhookProcessResult> {
-  try {
-    const { event, instance, data } = payload;
-    
-    // Gerar ID para o evento
-    const eventId = uuidv4();
-    
-    // Registrar recebimento do webhook
-    console.log(`Webhook recebido: ${event} para instância ${instance.instanceName}`);
-    
-    // Persistir evento no log de auditoria
-    await logAction(
-      0, // System
-      'webhook_received',
-      'evolution_api',
-      eventId,
-      {
-        event,
-        instance: instance.instanceName,
-        timestamp: new Date()
-      },
-      'info'
-    );
-    
-    // Processar evento baseado no tipo
-    switch (event) {
-      case 'connection.update':
-        return await handleConnectionUpdate(instance, data, eventId);
-      case 'qr.update':
-        return await handleQrUpdate(instance, data, eventId);
-      case 'messages.upsert':
-        return await handleIncomingMessage(instance, data, eventId);
-      case 'messages.update':
-        return await handleMessageStatus(instance, data, eventId);
-      default:
-        return {
-          processed: false,
-          message: `Tipo de evento não suportado: ${event}`
-        };
-    }
-  } catch (error) {
-    console.error('Erro ao processar webhook:', error);
-    return {
-      processed: false,
-      message: error instanceof Error ? error.message : 'Erro desconhecido'
-    };
-  }
+// Interface para atualização de conexão
+interface ConnectionUpdatePayload {
+  instance: {
+    key: string;
+    status: 'connecting' | 'connected' | 'disconnected' | 'qrcode';
+  };
+}
+
+// Interface para atualização de QR Code
+interface QrCodeUpdatePayload {
+  instance: {
+    key: string;
+  };
+  qrcode: {
+    code: string;
+    base64: string;
+  };
 }
 
 /**
- * Manipula eventos de atualização de conexão
- * @param instance Informações da instância
- * @param data Dados do evento
- * @param eventId ID do evento
- * @returns Resultado do processamento
+ * Classe principal do serviço de webhooks
  */
-export async function handleConnectionUpdate(
-  instance: any,
-  data: any,
-  eventId: string
-): Promise<WebhookProcessResult> {
-  try {
-    // Extrair dados relevantes
-    const { instanceId, instanceName } = instance;
-    const { status } = data;
+class EvolutionApiWebhookService {
+  /**
+   * Processa um evento webhook da Evolution API
+   * @param event Tipo do evento
+   * @param data Dados do evento
+   */
+  async processWebhook(event: string, data: any): Promise<any> {
+    console.log(`Processando webhook: ${event}`);
     
-    console.log(`Atualizando status da instância ${instanceName} para ${status}`);
-    
-    // Buscar instância no banco de dados
-    const [dbInstance] = await db.select()
-      .from(whatsappInstances)
-      .where(eq(whatsappInstances.instanceName, instanceId));
-    
-    if (!dbInstance) {
-      return {
-        processed: false,
-        message: `Instância não encontrada: ${instanceId}`
-      };
-    }
-    
-    // Atualizar status da instância no banco
-    await db.update(whatsappInstances)
-      .set({
-        status: status,
-        updatedAt: new Date(),
-        // Remover referência ao campo metadata que não existe
-        // metadata: { ...dbInstance.metadata, lastConnectionEvent: data }
-      })
-      .where(eq(whatsappInstances.id, dbInstance.id));
-    
-    // Enviar notificação para a escola se houver
-    if (dbInstance.schoolId) {
-      // Construir notificação
-      const notification: NotificationPayload = {
-        title: `Status do WhatsApp Atualizado`,
-        message: `A instância ${instanceName} está agora ${getStatusText(status)}`,
-        type: 'system',
-        data: {
-          instanceId,
-          status,
-          eventId
-        }
-      };
-      
-      // Enviar notificação para a escola
-      await sendSchoolNotification(dbInstance.schoolId, notification);
-      
-      // Registrar em log
-      await logAction(
-        0, // System
-        'whatsapp_status_changed',
-        'whatsapp_instance',
-        instanceId,
-        {
-          newStatus: status,
-          instance: instanceName,
-          schoolId: dbInstance.schoolId
-        },
-        status === 'connected' ? 'info' : 'warning'
-      );
-    }
-    
-    return { 
-      processed: true,
-      data: { instanceId, status }
-    };
-  } catch (error) {
-    console.error('Erro ao processar atualização de conexão:', error);
-    return {
-      processed: false,
-      message: error instanceof Error ? error.message : 'Erro desconhecido'
-    };
-  }
-}
-
-/**
- * Manipula eventos de atualização de QR Code
- * @param instance Informações da instância
- * @param data Dados do evento
- * @param eventId ID do evento
- * @returns Resultado do processamento
- */
-export async function handleQrUpdate(
-  instance: any,
-  data: any,
-  eventId: string
-): Promise<WebhookProcessResult> {
-  try {
-    // Extrair dados relevantes
-    const { instanceId, instanceName } = instance;
-    const { qrcode, attempt } = data;
-    
-    console.log(`Novo QR Code recebido para instância ${instanceName}, tentativa ${attempt}`);
-    
-    // Buscar instância no banco de dados
-    const [dbInstance] = await db.select()
-      .from(whatsappInstances)
-      .where(eq(whatsappInstances.instanceName, instanceId));
-    
-    if (!dbInstance) {
-      return {
-        processed: false,
-        message: `Instância não encontrada: ${instanceId}`
-      };
-    }
-    
-    // Atualizar QR code da instância no banco
-    await db.update(whatsappInstances)
-      .set({
-        qrCode: qrcode,
-        updatedAt: new Date(),
-        // Remover referência ao campo metadata que não existe
-        // metadata: { ...dbInstance.metadata, qrAttempt: attempt }
-      })
-      .where(eq(whatsappInstances.id, dbInstance.id));
-    
-    // Enviar notificação para a escola se houver
-    if (dbInstance.schoolId) {
-      // Construir notificação
-      const notification: NotificationPayload = {
-        title: `Novo QR Code disponível`,
-        message: `Um novo QR code foi gerado para conectar a instância ${instanceName}`,
-        type: 'system',
-        data: {
-          instanceId,
-          qrAttempt: attempt,
-          eventId
-        }
-      };
-      
-      // Enviar notificação para a escola
-      await sendSchoolNotification(dbInstance.schoolId, notification);
-    }
-    
-    return { 
-      processed: true,
-      data: { 
-        instanceId, 
-        qrReceived: true,
-        attempt
-      }
-    };
-  } catch (error) {
-    console.error('Erro ao processar atualização de QR:', error);
-    return {
-      processed: false,
-      message: error instanceof Error ? error.message : 'Erro desconhecido'
-    };
-  }
-}
-
-/**
- * Manipula eventos de novas mensagens
- * @param instance Informações da instância
- * @param data Dados do evento
- * @param eventId ID do evento
- * @returns Resultado do processamento
- */
-export async function handleIncomingMessage(
-  instance: any,
-  data: any,
-  eventId: string
-): Promise<WebhookProcessResult> {
-  try {
-    // Extrair dados relevantes
-    const { instanceId, instanceName } = instance;
-    const messages = Array.isArray(data.messages) ? data.messages : [data.messages];
-    
-    console.log(`Recebidas ${messages.length} mensagens para instância ${instanceName}`);
-    
-    // Buscar instância no banco de dados
-    const [dbInstance] = await db.select()
-      .from(whatsappInstances)
-      .where(eq(whatsappInstances.instanceName, instanceId));
-    
-    if (!dbInstance) {
-      return {
-        processed: false,
-        message: `Instância não encontrada: ${instanceId}`
-      };
-    }
-    
-    const processedMessages = [];
-    
-    // Processar cada mensagem
-    for (const msg of messages) {
-      // Ignorar mensagens enviadas pelo próprio sistema
-      if (msg.key?.fromMe) {
-        continue;
-      }
-      
-      // Extrair informações da mensagem
-      const messageId = msg.key?.id || uuidv4();
-      const fromNumber = msg.key?.remoteJid?.replace(/[@:].*$/, '');
-      const timestamp = new Date(msg.messageTimestamp * 1000);
-      
-      // Extrair conteúdo baseado no tipo
-      let messageContent = '';
-      let messageType = 'text';
-      let mediaUrl = null;
-      let fileName = null;
-      
-      if (msg.message?.conversation) {
-        messageContent = msg.message.conversation;
-      } else if (msg.message?.extendedTextMessage?.text) {
-        messageContent = msg.message.extendedTextMessage.text;
-      } else if (msg.message?.imageMessage) {
-        messageType = 'image';
-        messageContent = msg.message.imageMessage.caption || '';
-        mediaUrl = msg.message.imageMessage.url;
-        fileName = msg.message.imageMessage.fileName || `image_${Date.now()}.jpg`;
+    try {
+      switch (event) {
+        case WebhookEventType.MESSAGE:
+          return await this.processIncomingMessage(data);
         
-        // Baixar mídia se URL estiver disponível
-        if (mediaUrl) {
-          const mediaPath = await downloadMedia(mediaUrl, fileName, dbInstance.id);
-          // Verificar se é um documento e processar OCR se for
-          await processDocumentIfNeeded(mediaPath, messageContent, fromNumber, dbInstance);
-        }
-      } else if (msg.message?.documentMessage) {
-        messageType = 'document';
-        messageContent = msg.message.documentMessage.caption || '';
-        mediaUrl = msg.message.documentMessage.url;
-        fileName = msg.message.documentMessage.fileName || `document_${Date.now()}.pdf`;
+        case WebhookEventType.MESSAGE_ACK:
+          return await this.processMessageAck(data);
         
-        // Baixar documento se URL estiver disponível
-        if (mediaUrl) {
-          const mediaPath = await downloadMedia(mediaUrl, fileName, dbInstance.id);
-          // Processar documento
-          await processDocumentIfNeeded(mediaPath, messageContent, fromNumber, dbInstance);
-        }
-      } else if (msg.message?.audioMessage) {
-        messageType = 'audio';
-        mediaUrl = msg.message.audioMessage.url;
-        fileName = `audio_${Date.now()}.ogg`;
-      } else if (msg.message?.videoMessage) {
-        messageType = 'video';
-        messageContent = msg.message.videoMessage.caption || '';
-        mediaUrl = msg.message.videoMessage.url;
-        fileName = msg.message.videoMessage.fileName || `video_${Date.now()}.mp4`;
-      } else {
-        // Outros tipos de mensagem
-        messageContent = JSON.stringify(msg.message);
-        messageType = 'other';
+        case WebhookEventType.CONNECTION_UPDATE:
+          return await this.processConnectionUpdate(data);
+        
+        case WebhookEventType.QR_CODE:
+          return await this.processQrCodeUpdate(data);
+        
+        case WebhookEventType.READY:
+          return await this.processReadyEvent(data);
+        
+        default:
+          // Logar evento não processado para futuras implementações
+          console.log(`Evento não processado: ${event}`, data);
+          return { success: true, message: 'Evento recebido, mas não processado' };
       }
+    } catch (error) {
+      console.error(`Erro ao processar webhook ${event}:`, error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Erro desconhecido' 
+      };
+    }
+  }
+
+  /**
+   * Processa uma mensagem recebida
+   * @param data Dados da mensagem
+   */
+  private async processIncomingMessage(data: any): Promise<any> {
+    // Extrair informações relevantes
+    const messageData = data.data as MessagePayload;
+    const instanceKey = messageData.instanceKey || data.instance?.key;
+    const key = messageData.key;
+    
+    if (!instanceKey) {
+      throw new Error('Instance key não encontrada na mensagem');
+    }
+    
+    if (!key || !key.remoteJid) {
+      throw new Error('Dados da mensagem incompletos');
+    }
+    
+    // Verificar se é uma mensagem de grupo
+    const isGroup = key.remoteJid.includes('@g.us');
+    if (isGroup) {
+      // Por enquanto, ignoramos mensagens de grupo
+      return { success: true, ignored: true, reason: 'group_message' };
+    }
+    
+    try {
+      // Obter instância
+      const instance = await this.getInstanceByKey(instanceKey);
+      if (!instance) {
+        throw new Error(`Instância não encontrada: ${instanceKey}`);
+      }
+      
+      // Normalizar número de telefone
+      const phoneNumber = this.normalizePhoneNumber(key.remoteJid);
       
       // Buscar ou criar contato
-      let contact = await findOrCreateContact(fromNumber, dbInstance.id);
+      const contact = await this.getOrCreateContact(instance.id, phoneNumber, messageData.pushName);
       
-      // Salvar mensagem no banco de dados
-      const [savedMessage] = await db.insert(whatsappMessages)
-        .values({
-          instanceId: dbInstance.id,
-          contactId: contact.id,
-          content: messageContent,
-          direction: 'inbound',
-          status: 'received',
-          messageType: messageType,
-          mediaUrl: mediaUrl,
-          fileName: fileName,
-          externalId: messageId,
-          metadata: msg,
-          createdAt: timestamp,
-          updatedAt: new Date()
-        })
-        .returning();
+      // Extrair conteúdo da mensagem
+      const messageContent = this.extractMessageContent(messageData.message);
       
-      // Buscar dados da matrícula ou aluno associados ao contato
-      let enrollmentId = null;
-      let studentId = null;
-      
-      if (contact.metadata && typeof contact.metadata === 'object') {
-        enrollmentId = (contact.metadata as any).enrollmentId;
-        studentId = (contact.metadata as any).studentId;
-      }
-      
-      // Enviar notificação para a escola
-      if (dbInstance.schoolId) {
-        const notification: NotificationPayload = {
-          title: `Nova mensagem de ${contact.name || fromNumber}`,
-          message: truncateMessage(messageContent, 100),
-          type: 'message',
-          data: {
-            messageId: savedMessage.id,
-            contactId: contact.id,
-            contactName: contact.name,
-            contactPhone: fromNumber,
-            messageType,
-            instanceId: dbInstance.id,
-            enrollmentId,
-            studentId
-          }
-        };
-        
-        await sendSchoolNotification(dbInstance.schoolId, notification);
-      }
-      
-      // Disparar processamento da resposta automática
-      await processAutoReply(savedMessage, contact, dbInstance);
-      
-      processedMessages.push({
-        id: savedMessage.id,
+      // Salvar a mensagem
+      const message = await this.saveMessage({
+        instanceId: instance.id,
         contactId: contact.id,
-        type: messageType,
-        hasMedia: !!mediaUrl
+        content: messageContent.text,
+        direction: 'inbound',
+        status: 'received',
+        externalId: key.id,
+        metadata: {
+          messageType: messageContent.type,
+          rawMessage: messageData.message,
+          mediaUrl: messageContent.mediaUrl,
+          caption: messageContent.caption,
+          fileName: messageContent.fileName
+        },
+        createdAt: new Date(messageData.messageTimestamp * 1000)
       });
-    }
-    
-    return { 
-      processed: true,
-      data: {
-        instanceId: dbInstance.id,
-        messagesProcessed: processedMessages.length,
-        messages: processedMessages
+      
+      // Processar diferentes tipos de mensagem
+      if (messageContent.type === 'image' || messageContent.type === 'document') {
+        await this.processMediaMessage(message, instance.id, contact.id, messageContent);
+      } else if (messageContent.type === 'text') {
+        // Processar mensagem de texto com chatbot inteligente
+        await this.processTextMessage(message, instance.id, contact.id, messageContent.text);
       }
-    };
-  } catch (error) {
-    console.error('Erro ao processar mensagem recebida:', error);
-    return {
-      processed: false,
-      message: error instanceof Error ? error.message : 'Erro desconhecido'
-    };
-  }
-}
-
-/**
- * Manipula eventos de atualização de status de mensagens
- * @param instance Informações da instância
- * @param data Dados do evento
- * @param eventId ID do evento
- * @returns Resultado do processamento
- */
-export async function handleMessageStatus(
-  instance: any,
-  data: any,
-  eventId: string
-): Promise<WebhookProcessResult> {
-  try {
-    // Extrair dados relevantes
-    const { instanceId, instanceName } = instance;
-    const updates = Array.isArray(data.updates) ? data.updates : [data.updates];
-    
-    console.log(`Recebidas ${updates.length} atualizações de status para instância ${instanceName}`);
-    
-    // Buscar instância no banco de dados
-    const [dbInstance] = await db.select()
-      .from(whatsappInstances)
-      .where(eq(whatsappInstances.instanceName, instanceId));
-    
-    if (!dbInstance) {
-      return {
-        processed: false,
-        message: `Instância não encontrada: ${instanceId}`
-      };
+      
+      // Notificar sobre nova mensagem
+      await this.notifyNewMessage(instance, contact, messageContent);
+      
+      return { success: true, message: 'Mensagem processada com sucesso', messageId: message.id };
+    } catch (error) {
+      console.error('Erro ao processar mensagem recebida:', error);
+      throw error;
     }
-    
-    const processedUpdates = [];
-    
-    // Processar cada atualização
-    for (const update of updates) {
-      const messageId = update.key?.id;
-      if (!messageId) continue;
+  }
+  
+  /**
+   * Processa mensagem de texto usando o chatbot inteligente
+   * @param message Mensagem salva no sistema
+   * @param instanceId ID da instância
+   * @param contactId ID do contato
+   * @param text Texto da mensagem
+   */
+  private async processTextMessage(message: any, instanceId: number, contactId: number, text: string): Promise<void> {
+    try {
+      // Verificar se a mensagem está relacionada a documentos
+      const isDocumentQuery = await intelligentChatbot.isDocumentQuery(text);
       
-      // Mapear status do WhatsApp para status do sistema
-      const status = mapMessageStatus(update.status || update.update?.status);
+      if (isDocumentQuery) {
+        console.log(`Mensagem identificada como consulta sobre documentos: ${message.id}`);
+      }
       
-      // Buscar mensagem no banco de dados
-      const [message] = await db.select()
-        .from(whatsappMessages)
-        .where(eq(whatsappMessages.externalId, messageId));
+      // Verificar se o chatbot inteligente está habilitado
+      const chatbotEnabled = await intelligentChatbot.initialize();
       
-      if (message) {
-        // Atualizar status da mensagem
-        await db.update(whatsappMessages)
-          .set({
-            status: status,
-            updatedAt: new Date()
-          })
-          .where(eq(whatsappMessages.id, message.id));
+      if (chatbotEnabled) {
+        // Criar ID de contexto único baseado na instância e contato
+        const contextId = `whatsapp_${instanceId}_${contactId}`;
         
-        processedUpdates.push({
-          messageId: message.id,
-          externalId: messageId,
-          newStatus: status
+        // Processar mensagem com o chatbot
+        const response = await intelligentChatbot.processMessage(contextId, text, {
+          userContext: {
+            messageId: message.id,
+            documentQuery: isDocumentQuery
+          }
         });
+        
+        // Salvar resposta do chatbot como mensagem de saída
+        await this.saveMessage({
+          instanceId,
+          contactId,
+          content: response,
+          direction: 'outbound',
+          status: 'pending', // Será atualizado quando o webhook de confirmação chegar
+          externalId: `auto_${message.id}`,
+          metadata: {
+            messageType: 'text',
+            autoResponse: true,
+            relatedToMessage: message.id
+          }
+        });
+        
+        // Aqui chamaríamos a API para enviar a mensagem
+        // await this.sendWhatsAppMessage(instanceId, contactId, response);
+        
+        console.log(`Resposta automática gerada para mensagem ${message.id}`);
       }
+    } catch (error) {
+      console.error('Erro ao processar mensagem de texto:', error);
+      // Não lançar o erro para não interromper o fluxo principal
     }
-    
-    return { 
-      processed: true,
-      data: {
-        instanceId: dbInstance.id,
-        updatesProcessed: processedUpdates.length,
-        updates: processedUpdates
-      }
-    };
-  } catch (error) {
-    console.error('Erro ao processar atualização de status de mensagem:', error);
-    return {
-      processed: false,
-      message: error instanceof Error ? error.message : 'Erro desconhecido'
-    };
   }
-}
 
-/**
- * Processa resposta automática para mensagem recebida
- * @param message Mensagem recebida
- * @param contact Contato que enviou a mensagem
- * @param instance Instância do WhatsApp
- */
-async function processAutoReply(message: any, contact: any, instance: any): Promise<void> {
-  try {
-    // Verificar se resposta automática está habilitada para esta instância
-    // Removendo verificação do campo metadata que não existe no schema
-    // Sempre assumir que resposta automática está habilitada
-    
-    // Verificar se o contato está em atendimento por um atendente
-    // Usando flags temporárias já que não temos campo metadata
-    const isBeingAttended = false; // Assumir que não está em atendimento
-    
-    // Buscar mensagem de boas-vindas nas configurações da instância
-    // Usar mensagem padrão já que não temos campo metadata
-    let welcomeMessage = "Olá! Obrigado por entrar em contato. Em breve um atendente irá te responder.";
-    
-    // Verificar se já enviamos mensagem de boas-vindas para este contato
-    const hasWelcomed = contact.metadata && (contact.metadata as any).welcomeSent;
-    
-    if (!hasWelcomed) {
-      // Enviar mensagem de boas-vindas
-      try {
-        const result = await evolutionApiService.sendTextMessage(
-          instance.instanceName,
-          contact.phone,
-          welcomeMessage
-        );
+  /**
+   * Processa mensagem com mídia para potencial verificação de documentos
+   * @param message Mensagem salva no sistema
+   * @param instanceId ID da instância
+   * @param contactId ID do contato
+   * @param content Conteúdo extraído da mensagem
+   */
+  private async processMediaMessage(message: any, instanceId: number, contactId: number, content: any): Promise<void> {
+    try {
+      // Se for uma imagem ou documento, podemos tentar fazer OCR
+      if ((content.type === 'image' || content.type === 'document') && content.mediaUrl) {
+        // Verificar se a mensagem parece ser um documento baseado em palavras-chave
+        const isLikelyDocument = this.isLikelyDocument(content.text || content.caption || '');
         
-        // Marcar contato como já tendo recebido boas-vindas
-        await db.update(whatsappContacts)
-          .set({
-            metadata: { 
-              ...contact.metadata, 
-              welcomeSent: true,
-              welcomeSentAt: new Date()
-            },
-            updatedAt: new Date()
-          })
-          .where(eq(whatsappContacts.id, contact.id));
-        
-        console.log(`Mensagem de boas-vindas enviada para contato ${contact.id}`);
-      } catch (error) {
-        console.error(`Erro ao enviar mensagem de boas-vindas para contato ${contact.id}:`, error);
-      }
-    }
-    
-    // Analisar mensagem para identificar palavras-chave
-    const lowerContent = message.content.toLowerCase();
-    
-    // Lista de keywords para resposta automática
-    const keywords = {
-      matricula: "Para iniciar o processo de matrícula, por favor acesse nosso site ou visite nossa secretaria.",
-      horario: "Nosso horário de atendimento é de segunda a sexta, das 8h às 17h.",
-      preco: "Para informações sobre valores, por favor aguarde que um atendente entrará em contato.",
-      documento: "Você pode enviar seus documentos por este chat. Tire uma foto clara do documento e envie para nós."
-    };
-    
-    // Verificar se a mensagem contém alguma palavra-chave
-    for (const [keyword, response] of Object.entries(keywords)) {
-      if (lowerContent.includes(keyword)) {
-        try {
-          // Aguardar um pouco para simular digitação
-          await new Promise(resolve => setTimeout(resolve, 1500));
+        if (isLikelyDocument) {
+          // Agendar análise de documento
+          console.log(`Agendando análise de documento para mensagem ${message.id}`);
           
-          // Enviar resposta automática
-          await evolutionApiService.sendTextMessage(
-            instance.instanceName,
-            contact.phone,
-            response
+          // Aqui poderíamos agendar o processamento em uma fila de tarefas
+          // Por enquanto, atualizar metadados da mensagem
+          await db.update(whatsappMessages)
+            .set({ 
+              metadata: { 
+                ...message.metadata,
+                documentAnalysisPending: true,
+                documentAnalysisScheduled: new Date()
+              }
+            })
+            .where(eq(whatsappMessages.id, message.id))
+            .returning();
+          
+          // Notificar usuário que documento está sendo analisado
+          const responseText = await whatsappTemplateService.processTemplate(
+            "Recebemos seu documento e estamos analisando. Em breve retornaremos com o resultado.",
+            { tipo: content.type === 'image' ? 'imagem' : 'documento' }
           );
           
-          console.log(`Resposta automática (${keyword}) enviada para contato ${contact.id}`);
-          break; // Responder apenas à primeira palavra-chave encontrada
-        } catch (error) {
-          console.error(`Erro ao enviar resposta automática para contato ${contact.id}:`, error);
+          // Aqui chamaríamos a API para enviar a mensagem de confirmação
+          // await this.sendWhatsAppMessage(instanceId, contactId, responseText);
         }
       }
-    }
-  } catch (error) {
-    console.error('Erro ao processar resposta automática:', error);
-  }
-}
-
-/**
- * Processa documento recebido via WhatsApp
- * @param mediaPath Caminho do arquivo de mídia
- * @param caption Legenda da mídia
- * @param phone Número de telefone do remetente
- * @param instance Instância do WhatsApp
- */
-async function processDocumentIfNeeded(
-  mediaPath: string | null,
-  caption: string,
-  phone: string,
-  instance: any
-): Promise<void> {
-  if (!mediaPath) return;
-  
-  try {
-    // Verificar se parece um documento pela legenda ou extensão
-    const isDocument = 
-      caption.toLowerCase().includes('document') ||
-      caption.toLowerCase().includes('documento') ||
-      mediaPath.match(/\.(pdf|jpg|jpeg|png)$/i);
-    
-    if (!isDocument) return;
-    
-    console.log(`Processando documento recebido via WhatsApp: ${mediaPath}`);
-    
-    // Identificar tipo de documento (provisório, seria mais sofisticado em produção)
-    let documentType = 'unknown';
-    if (caption.toLowerCase().includes('rg')) documentType = 'rg';
-    else if (caption.toLowerCase().includes('cpf')) documentType = 'cpf';
-    else if (caption.toLowerCase().includes('residencia') || caption.toLowerCase().includes('comprovante')) documentType = 'comprovante_residencia';
-    
-    // Buscar matrícula associada ao telefone
-    const [contact] = await db.select()
-      .from(whatsappContacts)
-      .where(eq(whatsappContacts.phone, phone));
-    
-    if (!contact || !contact.metadata) {
-      console.log(`Contato não encontrado ou sem metadados para telefone ${phone}`);
-      return;
-    }
-    
-    const enrollmentId = (contact.metadata as any).enrollmentId;
-    if (!enrollmentId) {
-      console.log(`Nenhuma matrícula associada ao contato ${contact.id}`);
-      return;
-    }
-    
-    // Enviar para análise OCR
-    try {
-      const analysisResult = await ocrService.analyzeDocument(mediaPath, documentType);
-      
-      // Salvar documento associado à matrícula
-      // Aqui seria implementada a lógica para salvar o documento na tabela de documentos
-      
-      // Enviar confirmação ao usuário
-      await evolutionApiService.sendTextMessage(
-        instance.instanceName,
-        phone,
-        `Documento recebido e processado com sucesso! Tipo: ${documentType}. Obrigado!`
-      );
-      
-      console.log(`Documento processado com sucesso para matrícula ${enrollmentId}`);
     } catch (error) {
-      console.error('Erro ao processar documento:', error);
+      console.error('Erro ao processar mensagem com mídia:', error);
+      // Não lançar o erro para não interromper o fluxo principal
+    }
+  }
+
+  /**
+   * Verifica se o texto parece ser relacionado a um documento baseado em palavras-chave
+   * @param text Texto a ser analisado
+   * @returns Verdadeiro se parece ser um documento
+   */
+  private isLikelyDocument(text: string): boolean {
+    if (!text) return false;
+    
+    const lowerText = text.toLowerCase();
+    const documentKeywords = [
+      'rg', 'cpf', 'identidade', 'documento', 'carteira', 'passaporte',
+      'certificado', 'diploma', 'histórico', 'escolar', 'comprovante',
+      'declaração', 'residência', 'nascimento'
+    ];
+    
+    return documentKeywords.some(keyword => lowerText.includes(keyword));
+  }
+
+  /**
+   * Notifica sobre nova mensagem
+   * @param instance Instância do WhatsApp
+   * @param contact Contato que enviou a mensagem
+   * @param content Conteúdo da mensagem
+   */
+  private async notifyNewMessage(instance: any, contact: any, content: any): Promise<void> {
+    try {
+      // Obter escola da instância
+      if (!instance.schoolId) return;
       
-      // Informar ao usuário sobre o problema
-      await evolutionApiService.sendTextMessage(
-        instance.instanceName,
-        phone,
-        "Desculpe, tivemos um problema ao processar seu documento. Por favor, tente novamente com uma foto mais clara ou entre em contato com a secretaria."
+      // Enviar notificação para a escola
+      await sendSchoolNotification(
+        instance.schoolId,
+        {
+          title: 'Nova mensagem recebida',
+          message: `${contact.name || contact.phone}: ${content.text || '[Mídia]'}`,
+          type: 'message',
+          data: {
+            contactId: contact.id,
+            instanceId: instance.id,
+            phone: contact.phone,
+            messageType: content.type
+          }
+        }
       );
+    } catch (error) {
+      console.error('Erro ao enviar notificação de nova mensagem:', error);
     }
-  } catch (error) {
-    console.error('Erro ao verificar documento:', error);
   }
-}
 
-/**
- * Baixa mídia da mensagem do WhatsApp
- * @param url URL da mídia
- * @param fileName Nome do arquivo
- * @param instanceId ID da instância
- * @returns Caminho do arquivo salvo
- */
-async function downloadMedia(url: string, fileName: string, instanceId: number): Promise<string | null> {
-  try {
-    // Criar diretório temporário se não existir
-    await mkdirAsync(TEMP_MEDIA_DIR, { recursive: true });
+  /**
+   * Processa atualizações de status de mensagens
+   * @param data Dados do evento
+   */
+  private async processMessageAck(data: any): Promise<any> {
+    const ackData = data.data as MessageAckPayload;
+    const instanceKey = ackData.instanceKey || data.instance?.key;
+    const key = ackData.key;
     
-    // Criar diretório específico para a instância
-    const instanceDir = path.join(TEMP_MEDIA_DIR, `instance_${instanceId}`);
-    await mkdirAsync(instanceDir, { recursive: true });
-    
-    // Sanitizar nome do arquivo
-    const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9_.]/g, '_');
-    
-    // Definir caminho completo do arquivo
-    const filePath = path.join(instanceDir, `${Date.now()}_${sanitizedFileName}`);
-    
-    // Baixar arquivo
-    const response = await fetch(url);
-    
-    if (!response.ok) {
-      throw new Error(`Falha ao baixar mídia: ${response.statusText}`);
+    if (!instanceKey || !key || !key.id) {
+      throw new Error('Dados de confirmação de mensagem incompletos');
     }
     
-    const buffer = await response.buffer();
-    
-    // Salvar arquivo
-    await writeFileAsync(filePath, buffer);
-    
-    console.log(`Mídia baixada com sucesso: ${filePath}`);
-    return filePath;
-  } catch (error) {
-    console.error('Erro ao baixar mídia:', error);
-    return null;
+    try {
+      // Obter instância
+      const instance = await this.getInstanceByKey(instanceKey);
+      if (!instance) {
+        throw new Error(`Instância não encontrada: ${instanceKey}`);
+      }
+      
+      // Atualizar status da mensagem
+      const statusMap: Record<string, string> = {
+        'error': 'failed',
+        'pending': 'pending',
+        'server': 'sent',
+        'delivered': 'delivered',
+        'read': 'read'
+      };
+      
+      const newStatus = statusMap[ackData.update.status] || 'unknown';
+      
+      // Buscar mensagem pelo ID externo
+      const [existingMessage] = await db
+        .select()
+        .from(whatsappMessages)
+        .where(
+          and(
+            eq(whatsappMessages.externalId, key.id),
+            eq(whatsappMessages.instanceId, instance.id)
+          )
+        );
+      
+      if (!existingMessage) {
+        return { success: false, error: 'Mensagem não encontrada' };
+      }
+      
+      // Atualizar status
+      const [updatedMessage] = await db
+        .update(whatsappMessages)
+        .set({ 
+          status: newStatus,
+          ...(newStatus === 'delivered' && { deliveredAt: new Date() }),
+          ...(newStatus === 'read' && { readAt: new Date() }),
+          updatedAt: new Date()
+        })
+        .where(eq(whatsappMessages.id, existingMessage.id))
+        .returning();
+      
+      return { 
+        success: true, 
+        message: 'Status da mensagem atualizado com sucesso',
+        messageId: updatedMessage.id,
+        newStatus
+      };
+    } catch (error) {
+      console.error('Erro ao processar confirmação de mensagem:', error);
+      throw error;
+    }
   }
-}
 
-/**
- * Busca ou cria um contato com o número de telefone
- * @param phone Número de telefone
- * @param instanceId ID da instância
- * @returns Contato
- */
-async function findOrCreateContact(phone: string, instanceId: number): Promise<any> {
-  try {
-    // Buscar contato existente
-    const [existingContact] = await db.select()
+  /**
+   * Processa atualizações de conexão
+   * @param data Dados do evento
+   */
+  private async processConnectionUpdate(data: any): Promise<any> {
+    const updateData = data.data as ConnectionUpdatePayload;
+    const instance = updateData.instance;
+    
+    if (!instance || !instance.key) {
+      throw new Error('Dados de atualização de conexão incompletos');
+    }
+    
+    try {
+      // Obter instância
+      const existingInstance = await this.getInstanceByKey(instance.key);
+      if (!existingInstance) {
+        // Instância não encontrada, possivelmente foi criada externamente
+        // Podemos ignorar ou criar um registro para ela
+        return { 
+          success: false, 
+          error: `Instância não encontrada: ${instance.key}`, 
+          action: 'ignored' 
+        };
+      }
+      
+      // Atualizar status da instância
+      const [updatedInstance] = await db
+        .update(whatsappInstances)
+        .set({ 
+          status: instance.status,
+          updatedAt: new Date(),
+          ...(instance.status === 'connected' && { lastConnected: new Date() })
+        })
+        .where(eq(whatsappInstances.id, existingInstance.id))
+        .returning();
+      
+      // Limpar cache da instância
+      await cacheService.del(`whatsapp_instance_${instance.key}`);
+      
+      // Notificar sobre mudança de status
+      if (existingInstance.schoolId) {
+        await sendSchoolNotification(
+          existingInstance.schoolId,
+          {
+            title: 'Status do WhatsApp alterado',
+            message: `A conexão com o WhatsApp está agora ${instance.status === 'connected' ? 'ativa' : 'inativa'}`,
+            type: 'system',
+            data: {
+              instanceId: existingInstance.id,
+              oldStatus: existingInstance.status,
+              newStatus: instance.status
+            }
+          }
+        );
+      }
+      
+      return { 
+        success: true, 
+        message: 'Status da instância atualizado com sucesso',
+        instanceId: updatedInstance.id,
+        newStatus: instance.status
+      };
+    } catch (error) {
+      console.error('Erro ao processar atualização de conexão:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Processa atualizações de QR Code
+   * @param data Dados do evento
+   */
+  private async processQrCodeUpdate(data: any): Promise<any> {
+    const qrData = data.data as QrCodeUpdatePayload;
+    const instance = qrData.instance;
+    
+    if (!instance || !instance.key || !qrData.qrcode) {
+      throw new Error('Dados de atualização de QR Code incompletos');
+    }
+    
+    try {
+      // Obter instância
+      const existingInstance = await this.getInstanceByKey(instance.key);
+      if (!existingInstance) {
+        return { 
+          success: false, 
+          error: `Instância não encontrada: ${instance.key}`, 
+          action: 'ignored' 
+        };
+      }
+      
+      // Atualizar QR Code da instância
+      const [updatedInstance] = await db
+        .update(whatsappInstances)
+        .set({ 
+          qrCode: qrData.qrcode.base64,
+          status: 'qrcode',
+          updatedAt: new Date()
+        })
+        .where(eq(whatsappInstances.id, existingInstance.id))
+        .returning();
+      
+      // Limpar cache da instância
+      await cacheService.del(`whatsapp_instance_${instance.key}`);
+      
+      // Notificar sobre novo QR Code
+      if (existingInstance.schoolId) {
+        await sendSchoolNotification(
+          existingInstance.schoolId,
+          {
+            title: 'Novo QR Code disponível',
+            message: 'Escaneie o QR Code para conectar o WhatsApp',
+            type: 'system',
+            data: {
+              instanceId: existingInstance.id,
+              hasQrCode: true
+            }
+          }
+        );
+      }
+      
+      return { 
+        success: true, 
+        message: 'QR Code da instância atualizado com sucesso',
+        instanceId: updatedInstance.id
+      };
+    } catch (error) {
+      console.error('Erro ao processar atualização de QR Code:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Processa evento de "Ready" (quando a API está pronta)
+   * @param data Dados do evento
+   */
+  private async processReadyEvent(data: any): Promise<any> {
+    console.log('Evolution API está pronta:', data);
+    
+    return {
+      success: true,
+      message: 'Evento Ready processado'
+    };
+  }
+
+  /**
+   * Obtém uma instância pelo seu Key
+   * @param instanceKey Key da instância
+   */
+  private async getInstanceByKey(instanceKey: string): Promise<any> {
+    // Tentar obter do cache
+    const cacheKey = `whatsapp_instance_${instanceKey}`;
+    const cached = await cacheService.get(cacheKey);
+    if (cached) return cached;
+    
+    // Buscar no banco
+    const [instance] = await db
+      .select()
+      .from(whatsappInstances)
+      .where(eq(whatsappInstances.instanceName, instanceKey))
+      .limit(1);
+    
+    // Armazenar em cache
+    if (instance) {
+      await cacheService.set(cacheKey, instance, { ttl: CACHE_TTL });
+    }
+    
+    return instance;
+  }
+
+  /**
+   * Obtém ou cria um contato
+   * @param instanceId ID da instância
+   * @param phone Número de telefone
+   * @param name Nome do contato (opcional)
+   */
+  private async getOrCreateContact(instanceId: number, phone: string, name?: string): Promise<any> {
+    // Tentar obter do cache
+    const cacheKey = `whatsapp_contact_${instanceId}_${phone}`;
+    const cached = await cacheService.get(cacheKey);
+    if (cached) return cached;
+    
+    // Buscar no banco
+    const [contact] = await db
+      .select()
       .from(whatsappContacts)
       .where(
         and(
-          eq(whatsappContacts.phone, phone),
-          eq(whatsappContacts.instanceId, instanceId)
+          eq(whatsappContacts.instanceId, instanceId),
+          eq(whatsappContacts.phone, phone)
         )
-      );
+      )
+      .limit(1);
     
-    if (existingContact) {
-      return existingContact;
+    if (contact) {
+      // Atualizar nome se fornecido e diferente
+      if (name && contact.name !== name) {
+        const [updatedContact] = await db
+          .update(whatsappContacts)
+          .set({ name, updatedAt: new Date() })
+          .where(eq(whatsappContacts.id, contact.id))
+          .returning();
+        
+        // Atualizar cache
+        await cacheService.set(cacheKey, updatedContact, { ttl: CACHE_TTL });
+        
+        return updatedContact;
+      }
+      
+      // Armazenar em cache
+      await cacheService.set(cacheKey, contact, { ttl: CACHE_TTL });
+      
+      return contact;
     }
     
     // Criar novo contato
-    console.log(`Criando novo contato para telefone ${phone}`);
-    
-    const [newContact] = await db.insert(whatsappContacts)
+    const [newContact] = await db
+      .insert(whatsappContacts)
       .values({
         instanceId,
         phone,
-        name: `Contato ${phone.slice(-4)}`, // Nome temporário com últimos 4 dígitos
-        email: null,
-        status: 'new',
-        metadata: {},
-        createdAt: new Date(),
-        updatedAt: new Date()
+        name: name || '',
+        metadata: {}
       })
       .returning();
     
+    // Armazenar em cache
+    await cacheService.set(cacheKey, newContact, { ttl: CACHE_TTL });
+    
     return newContact;
-  } catch (error) {
-    console.error('Erro ao buscar/criar contato:', error);
-    throw error;
+  }
+
+  /**
+   * Salva uma mensagem no banco de dados
+   * @param messageData Dados da mensagem
+   */
+  private async saveMessage(messageData: any): Promise<any> {
+    const [message] = await db
+      .insert(whatsappMessages)
+      .values(messageData)
+      .returning();
+    
+    return message;
+  }
+
+  /**
+   * Normaliza um número de telefone removendo partes não relevantes
+   * @param phoneWithMeta Número de telefone com metadados
+   */
+  private normalizePhoneNumber(phoneWithMeta: string): string {
+    // Remove sufixos como @s.whatsapp.net ou @c.us
+    return phoneWithMeta.split('@')[0];
+  }
+
+  /**
+   * Extrai o conteúdo de uma mensagem do WhatsApp
+   * @param message Objeto de mensagem do WhatsApp
+   */
+  private extractMessageContent(message: any): { text: string; type: string; mediaUrl?: string; caption?: string; fileName?: string } {
+    if (!message) {
+      return { text: '', type: 'unknown' };
+    }
+    
+    // Verificar diferentes tipos de mensagem
+    if (message.conversation) {
+      return { text: message.conversation, type: 'text' };
+    }
+    
+    if (message.extendedTextMessage) {
+      return { text: message.extendedTextMessage.text, type: 'text' };
+    }
+    
+    if (message.imageMessage) {
+      return { 
+        text: message.imageMessage.caption || '',
+        type: 'image',
+        mediaUrl: message.imageMessage.url || message.imageMessage.fileSha256,
+        caption: message.imageMessage.caption || ''
+      };
+    }
+    
+    if (message.videoMessage) {
+      return { 
+        text: message.videoMessage.caption || '',
+        type: 'video',
+        mediaUrl: message.videoMessage.url || message.videoMessage.fileSha256,
+        caption: message.videoMessage.caption || ''
+      };
+    }
+    
+    if (message.audioMessage) {
+      return { 
+        text: '',
+        type: 'audio',
+        mediaUrl: message.audioMessage.url || message.audioMessage.fileSha256
+      };
+    }
+    
+    if (message.documentMessage) {
+      return { 
+        text: message.documentMessage.caption || '',
+        type: 'document',
+        mediaUrl: message.documentMessage.url || message.documentMessage.fileSha256,
+        caption: message.documentMessage.caption || '',
+        fileName: message.documentMessage.fileName || ''
+      };
+    }
+    
+    if (message.locationMessage) {
+      const lat = message.locationMessage.degreesLatitude;
+      const lng = message.locationMessage.degreesLongitude;
+      return { 
+        text: `Localização: ${lat},${lng}`,
+        type: 'location'
+      };
+    }
+    
+    if (message.contactMessage || message.contactsArrayMessage) {
+      return { 
+        text: 'Contato compartilhado',
+        type: 'contact'
+      };
+    }
+    
+    if (message.stickerMessage) {
+      return { 
+        text: '',
+        type: 'sticker',
+        mediaUrl: message.stickerMessage.url || message.stickerMessage.fileSha256
+      };
+    }
+    
+    // Mensagem de tipo desconhecido
+    return { 
+      text: JSON.stringify(message),
+      type: 'unknown'
+    };
   }
 }
 
-/**
- * Mapeia status do WhatsApp para status do sistema
- * @param status Status original do WhatsApp
- * @returns Status mapeado
- */
-function mapMessageStatus(status: string): string {
-  switch (status) {
-    case 'sent':
-    case 'message':
-      return 'sent';
-    case 'delivered':
-      return 'delivered';
-    case 'read':
-      return 'read';
-    case 'failed':
-    case 'error':
-      return 'failed';
-    default:
-      return 'pending';
-  }
-}
-
-/**
- * Converte status em texto legível
- * @param status Status da conexão
- * @returns Texto legível
- */
-function getStatusText(status: string): string {
-  switch (status) {
-    case 'connected':
-      return 'conectada';
-    case 'disconnected':
-      return 'desconectada';
-    case 'connecting':
-      return 'conectando';
-    case 'qrcode':
-      return 'aguardando leitura do QR Code';
-    default:
-      return status;
-  }
-}
-
-/**
- * Trunca uma mensagem para exibição
- * @param message Mensagem completa
- * @param maxLength Tamanho máximo
- * @returns Mensagem truncada
- */
-function truncateMessage(message: string, maxLength: number): string {
-  if (!message) return '';
-  if (message.length <= maxLength) return message;
-  return message.substring(0, maxLength - 3) + '...';
-}
-
-export default {
-  processWebhook,
-  handleConnectionUpdate,
-  handleQrUpdate,
-  handleIncomingMessage,
-  handleMessageStatus
-};
+// Exportar instância singleton
+export const evolutionApiWebhookService = new EvolutionApiWebhookService();
+export default evolutionApiWebhookService;
