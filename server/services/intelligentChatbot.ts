@@ -11,19 +11,26 @@ import { whatsappTemplateService } from './whatsappTemplateService';
 
 // Definir interface para o histórico de conversas
 interface ConversationHistory {
-  role: 'user' | 'assistant';
-  content: string | ContentBlock[];
+  role: 'user' | 'assistant' | 'system';
+  content: string | any[]; // Suporte tanto para string quanto para formatos multimodais
   timestamp?: Date;
 }
 
-interface ContentBlock {
-  type: 'text' | 'image';
-  text?: string;
-  image_url?: {
+// Interfaces para OpenRouter/OpenAI
+interface ImageUrlContent {
+  type: 'image_url';
+  image_url: {
     url: string;
     detail?: 'low' | 'high';
   };
 }
+
+interface TextContent {
+  type: 'text';
+  text: string;
+}
+
+type ContentBlock = ImageUrlContent | TextContent;
 
 // Tempo para expiração do contexto de conversa (15 minutos)
 const CONVERSATION_TTL = 15 * 60;
@@ -108,7 +115,7 @@ class IntelligentChatbot {
       history.push(userMessage);
       
       // Limitar histórico para evitar tokens excessivos
-      const limitedHistory = this.limitHistorySize(history);
+      const limitedHistoryData = this.limitHistorySize(history);
       
       // Criar sistema de prompt com contexto específico
       const defaultSystemPrompt = 
@@ -123,8 +130,14 @@ class IntelligentChatbot {
       
       const systemPrompt = options.systemPrompt || defaultSystemPrompt;
       
+      // Transformar o histórico para o formato esperado da OpenAI/OpenRouter
+      const formattedMessages = limitedHistoryData.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
+      
       // Executar modelo
-      console.log(`Enviando requisição ao OpenRouter com ${limitedHistory.length} mensagens no histórico`);
+      console.log(`Enviando requisição ao OpenRouter com ${formattedMessages.length} mensagens no histórico`);
       
       // Usar o modelo Deepseek Chat v3 via OpenRouter
       const response = await this.client.chat.completions.create({
@@ -132,7 +145,7 @@ class IntelligentChatbot {
         max_tokens: options.maxTokens || 1024,
         messages: [
           { role: 'system', content: systemPrompt },
-          ...limitedHistory
+          ...formattedMessages
         ],
       });
       
@@ -153,10 +166,10 @@ class IntelligentChatbot {
       // Logar interação
       try {
         await logAction(
-          0, // ID 0 para sistema
+          '0', // ID 0 para sistema
           'chatbot_interaction',
           'openrouter',
-          0,
+          '0',
           { contextId, model: 'deepseek/deepseek-chat-v3-0324:free' },
           'info'
         );
@@ -172,7 +185,7 @@ class IntelligentChatbot {
   }
   
   /**
-   * Analisa imagem via modelo multimodal
+   * Analisa imagem via modelo multimodal 
    * @param contextId ID do contexto
    * @param imageUrl URL da imagem
    * @param query Pergunta sobre a imagem
@@ -202,21 +215,7 @@ class IntelligentChatbot {
     }
     
     try {
-      // Criar conteúdo multimodal
-      const content: ContentBlock[] = [
-        { 
-          type: 'image', 
-          image_url: { 
-            url: imageUrl,
-            detail: options.detail || 'high'
-          } 
-        },
-        { 
-          type: 'text', 
-          text: query 
-        }
-      ];
-      
+      // OpenRouter/OpenAI - formato multimodal para imagens
       // Preparar sistema de prompt
       const defaultSystemPrompt = 
         `Você é um assistente especializado em análise de documentos escolares.
@@ -237,20 +236,38 @@ class IntelligentChatbot {
       const systemPrompt = options.systemPrompt || defaultSystemPrompt;
       
       // Executar modelo com visão
-      console.log(`Enviando requisição de análise de imagem para Claude`);
+      console.log(`Enviando requisição de análise de imagem para OpenRouter`);
       
-      // O modelo mais recente do Anthropic é "claude-3-7-sonnet-20250219", lançado em 24 de fevereiro de 2025
-      const response = await this.client.messages.create({
-        model: 'claude-3-7-sonnet-20250219',
+      // OpenRouter com o modelo gpt-4o ou outro que tenha suporte a visão
+      const response = await this.client.chat.completions.create({
+        model: 'openai/gpt-4o', // Usar modelo com visão
         max_tokens: options.maxTokens || 2048,
-        system: systemPrompt,
         messages: [
           { 
+            role: 'system',
+            content: systemPrompt
+          },
+          { 
             role: 'user',
-            content: content
+            content: [
+              {
+                type: 'image_url',
+                image_url: {
+                  url: imageUrl,
+                  detail: options.detail || 'high' 
+                }
+              },
+              {
+                type: 'text',
+                text: query
+              }
+            ]
           }
-        ],
+        ]
       });
+      
+      // Extrair resposta do modelo
+      const contentText = response.choices[0].message.content || "Não foi possível analisar a imagem";
       
       // Salvar no histórico
       const history = await this.getConversationHistory(contextId);
@@ -265,7 +282,7 @@ class IntelligentChatbot {
       // Adicionar resposta do assistente
       history.push({
         role: 'assistant',
-        content: response.content[0].text,
+        content: contentText,
         timestamp: new Date()
       });
       
@@ -275,18 +292,18 @@ class IntelligentChatbot {
       // Logar interação
       try {
         await logAction(
-          0, // ID 0 para sistema
+          '0', // ID 0 para sistema
           'image_analysis',
-          'anthropic',
-          0,
-          { contextId, tokensUsed: response.usage?.input_tokens + response.usage?.output_tokens || 0 },
+          'openrouter',
+          '0',
+          { contextId, model: 'openai/gpt-4o' },
           'info'
         );
       } catch (logError) {
         console.error('Erro ao registrar análise de imagem:', logError);
       }
       
-      return response.content[0].text;
+      return contentText;
     } catch (error) {
       console.error('Erro ao analisar imagem com chatbot inteligente:', error);
       return 'Desculpe, não foi possível analisar a imagem no momento. Por favor, tente novamente mais tarde.';
@@ -322,16 +339,17 @@ class IntelligentChatbot {
       return false;
     }
     
-    // Para casos mais complexos, usar Anthropic
+    // Para casos mais complexos, usar OpenRouter
     try {
-      // O modelo mais recente do Anthropic é "claude-3-7-sonnet-20250219", lançado em 24 de fevereiro de 2025
-      const response = await this.client.messages.create({
-        model: 'claude-3-7-sonnet-20250219',
+      const response = await this.client.chat.completions.create({
+        model: 'deepseek/deepseek-chat-v3-0324:free',
         max_tokens: 50,
-        system: 
-          `Sua tarefa é determinar se a mensagem do usuário está relacionada a documentos escolares ou de matrícula.
-           Responda APENAS com "sim" ou "não".`,
         messages: [
+          { 
+            role: 'system', 
+            content: `Sua tarefa é determinar se a mensagem do usuário está relacionada a documentos escolares ou de matrícula.
+                     Responda APENAS com "sim" ou "não".`
+          },
           { 
             role: 'user',
             content: `A mensagem a seguir está pedindo informações sobre documentos, envio de documentos, 
@@ -341,10 +359,10 @@ class IntelligentChatbot {
         ],
       });
       
-      const answer = response.content[0].text.toLowerCase().trim();
+      const answer = response.choices[0].message.content?.toLowerCase().trim() || "";
       return answer.includes('sim');
     } catch (error) {
-      console.error('Erro ao classificar mensagem:', error);
+      console.error('Erro ao classificar mensagem com OpenRouter:', error);
       return false;
     }
   }
