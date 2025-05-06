@@ -415,6 +415,551 @@ export async function getConversionDetails(schoolId?: number, source?: string, p
 }
 
 /**
+ * Interface para alertas de métricas
+ */
+export interface MetricAlert {
+  id?: number;
+  schoolId?: number;
+  userId?: number;
+  metric: string;
+  condition: 'below' | 'above';
+  threshold: number;
+  period: string;
+  notification_type: 'system' | 'email' | 'both';
+  is_active: boolean;
+  description?: string;
+  last_triggered?: Date;
+  created_at?: Date;
+  updated_at?: Date;
+}
+
+/**
+ * Obtém alertas configurados
+ * @param schoolId ID da escola (opcional)
+ * @param userId ID do usuário (opcional)
+ * @returns Lista de alertas
+ */
+export async function getMetricAlerts(schoolId?: number, userId?: number): Promise<MetricAlert[]> {
+  if (!analyticsService.isInitialized() || analyticsService.isInactiveMode()) {
+    console.log('[AnalyticsService Inativo] Simulando consulta de alertas');
+    return [];
+  }
+  
+  try {
+    // Criar tabela se ainda não existir
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS metric_alerts (
+        id SERIAL PRIMARY KEY,
+        school_id INTEGER,
+        user_id INTEGER,
+        metric TEXT NOT NULL,
+        condition TEXT NOT NULL,
+        threshold DECIMAL(10, 2) NOT NULL,
+        period TEXT NOT NULL,
+        notification_type TEXT NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        description TEXT,
+        last_triggered TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+      )
+    `);
+    
+    // Montar consulta SQL
+    let query = `
+      SELECT 
+        id, school_id as "schoolId", user_id as "userId",
+        metric, condition, threshold, period, notification_type,
+        is_active, description, last_triggered,
+        created_at, updated_at
+      FROM metric_alerts
+      WHERE 1=1
+    `;
+    
+    const params = [];
+    let paramCounter = 1;
+    
+    if (schoolId) {
+      query += ` AND school_id = $${paramCounter++}`;
+      params.push(schoolId);
+    }
+    
+    if (userId) {
+      query += ` AND user_id = $${paramCounter++}`;
+      params.push(userId);
+    }
+    
+    query += ` ORDER BY created_at DESC`;
+    
+    // Executar consulta
+    const result = await db.execute(query, params);
+    
+    return result.rows;
+    
+  } catch (error) {
+    console.error('Erro ao obter alertas de métricas:', error);
+    throw new Error(`Falha ao obter alertas: ${error.message}`);
+  }
+}
+
+/**
+ * Obtém um alerta específico por ID
+ * @param id ID do alerta
+ * @returns Detalhes do alerta
+ */
+export async function getMetricAlertById(id: number): Promise<MetricAlert | null> {
+  if (!analyticsService.isInitialized() || analyticsService.isInactiveMode()) {
+    console.log('[AnalyticsService Inativo] Simulando consulta de alerta único');
+    return null;
+  }
+  
+  try {
+    const query = `
+      SELECT 
+        id, school_id as "schoolId", user_id as "userId",
+        metric, condition, threshold, period, notification_type,
+        is_active, description, last_triggered,
+        created_at, updated_at
+      FROM metric_alerts
+      WHERE id = $1
+    `;
+    
+    const result = await db.execute(query, [id]);
+    
+    if (result.rows.length === 0) {
+      return null;
+    }
+    
+    return result.rows[0];
+    
+  } catch (error) {
+    console.error(`Erro ao obter alerta ID ${id}:`, error);
+    throw new Error(`Falha ao obter alerta: ${error.message}`);
+  }
+}
+
+/**
+ * Cria um novo alerta de métrica
+ * @param alert Dados do alerta
+ * @returns Alerta criado
+ */
+export async function createMetricAlert(alert: MetricAlert): Promise<MetricAlert> {
+  if (!analyticsService.isInitialized() || analyticsService.isInactiveMode()) {
+    console.log('[AnalyticsService Inativo] Simulando criação de alerta');
+    return {
+      ...alert,
+      id: Math.floor(Math.random() * 1000),
+      created_at: new Date(),
+      updated_at: new Date()
+    };
+  }
+  
+  try {
+    // Validações básicas
+    if (!alert.metric || !alert.condition || alert.threshold === undefined || !alert.period || !alert.notification_type) {
+      throw new Error('Campos obrigatórios não informados');
+    }
+    
+    const query = `
+      INSERT INTO metric_alerts (
+        school_id, user_id, metric, condition, threshold,
+        period, notification_type, is_active, description
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9
+      ) RETURNING 
+        id, school_id as "schoolId", user_id as "userId",
+        metric, condition, threshold, period, notification_type,
+        is_active, description, last_triggered,
+        created_at, updated_at
+    `;
+    
+    const params = [
+      alert.schoolId || null,
+      alert.userId || null,
+      alert.metric,
+      alert.condition,
+      alert.threshold,
+      alert.period,
+      alert.notification_type,
+      alert.is_active !== undefined ? alert.is_active : true,
+      alert.description || null
+    ];
+    
+    const result = await db.execute(query, params);
+    
+    return result.rows[0];
+    
+  } catch (error) {
+    console.error('Erro ao criar alerta de métrica:', error);
+    throw new Error(`Falha ao criar alerta: ${error.message}`);
+  }
+}
+
+/**
+ * Atualiza um alerta existente
+ * @param id ID do alerta
+ * @param alert Dados a atualizar
+ * @returns Alerta atualizado
+ */
+export async function updateMetricAlert(id: number, alert: Partial<MetricAlert>): Promise<MetricAlert | null> {
+  if (!analyticsService.isInitialized() || analyticsService.isInactiveMode()) {
+    console.log('[AnalyticsService Inativo] Simulando atualização de alerta');
+    return {
+      id,
+      ...alert,
+      updated_at: new Date()
+    } as MetricAlert;
+  }
+  
+  try {
+    // Verificar se alerta existe
+    const existingAlert = await getMetricAlertById(id);
+    if (!existingAlert) {
+      return null;
+    }
+    
+    // Construir conjuntos de campos a atualizar
+    const updates = [];
+    const params = [];
+    let paramCounter = 1;
+    
+    if (alert.metric !== undefined) {
+      updates.push(`metric = $${paramCounter++}`);
+      params.push(alert.metric);
+    }
+    
+    if (alert.condition !== undefined) {
+      updates.push(`condition = $${paramCounter++}`);
+      params.push(alert.condition);
+    }
+    
+    if (alert.threshold !== undefined) {
+      updates.push(`threshold = $${paramCounter++}`);
+      params.push(alert.threshold);
+    }
+    
+    if (alert.period !== undefined) {
+      updates.push(`period = $${paramCounter++}`);
+      params.push(alert.period);
+    }
+    
+    if (alert.notification_type !== undefined) {
+      updates.push(`notification_type = $${paramCounter++}`);
+      params.push(alert.notification_type);
+    }
+    
+    if (alert.is_active !== undefined) {
+      updates.push(`is_active = $${paramCounter++}`);
+      params.push(alert.is_active);
+    }
+    
+    if (alert.description !== undefined) {
+      updates.push(`description = $${paramCounter++}`);
+      params.push(alert.description);
+    }
+    
+    if (alert.last_triggered !== undefined) {
+      updates.push(`last_triggered = $${paramCounter++}`);
+      params.push(alert.last_triggered);
+    }
+    
+    updates.push(`updated_at = NOW()`);
+    
+    // Se não há atualizações, retornar o alerta existente
+    if (params.length === 0) {
+      return existingAlert;
+    }
+    
+    // Adicionar ID no final dos parâmetros
+    params.push(id);
+    
+    const query = `
+      UPDATE metric_alerts
+      SET ${updates.join(', ')}
+      WHERE id = $${paramCounter}
+      RETURNING 
+        id, school_id as "schoolId", user_id as "userId",
+        metric, condition, threshold, period, notification_type,
+        is_active, description, last_triggered,
+        created_at, updated_at
+    `;
+    
+    const result = await db.execute(query, params);
+    
+    if (result.rows.length === 0) {
+      return null;
+    }
+    
+    return result.rows[0];
+    
+  } catch (error) {
+    console.error(`Erro ao atualizar alerta ID ${id}:`, error);
+    throw new Error(`Falha ao atualizar alerta: ${error.message}`);
+  }
+}
+
+/**
+ * Remove um alerta
+ * @param id ID do alerta
+ * @returns Sucesso da operação
+ */
+export async function deleteMetricAlert(id: number): Promise<boolean> {
+  if (!analyticsService.isInitialized() || analyticsService.isInactiveMode()) {
+    console.log('[AnalyticsService Inativo] Simulando exclusão de alerta');
+    return true;
+  }
+  
+  try {
+    const query = `DELETE FROM metric_alerts WHERE id = $1`;
+    const result = await db.execute(query, [id]);
+    
+    return result.rowCount > 0;
+    
+  } catch (error) {
+    console.error(`Erro ao excluir alerta ID ${id}:`, error);
+    throw new Error(`Falha ao excluir alerta: ${error.message}`);
+  }
+}
+
+/**
+ * Verifica todos os alertas ativos e dispara notificações quando necessário
+ * @returns Número de alertas disparados
+ */
+export async function checkAndTriggerAlerts(): Promise<number> {
+  if (!analyticsService.isInitialized() || analyticsService.isInactiveMode()) {
+    console.log('[AnalyticsService Inativo] Simulando verificação de alertas');
+    return 0;
+  }
+  
+  try {
+    // Obter todos os alertas ativos
+    const query = `
+      SELECT 
+        id, school_id as "schoolId", user_id as "userId",
+        metric, condition, threshold, period, notification_type,
+        is_active, description, last_triggered
+      FROM metric_alerts
+      WHERE is_active = TRUE
+    `;
+    
+    const result = await db.execute(query);
+    const alerts = result.rows;
+    
+    if (alerts.length === 0) {
+      return 0;
+    }
+    
+    let triggeredCount = 0;
+    
+    // Verificar cada alerta
+    for (const alert of alerts) {
+      try {
+        const shouldTrigger = await checkAlertCondition(alert);
+        
+        if (shouldTrigger) {
+          // Atualizar data do último disparo
+          await updateMetricAlert(alert.id, { last_triggered: new Date() });
+          
+          // Enviar notificações
+          await triggerAlertNotifications(alert);
+          
+          triggeredCount++;
+        }
+      } catch (error) {
+        console.error(`Erro ao verificar alerta ID ${alert.id}:`, error);
+        // Continuar para o próximo alerta
+      }
+    }
+    
+    return triggeredCount;
+    
+  } catch (error) {
+    console.error('Erro ao verificar alertas:', error);
+    throw new Error(`Falha ao verificar alertas: ${error.message}`);
+  }
+}
+
+/**
+ * Verifica se a condição de um alerta foi atingida
+ * @param alert Alerta a verificar
+ * @returns Verdadeiro se condição foi atingida
+ */
+async function checkAlertCondition(alert: MetricAlert): Promise<boolean> {
+  // Determinar o tipo de métrica e obter o valor atual
+  let metricValue = 0;
+  
+  switch (alert.metric) {
+    case 'conversion_rate':
+      const metrics = await getConversionMetrics(alert.schoolId, alert.period);
+      metricValue = metrics.conversion_rate;
+      break;
+      
+    case 'enrollment_count':
+      const enrollmentsQuery = `
+        SELECT COUNT(*) as count
+        FROM enrollments
+        WHERE created_at > NOW() - INTERVAL '${alert.period}'
+        ${alert.schoolId ? 'AND school_id = $1' : ''}
+      `;
+      
+      const enrollmentsResult = await db.execute(enrollmentsQuery, alert.schoolId ? [alert.schoolId] : []);
+      metricValue = parseInt(enrollmentsResult.rows[0].count);
+      break;
+      
+    case 'lead_count':
+      const leadsQuery = `
+        SELECT COUNT(*) as count
+        FROM leads
+        WHERE created_at > NOW() - INTERVAL '${alert.period}'
+        ${alert.schoolId ? 'AND school_id = $1' : ''}
+      `;
+      
+      const leadsResult = await db.execute(leadsQuery, alert.schoolId ? [alert.schoolId] : []);
+      metricValue = parseInt(leadsResult.rows[0].count);
+      break;
+      
+    case 'document_rejection_rate':
+      const docsQuery = `
+        SELECT 
+          COUNT(*) as total_docs,
+          SUM(CASE WHEN status = 'invalid' THEN 1 ELSE 0 END) as rejected_docs
+        FROM documents d
+        JOIN document_validations dv ON d.id = dv.document_id
+        WHERE d.created_at > NOW() - INTERVAL '${alert.period}'
+        ${alert.schoolId ? 'AND d.school_id = $1' : ''}
+      `;
+      
+      const docsResult = await db.execute(docsQuery, alert.schoolId ? [alert.schoolId] : []);
+      const totalDocs = parseInt(docsResult.rows[0].total_docs);
+      const rejectedDocs = parseInt(docsResult.rows[0].rejected_docs);
+      
+      metricValue = totalDocs > 0 ? rejectedDocs / totalDocs : 0;
+      break;
+      
+    case 'payment_failure_rate':
+      const paymentsQuery = `
+        SELECT 
+          COUNT(*) as total_payments,
+          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_payments
+        FROM payments
+        WHERE created_at > NOW() - INTERVAL '${alert.period}'
+        ${alert.schoolId ? 'AND school_id = $1' : ''}
+      `;
+      
+      const paymentsResult = await db.execute(paymentsQuery, alert.schoolId ? [alert.schoolId] : []);
+      const totalPayments = parseInt(paymentsResult.rows[0].total_payments);
+      const failedPayments = parseInt(paymentsResult.rows[0].failed_payments);
+      
+      metricValue = totalPayments > 0 ? failedPayments / totalPayments : 0;
+      break;
+      
+    default:
+      console.log(`Métrica ${alert.metric} não implementada, ignorando alerta`);
+      return false;
+  }
+  
+  // Verificar condição
+  if (alert.condition === 'above') {
+    return metricValue > alert.threshold;
+  } else {
+    return metricValue < alert.threshold;
+  }
+}
+
+/**
+ * Dispara as notificações para um alerta
+ * @param alert Alerta disparado
+ */
+async function triggerAlertNotifications(alert: MetricAlert): Promise<void> {
+  // Formatação da mensagem
+  const metricLabels = {
+    conversion_rate: 'Taxa de conversão',
+    enrollment_count: 'Total de matrículas',
+    lead_count: 'Total de leads',
+    document_rejection_rate: 'Taxa de rejeição de documentos',
+    payment_failure_rate: 'Taxa de falhas em pagamentos',
+  };
+  
+  const conditionLabels = {
+    above: 'acima de',
+    below: 'abaixo de',
+  };
+  
+  const metricName = metricLabels[alert.metric] || alert.metric;
+  const conditionName = conditionLabels[alert.condition] || alert.condition;
+  const thresholdFormatted = alert.metric.includes('rate') ? `${Math.round(alert.threshold * 100)}%` : alert.threshold;
+  
+  const title = `Alerta: ${metricName} ${conditionName} ${thresholdFormatted}`;
+  const message = alert.description || `O valor da métrica "${metricName}" está ${conditionName} ${thresholdFormatted} no período de ${alert.period}.`;
+  
+  // Enviar notificação do sistema
+  if (alert.notification_type === 'system' || alert.notification_type === 'both') {
+    if (alert.userId) {
+      // Notificação para usuário específico
+      await sendUserNotification(alert.userId, {
+        title,
+        message,
+        type: 'system',
+        data: {
+          alertId: alert.id,
+          metric: alert.metric,
+          threshold: alert.threshold,
+        },
+      });
+    } else if (alert.schoolId) {
+      // Notificação para escola
+      await sendSchoolNotification(alert.schoolId, {
+        title,
+        message,
+        type: 'system',
+        data: {
+          alertId: alert.id,
+          metric: alert.metric,
+          threshold: alert.threshold,
+        },
+      });
+    }
+  }
+  
+  // Enviar e-mail
+  if (alert.notification_type === 'email' || alert.notification_type === 'both') {
+    try {
+      // Obter e-mail do usuário ou da escola
+      let emailTo = '';
+      
+      if (alert.userId) {
+        const userResult = await db.execute('SELECT email FROM users WHERE id = $1', [alert.userId]);
+        if (userResult.rows.length > 0) {
+          emailTo = userResult.rows[0].email;
+        }
+      } else if (alert.schoolId) {
+        const schoolResult = await db.execute('SELECT email FROM schools WHERE id = $1', [alert.schoolId]);
+        if (schoolResult.rows.length > 0) {
+          emailTo = schoolResult.rows[0].email;
+        }
+      }
+      
+      if (emailTo) {
+        await emailService.emailService.sendEmail({
+          to: emailTo,
+          subject: title,
+          html: `
+            <h2>Alerta de Métrica</h2>
+            <p>${message}</p>
+            <p><strong>Métrica:</strong> ${metricName}</p>
+            <p><strong>Condição:</strong> ${conditionName} ${thresholdFormatted}</p>
+            <p><strong>Período:</strong> ${alert.period}</p>
+            <p><em>Este é um e-mail automático do sistema EduMatrik AI.</em></p>
+          `,
+        });
+      }
+    } catch (emailError) {
+      console.error('Erro ao enviar e-mail de alerta:', emailError);
+    }
+  }
+}
+
+/**
  * Obtém previsão de demanda para matrículas
  * @param schoolId ID da escola
  * @param months Número de meses para previsão

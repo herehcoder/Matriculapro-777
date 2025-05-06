@@ -364,4 +364,225 @@ export function registerAnalyticsRoutes(app: Express, isAuthenticated: any) {
       res.status(500).json({ message: `Erro ao gerar previsão: ${error.message}` });
     }
   });
+  
+  /**
+   * @route GET /api/analytics/metric-alerts
+   * @desc Obter alertas de métricas
+   * @access Admin, School
+   */
+  app.get('/api/analytics/metric-alerts', isAuthenticated, isAdminOrSchool, validateSchoolAccess, async (req: Request, res: Response) => {
+    try {
+      const user = req.user as any;
+      let schoolId: number | undefined = undefined;
+      let userId: number | undefined = undefined;
+      
+      // Se for admin e passar schoolId, filtra por escola
+      if (user.role === 'admin' && req.query.schoolId) {
+        schoolId = parseInt(req.query.schoolId as string);
+      } 
+      // Se for escola, filtra pela própria escola
+      else if (user.role === 'school') {
+        schoolId = user.schoolId;
+      }
+      
+      // Se solicitar alertas pessoais
+      if (req.query.personal === 'true') {
+        userId = user.id;
+        schoolId = undefined; // Se pessoal, ignora escola
+      }
+      
+      const alerts = await analyticsService.getMetricAlerts(schoolId, userId);
+      
+      res.json(alerts);
+    } catch (error) {
+      console.error('Erro ao obter alertas de métricas:', error);
+      res.status(500).json({ message: `Erro ao obter alertas: ${error.message}` });
+    }
+  });
+  
+  /**
+   * @route GET /api/analytics/metric-alerts/:id
+   * @desc Obter um alerta de métrica por ID
+   * @access Admin, School
+   */
+  app.get('/api/analytics/metric-alerts/:id', isAuthenticated, isAdminOrSchool, async (req: Request, res: Response) => {
+    try {
+      const alertId = parseInt(req.params.id);
+      const user = req.user as any;
+      
+      const alert = await analyticsService.getMetricAlertById(alertId);
+      
+      if (!alert) {
+        return res.status(404).json({ message: 'Alerta não encontrado' });
+      }
+      
+      // Verificar permissões
+      if (user.role !== 'admin' && 
+          alert.schoolId !== user.schoolId && 
+          alert.userId !== user.id) {
+        return res.status(403).json({ message: 'Sem permissão para acessar este alerta' });
+      }
+      
+      res.json(alert);
+    } catch (error) {
+      console.error(`Erro ao obter alerta ID ${req.params.id}:`, error);
+      res.status(500).json({ message: `Erro ao obter alerta: ${error.message}` });
+    }
+  });
+  
+  /**
+   * @route POST /api/analytics/metric-alerts
+   * @desc Criar um novo alerta de métrica
+   * @access Admin, School
+   */
+  app.post('/api/analytics/metric-alerts', isAuthenticated, isAdminOrSchool, async (req: Request, res: Response) => {
+    try {
+      const user = req.user as any;
+      const alertData = req.body;
+      
+      // Se não for admin, só pode criar alertas para si mesmo ou para sua escola
+      if (user.role !== 'admin') {
+        if (alertData.schoolId && alertData.schoolId !== user.schoolId) {
+          return res.status(403).json({ message: 'Sem permissão para criar alertas para outra escola' });
+        }
+        
+        // Se não especificar schoolId, associar à escola do usuário
+        if (!alertData.schoolId && user.schoolId) {
+          alertData.schoolId = user.schoolId;
+        }
+        
+        // Se não especificar userId, associar ao usuário
+        if (!alertData.userId && !alertData.schoolId) {
+          alertData.userId = user.id;
+        }
+      }
+      
+      // Validações básicas
+      if (!alertData.metric || !alertData.condition || !alertData.threshold || !alertData.period || !alertData.notification_type) {
+        return res.status(400).json({ message: 'Campos obrigatórios não informados' });
+      }
+      
+      // Definir status ativo por padrão
+      if (alertData.is_active === undefined) {
+        alertData.is_active = true;
+      }
+      
+      const newAlert = await analyticsService.createMetricAlert(alertData);
+      
+      res.status(201).json(newAlert);
+    } catch (error) {
+      console.error('Erro ao criar alerta de métrica:', error);
+      res.status(500).json({ message: `Erro ao criar alerta: ${error.message}` });
+    }
+  });
+  
+  /**
+   * @route PATCH /api/analytics/metric-alerts/:id
+   * @desc Atualizar um alerta de métrica
+   * @access Admin, School
+   */
+  app.patch('/api/analytics/metric-alerts/:id', isAuthenticated, isAdminOrSchool, async (req: Request, res: Response) => {
+    try {
+      const alertId = parseInt(req.params.id);
+      const user = req.user as any;
+      const updateData = req.body;
+      
+      // Obter alerta atual
+      const existingAlert = await analyticsService.getMetricAlertById(alertId);
+      
+      if (!existingAlert) {
+        return res.status(404).json({ message: 'Alerta não encontrado' });
+      }
+      
+      // Verificar permissões
+      if (user.role !== 'admin' && 
+          existingAlert.schoolId !== user.schoolId && 
+          existingAlert.userId !== user.id) {
+        return res.status(403).json({ message: 'Sem permissão para modificar este alerta' });
+      }
+      
+      // Impedir alteração de schoolId ou userId por não-admins
+      if (user.role !== 'admin') {
+        if (updateData.schoolId && updateData.schoolId !== existingAlert.schoolId) {
+          return res.status(403).json({ message: 'Sem permissão para alterar a escola do alerta' });
+        }
+        
+        if (updateData.userId && updateData.userId !== existingAlert.userId) {
+          return res.status(403).json({ message: 'Sem permissão para alterar o usuário do alerta' });
+        }
+      }
+      
+      const updatedAlert = await analyticsService.updateMetricAlert(alertId, updateData);
+      
+      res.json(updatedAlert);
+    } catch (error) {
+      console.error(`Erro ao atualizar alerta ID ${req.params.id}:`, error);
+      res.status(500).json({ message: `Erro ao atualizar alerta: ${error.message}` });
+    }
+  });
+  
+  /**
+   * @route DELETE /api/analytics/metric-alerts/:id
+   * @desc Excluir um alerta de métrica
+   * @access Admin, School
+   */
+  app.delete('/api/analytics/metric-alerts/:id', isAuthenticated, isAdminOrSchool, async (req: Request, res: Response) => {
+    try {
+      const alertId = parseInt(req.params.id);
+      const user = req.user as any;
+      
+      // Obter alerta atual
+      const existingAlert = await analyticsService.getMetricAlertById(alertId);
+      
+      if (!existingAlert) {
+        return res.status(404).json({ message: 'Alerta não encontrado' });
+      }
+      
+      // Verificar permissões
+      if (user.role !== 'admin' && 
+          existingAlert.schoolId !== user.schoolId && 
+          existingAlert.userId !== user.id) {
+        return res.status(403).json({ message: 'Sem permissão para excluir este alerta' });
+      }
+      
+      const success = await analyticsService.deleteMetricAlert(alertId);
+      
+      if (success) {
+        res.status(204).end();
+      } else {
+        res.status(500).json({ message: 'Falha ao excluir alerta' });
+      }
+    } catch (error) {
+      console.error(`Erro ao excluir alerta ID ${req.params.id}:`, error);
+      res.status(500).json({ message: `Erro ao excluir alerta: ${error.message}` });
+    }
+  });
+  
+  /**
+   * @route POST /api/analytics/trigger-alerts
+   * @desc Acionar verificação de alertas manualmente
+   * @access Admin
+   */
+  app.post('/api/analytics/trigger-alerts', isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      const user = req.user as any;
+      
+      // Somente administradores podem acionar verificação manual
+      if (user.role !== 'admin') {
+        return res.status(403).json({ 
+          message: 'Somente administradores podem acionar verificação manual de alertas' 
+        });
+      }
+      
+      const triggeredCount = await analyticsService.checkAndTriggerAlerts();
+      
+      res.json({
+        success: true,
+        message: `Verificação concluída. ${triggeredCount} alertas disparados.`
+      });
+    } catch (error) {
+      console.error('Erro ao verificar alertas manualmente:', error);
+      res.status(500).json({ message: `Erro ao verificar alertas: ${error.message}` });
+    }
+  });
 }

@@ -76,6 +76,9 @@ class AnalyticsService {
       // Iniciar ETL agendado
       this.scheduleETL();
       
+      // Agendar verificação periódica de alertas
+      this.scheduleAlertChecks();
+      
       this.initialized = true;
       console.log('Serviço de Analytics inicializado com sucesso');
     } catch (error) {
@@ -193,6 +196,37 @@ class AnalyticsService {
     this.scheduledJobs.set('daily_etl', dailyJob);
     
     console.log('ETL agendado com sucesso');
+  }
+  
+  /**
+   * Agenda verificação periódica de alertas
+   */
+  private scheduleAlertChecks(): void {
+    // Verificar alertas a cada hora
+    const alertJob = setInterval(() => {
+      if (this.inactiveMode) return;
+      
+      // Importar função diretamente para evitar referência circular
+      import('./analyticsServiceExtensions')
+        .then(module => {
+          module.checkAndTriggerAlerts()
+            .then(count => {
+              if (count > 0) {
+                console.log(`Verificação de alertas concluída: ${count} alertas disparados`);
+              }
+            })
+            .catch(error => {
+              console.error('Erro ao verificar alertas:', error);
+            });
+        })
+        .catch(error => {
+          console.error('Erro ao importar módulo de alertas:', error);
+        });
+    }, 60 * 60 * 1000); // Verificar a cada 1 hora
+    
+    this.scheduledJobs.set('alert_checks', alertJob);
+    
+    console.log('Verificação de alertas agendada com sucesso');
   }
   
   /**
@@ -1559,7 +1593,14 @@ import {
   getDemandForecast,
   getRevenueForecast,
   getKpiDashboard,
-  exportEntityData
+  exportEntityData,
+  getMetricAlerts,
+  getMetricAlertById,
+  createMetricAlert,
+  updateMetricAlert,
+  deleteMetricAlert,
+  checkAndTriggerAlerts,
+  MetricAlert
 } from './analyticsServiceExtensions';
 
 class AnalyticsServiceWithExtensions extends AnalyticsService {
@@ -1581,6 +1622,14 @@ class AnalyticsServiceWithExtensions extends AnalyticsService {
   
   // Método de exportação de dados
   exportEntityData = exportEntityData;
+  
+  // Métodos de gestão de alertas de métricas
+  getMetricAlerts = getMetricAlerts;
+  getMetricAlertById = getMetricAlertById;
+  createMetricAlert = createMetricAlert;
+  updateMetricAlert = updateMetricAlert;
+  deleteMetricAlert = deleteMetricAlert;
+  checkAndTriggerAlerts = checkAndTriggerAlerts;
 }
 
 export const analyticsService = new AnalyticsServiceWithExtensions();
