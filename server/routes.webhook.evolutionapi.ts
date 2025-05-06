@@ -7,7 +7,7 @@ import { Request, Response, NextFunction, Express } from 'express';
 import { db } from './db';
 import { v4 as uuidv4 } from 'uuid';
 import { sendUserNotification, sendSchoolNotification, NotificationPayload } from './pusher';
-import { queueService } from './services/queueService';
+import queueService, { QueueType, Priority } from './services/queueService';
 import { logAction } from './services/securityService';
 
 // Tipos de eventos suportados pelo webhook
@@ -548,17 +548,16 @@ async function processAutoReply(
       }
       
       // Enfileirar mensagem para envio
-      await queueService.enqueue(
-        'whatsapp_message',
+      await queueService.addJob(
+        QueueType.WHATSAPP, 
         {
+          type: 'process-document',
           instanceId: message.instanceId,
           contactId: message.fromNumber,
           content: replyContent,
-          replyToMessageId: message.id
-        },
-        {
-          priority: 5, // Prioridade alta para resposta automática
-          userId: 0 // System
+          replyToMessageId: message.id,
+          userId: 0, // System
+          priority: Priority.HIGH
         }
       );
     }

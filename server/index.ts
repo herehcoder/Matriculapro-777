@@ -98,7 +98,37 @@ app.use('/uploads', express.static(uploadsDir));
       // Inicializar serviço de analytics
       analyticsService.initialize().catch(err => {
         console.error('Erro ao inicializar serviço de analytics:', err);
-      })
+      }),
+      
+      // Inicializar serviço CDN
+      cdnService.initializeCDN().catch(err => {
+        console.error('Erro ao inicializar serviço CDN:', err);
+      }),
+      
+      // Inicializar sistema de filas apenas se Redis estiver disponível
+      (async () => {
+        if (process.env.REDIS_URL) {
+          try {
+            await initializeQueueService();
+            setupDefaultProcessors();
+            console.log('Sistema de filas inicializado com sucesso');
+          } catch (err) {
+            console.warn('Sistema de filas desabilitado:', err.message);
+          }
+        } else {
+          console.log('Sistema de filas desabilitado: Redis não configurado');
+        }
+      })(),
+      
+      // Criar índices de otimização de banco de dados
+      (async () => {
+        try {
+          await createPerformanceIndices();
+          console.log('Índices de otimização de banco de dados criados');
+        } catch (err) {
+          console.warn('Otimização de banco de dados desabilitada:', err.message);
+        }
+      })()
     ]);
 
     const server = await registerRoutes(app);

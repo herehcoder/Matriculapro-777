@@ -4,8 +4,8 @@
  */
 
 import { createClient } from 'redis';
-import { caching } from 'cache-manager';
-import { redisStore } from 'cache-manager-redis-store';
+import * as cacheManager from 'cache-manager';
+import * as redisStore from 'cache-manager-redis-store';
 import { promisify } from 'util';
 
 // Configuração do Redis
@@ -57,8 +57,8 @@ class CacheService {
 
       if (this.redisAvailable) {
         // Inicializar cache gerenciado com Redis
-        this.cache = await caching({
-          store: redisStore.create(REDIS_URL),
+        this.cache = cacheManager.caching({
+          store: redisStore.create({ url: REDIS_URL }),
           ttl: DEFAULT_TTL, // tempo padrão de vida do cache em segundos
           max: 1000 // número máximo de itens no cache
         });
