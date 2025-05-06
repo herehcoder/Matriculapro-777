@@ -8,6 +8,7 @@ import { mlService } from './mlService';
 import { analyticsService } from './analyticsService';
 import { sendUserNotification, sendSchoolNotification } from '../pusher';
 import * as emailService from '../email';
+import { getDemandForecast } from './demandForecastService';
 
 /**
  * Obtém métricas avançadas de conversão (leads para matrículas)
@@ -494,11 +495,25 @@ export async function getMetricAlerts(schoolId?: number, userId?: number): Promi
     // Executar consulta
     const result = await db.execute(query, params);
     
-    return result.rows;
+    return result.rows.map(row => ({
+      id: row.id,
+      schoolId: row.schoolId,
+      userId: row.userId,
+      metric: row.metric,
+      condition: row.condition,
+      threshold: row.threshold,
+      period: row.period,
+      notification_type: row.notification_type,
+      is_active: row.is_active,
+      description: row.description,
+      last_triggered: row.last_triggered,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    }));
     
   } catch (error) {
     console.error('Erro ao obter alertas de métricas:', error);
-    throw new Error(`Falha ao obter alertas: ${error.message}`);
+    throw new Error(`Falha ao obter alertas de métricas: ${error.message}`);
   }
 }
 
@@ -509,7 +524,7 @@ export async function getMetricAlerts(schoolId?: number, userId?: number): Promi
  */
 export async function getMetricAlertById(id: number): Promise<MetricAlert | null> {
   if (!analyticsService.isInitialized() || analyticsService.isInactiveMode()) {
-    console.log('[AnalyticsService Inativo] Simulando consulta de alerta único');
+    console.log('[AnalyticsService Inativo] Simulando consulta de alerta por ID');
     return null;
   }
   
@@ -526,15 +541,31 @@ export async function getMetricAlertById(id: number): Promise<MetricAlert | null
     
     const result = await db.execute(query, [id]);
     
-    if (result.rows.length === 0) {
+    if (!result.rows.length) {
       return null;
     }
     
-    return result.rows[0];
+    const row = result.rows[0];
+    
+    return {
+      id: row.id,
+      schoolId: row.schoolId,
+      userId: row.userId,
+      metric: row.metric,
+      condition: row.condition,
+      threshold: row.threshold,
+      period: row.period,
+      notification_type: row.notification_type,
+      is_active: row.is_active,
+      description: row.description,
+      last_triggered: row.last_triggered,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    };
     
   } catch (error) {
-    console.error(`Erro ao obter alerta ID ${id}:`, error);
-    throw new Error(`Falha ao obter alerta: ${error.message}`);
+    console.error('Erro ao obter alerta de métrica por ID:', error);
+    throw new Error(`Falha ao obter alerta de métrica: ${error.message}`);
   }
 }
 
@@ -548,25 +579,19 @@ export async function createMetricAlert(alert: MetricAlert): Promise<MetricAlert
     console.log('[AnalyticsService Inativo] Simulando criação de alerta');
     return {
       ...alert,
-      id: Math.floor(Math.random() * 1000),
+      id: Math.floor(Math.random() * 1000) + 1,
       created_at: new Date(),
       updated_at: new Date()
     };
   }
   
   try {
-    // Validações básicas
-    if (!alert.metric || !alert.condition || alert.threshold === undefined || !alert.period || !alert.notification_type) {
-      throw new Error('Campos obrigatórios não informados');
-    }
-    
     const query = `
       INSERT INTO metric_alerts (
         school_id, user_id, metric, condition, threshold,
         period, notification_type, is_active, description
-      ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9
-      ) RETURNING 
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING 
         id, school_id as "schoolId", user_id as "userId",
         metric, condition, threshold, period, notification_type,
         is_active, description, last_triggered,
@@ -581,17 +606,32 @@ export async function createMetricAlert(alert: MetricAlert): Promise<MetricAlert
       alert.threshold,
       alert.period,
       alert.notification_type,
-      alert.is_active !== undefined ? alert.is_active : true,
+      alert.is_active,
       alert.description || null
     ];
     
     const result = await db.execute(query, params);
+    const row = result.rows[0];
     
-    return result.rows[0];
+    return {
+      id: row.id,
+      schoolId: row.schoolId,
+      userId: row.userId,
+      metric: row.metric,
+      condition: row.condition,
+      threshold: row.threshold,
+      period: row.period,
+      notification_type: row.notification_type,
+      is_active: row.is_active,
+      description: row.description,
+      last_triggered: row.last_triggered,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    };
     
   } catch (error) {
     console.error('Erro ao criar alerta de métrica:', error);
-    throw new Error(`Falha ao criar alerta: ${error.message}`);
+    throw new Error(`Falha ao criar alerta de métrica: ${error.message}`);
   }
 }
 
@@ -606,22 +646,35 @@ export async function updateMetricAlert(id: number, alert: Partial<MetricAlert>)
     console.log('[AnalyticsService Inativo] Simulando atualização de alerta');
     return {
       id,
-      ...alert,
+      schoolId: alert.schoolId,
+      userId: alert.userId,
+      metric: alert.metric || 'conversion_rate',
+      condition: alert.condition || 'below',
+      threshold: alert.threshold || 0.2,
+      period: alert.period || 'last30days',
+      notification_type: alert.notification_type || 'system',
+      is_active: alert.is_active !== undefined ? alert.is_active : true,
+      description: alert.description,
+      last_triggered: alert.last_triggered,
       updated_at: new Date()
-    } as MetricAlert;
+    };
   }
   
   try {
-    // Verificar se alerta existe
-    const existingAlert = await getMetricAlertById(id);
-    if (!existingAlert) {
-      return null;
+    // Construir parte de atualização da consulta
+    const updates = [];
+    const params = [id];
+    let paramCounter = 2;
+    
+    if (alert.schoolId !== undefined) {
+      updates.push(`school_id = $${paramCounter++}`);
+      params.push(alert.schoolId === null ? null : alert.schoolId);
     }
     
-    // Construir conjuntos de campos a atualizar
-    const updates = [];
-    const params = [];
-    let paramCounter = 1;
+    if (alert.userId !== undefined) {
+      updates.push(`user_id = $${paramCounter++}`);
+      params.push(alert.userId === null ? null : alert.userId);
+    }
     
     if (alert.metric !== undefined) {
       updates.push(`metric = $${paramCounter++}`);
@@ -655,28 +708,25 @@ export async function updateMetricAlert(id: number, alert: Partial<MetricAlert>)
     
     if (alert.description !== undefined) {
       updates.push(`description = $${paramCounter++}`);
-      params.push(alert.description);
+      params.push(alert.description === null ? null : alert.description);
     }
     
     if (alert.last_triggered !== undefined) {
       updates.push(`last_triggered = $${paramCounter++}`);
-      params.push(alert.last_triggered);
+      params.push(alert.last_triggered === null ? null : alert.last_triggered);
     }
     
     updates.push(`updated_at = NOW()`);
     
-    // Se não há atualizações, retornar o alerta existente
-    if (params.length === 0) {
-      return existingAlert;
+    if (updates.length === 1) {
+      // Apenas o updated_at foi incluído
+      return await getMetricAlertById(id);
     }
-    
-    // Adicionar ID no final dos parâmetros
-    params.push(id);
     
     const query = `
       UPDATE metric_alerts
       SET ${updates.join(', ')}
-      WHERE id = $${paramCounter}
+      WHERE id = $1
       RETURNING 
         id, school_id as "schoolId", user_id as "userId",
         metric, condition, threshold, period, notification_type,
@@ -686,15 +736,31 @@ export async function updateMetricAlert(id: number, alert: Partial<MetricAlert>)
     
     const result = await db.execute(query, params);
     
-    if (result.rows.length === 0) {
+    if (!result.rows.length) {
       return null;
     }
     
-    return result.rows[0];
+    const row = result.rows[0];
+    
+    return {
+      id: row.id,
+      schoolId: row.schoolId,
+      userId: row.userId,
+      metric: row.metric,
+      condition: row.condition,
+      threshold: row.threshold,
+      period: row.period,
+      notification_type: row.notification_type,
+      is_active: row.is_active,
+      description: row.description,
+      last_triggered: row.last_triggered,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    };
     
   } catch (error) {
-    console.error(`Erro ao atualizar alerta ID ${id}:`, error);
-    throw new Error(`Falha ao atualizar alerta: ${error.message}`);
+    console.error('Erro ao atualizar alerta de métrica:', error);
+    throw new Error(`Falha ao atualizar alerta de métrica: ${error.message}`);
   }
 }
 
@@ -716,8 +782,8 @@ export async function deleteMetricAlert(id: number): Promise<boolean> {
     return result.rowCount > 0;
     
   } catch (error) {
-    console.error(`Erro ao excluir alerta ID ${id}:`, error);
-    throw new Error(`Falha ao excluir alerta: ${error.message}`);
+    console.error('Erro ao remover alerta de métrica:', error);
+    throw new Error(`Falha ao remover alerta de métrica: ${error.message}`);
   }
 }
 
@@ -739,15 +805,23 @@ export async function checkAndTriggerAlerts(): Promise<number> {
         metric, condition, threshold, period, notification_type,
         is_active, description, last_triggered
       FROM metric_alerts
-      WHERE is_active = TRUE
+      WHERE is_active = true
     `;
     
     const result = await db.execute(query);
-    const alerts = result.rows;
-    
-    if (alerts.length === 0) {
-      return 0;
-    }
+    const alerts = result.rows.map(row => ({
+      id: row.id,
+      schoolId: row.schoolId,
+      userId: row.userId,
+      metric: row.metric,
+      condition: row.condition,
+      threshold: row.threshold,
+      period: row.period,
+      notification_type: row.notification_type,
+      is_active: row.is_active,
+      description: row.description,
+      last_triggered: row.last_triggered
+    }));
     
     let triggeredCount = 0;
     
@@ -881,28 +955,14 @@ async function checkAlertCondition(alert: MetricAlert): Promise<boolean> {
     default:
       console.log(`Métrica ${alert.metric} não implementada, ignorando alerta`);
       return false;
-    }
-    
-    // Verificar condição
-    if (alert.condition === 'above') {
-      return metricValue > alert.threshold;
-    } else {
-      return metricValue < alert.threshold;
-    }
-  } catch (error) {
-    console.error(`Erro ao verificar condição do alerta: ${error.message}`);
-    return false;
   }
-}
-
-// Funções de previsão de demanda movidas para outro arquivo
-
-// Declarando apenas a assinatura da função para evitar erros de uso atual
-// Implementação real está em outro arquivo
-export async function getDemandForecast(schoolId: number, months: number = 3, courseId?: number): Promise<any> {
-  return import('./demandForecastService').then(module => {
-    return module.getDemandForecast(schoolId, months, courseId);
-  });
+  
+  // Verificar condição
+  if (alert.condition === 'above') {
+    return metricValue > alert.threshold;
+  } else {
+    return metricValue < alert.threshold;
+  }
 }
 
 /**
@@ -947,86 +1007,77 @@ export async function getRevenueForecast(schoolId: number, months: number = 3): 
       ],
       historical_comparison: [
         { period: '3 meses anteriores', actual: 85000, predicted: 87000 },
-        { period: '6 meses anteriores', actual: 80000, predicted: 78000 }
+        { period: '6 meses anteriores', actual: 80000, predicted: 79000 }
       ]
     };
   }
   
   try {
-    // Obter previsão de matrículas
+    // Primeiro obter previsão de matrículas
     const enrollmentForecast = await getDemandForecast(schoolId, months);
-    const totalEnrollments = enrollmentForecast.total_prediction;
-    
-    // Obter valor médio de pagamentos
-    const avgPaymentQuery = `
-      SELECT 
-        AVG(p.amount) as avg_amount,
-        COUNT(*) as count
-      FROM payments p
-      JOIN enrollments e ON p.enrollment_id = e.id
-      WHERE e.school_id = $1
-      AND p.status = 'completed'
-      AND p.created_at > NOW() - INTERVAL '1 year'
-    `;
-    
-    const avgPaymentResult = await db.execute(avgPaymentQuery, [schoolId]);
-    let avgPayment = 0;
-    
-    if (avgPaymentResult.rows.length > 0 && avgPaymentResult.rows[0].count > 0) {
-      avgPayment = parseFloat(avgPaymentResult.rows[0].avg_amount);
-    } else {
-      // Valor médio padrão se não houver dados
-      avgPayment = 2000;
-    }
-    
-    // Calcular previsão total
-    const totalPrediction = Math.round(totalEnrollments * avgPayment);
-    
-    // Distribuição mensal
-    const monthlyBreakdown = enrollmentForecast.monthly_breakdown.map(month => ({
-      month: month.month,
-      prediction: Math.round(month.prediction * avgPayment)
-    }));
-    
-    // Distribuição por curso com valores médios
-    const courseValues = new Map();
     
     // Obter valores médios por curso
-    const courseValueQuery = `
+    const avgValueQuery = `
       SELECT 
-        c.id, 
-        c.name, 
-        AVG(p.amount) as avg_amount,
-        COUNT(*) as count
-      FROM payments p
-      JOIN enrollments e ON p.enrollment_id = e.id
-      JOIN courses c ON e.course_id = c.id
-      WHERE e.school_id = $1
-      AND p.status = 'completed'
+        c.id, c.name, 
+        COALESCE(AVG(p.amount), 0) as avg_value,
+        COUNT(DISTINCT e.id) as enrollments_count
+      FROM courses c
+      LEFT JOIN enrollments e ON c.id = e.course_id
+      LEFT JOIN payments p ON e.id = p.enrollment_id
+      WHERE c.school_id = $1
       AND p.created_at > NOW() - INTERVAL '1 year'
       GROUP BY c.id, c.name
     `;
     
-    const courseValueResult = await db.execute(courseValueQuery, [schoolId]);
+    const avgValueResult = await db.execute(avgValueQuery, [schoolId]);
     
-    courseValueResult.rows.forEach(row => {
-      if (parseInt(row.count) > 0) {
-        courseValues.set(row.name, parseFloat(row.avg_amount));
-      }
+    // Mapa de cursos para valores médios
+    const courseValues = new Map();
+    let totalAvgValue = 0;
+    let totalEnrollments = 0;
+    
+    avgValueResult.rows.forEach(row => {
+      const avgValue = parseFloat(row.avg_value);
+      const count = parseInt(row.enrollments_count);
+      
+      courseValues.set(row.name, avgValue);
+      
+      totalAvgValue += avgValue * count;
+      totalEnrollments += count;
     });
     
-    // Criar distribuição por curso
+    // Valor médio geral (ponderado pelo número de matrículas)
+    const globalAvgValue = totalEnrollments > 0 ? totalAvgValue / totalEnrollments : 2000;
+    
+    // Calcular previsão total de receita com base na previsão de matrículas
+    let totalRevenue = 0;
+    
+    // Distribuição de receita por curso
     const courseDistribution = enrollmentForecast.course_distribution.map(course => {
-      const avgValue = courseValues.get(course.course_name) || avgPayment;
+      const avgValue = courseValues.get(course.course_name) || globalAvgValue;
+      const prediction = course.prediction * avgValue;
+      
+      totalRevenue += prediction;
+      
       return {
         course_name: course.course_name,
         percentage: course.percentage,
-        prediction: Math.round(course.prediction * avgValue),
+        prediction,
         avg_value: Math.round(avgValue * 100) / 100
       };
     });
     
-    // Comparação histórica de previsões vs. realidade
+    // Distribuição mensal
+    const monthlyBreakdown = enrollmentForecast.monthly_breakdown.map(month => {
+      const revenue = month.prediction * globalAvgValue;
+      return {
+        month: month.month,
+        prediction: Math.round(revenue)
+      };
+    });
+    
+    // Comparação histórica
     const historicalComparison = [];
     
     // Períodos de 3 e 6 meses atrás
@@ -1042,14 +1093,12 @@ export async function getRevenueForecast(schoolId: number, months: number = 3): 
       const startDate = new Date(endDate);
       startDate.setMonth(startDate.getMonth() - 3); // Olhar 3 meses para cada período
       
-      // Obter receita real
+      // Obter pagamentos reais
       const actualQuery = `
-        SELECT SUM(p.amount) as total
-        FROM payments p
-        JOIN enrollments e ON p.enrollment_id = e.id
-        WHERE e.school_id = $1
-        AND p.status = 'completed'
-        AND p.created_at BETWEEN $2 AND $3
+        SELECT COALESCE(SUM(amount), 0) as total
+        FROM payments
+        WHERE school_id = $1
+        AND created_at BETWEEN $2 AND $3
       `;
       
       const actualResult = await db.execute(actualQuery, [
@@ -1058,7 +1107,7 @@ export async function getRevenueForecast(schoolId: number, months: number = 3): 
         endDate.toISOString()
       ]);
       
-      const actual = actualResult.rows[0].total ? Math.round(parseFloat(actualResult.rows[0].total)) : 0;
+      const actual = parseFloat(actualResult.rows[0].total);
       
       // Simular uma previsão anterior com ±10% de variação
       const variation = Math.random() * 0.2 - 0.1; // Entre -10% e +10%
@@ -1066,14 +1115,13 @@ export async function getRevenueForecast(schoolId: number, months: number = 3): 
       
       historicalComparison.push({
         period: period.label,
-        actual,
+        actual: Math.round(actual),
         predicted
       });
     }
     
-    // Retornar resultado completo
     return {
-      total_prediction: totalPrediction,
+      total_prediction: Math.round(totalRevenue),
       confidence: enrollmentForecast.confidence,
       monthly_breakdown: monthlyBreakdown,
       course_distribution: courseDistribution,
@@ -1093,241 +1141,301 @@ export async function getRevenueForecast(schoolId: number, months: number = 3): 
  * @returns KPIs
  */
 export async function getKpiDashboard(schoolId?: number, period: string = '30days'): Promise<{
-  enrollment_kpis: {
+  enrollment_stats: {
     total: number;
+    completed: number;
+    pending: number;
     growth_rate: number;
-    avg_completion_time: number;
-    completion_rate: number;
   };
-  revenue_kpis: {
+  revenue_stats: {
     total: number;
+    average_payment: number;
     growth_rate: number;
-    avg_ticket: number;
-    projected_monthly: number;
   };
-  document_kpis: {
-    total_processed: number;
-    validation_rate: number;
+  conversion_stats: {
+    rate: number;
+    leads_count: number;
+    converted_count: number;
+    avg_time: number;
+  };
+  document_stats: {
+    total_submitted: number;
+    approved_rate: number;
     avg_validation_time: number;
-    rejection_rate: number;
   };
-  conversion_kpis: {
-    lead_to_enrollment_rate: number;
-    cost_per_enrollment: number;
-    highest_conversion_source: string;
-    avg_enrollment_value: number;
+  retention_stats: {
+    rate: number;
+    total_students: number;
+    returning_students: number;
   };
 }> {
   if (!analyticsService.isInitialized() || analyticsService.isInactiveMode()) {
-    console.log('[AnalyticsService Inativo] Simulando KPI dashboard');
+    console.log('[AnalyticsService Inativo] Simulando KPIs para dashboard');
     return {
-      enrollment_kpis: {
-        total: 45,
-        growth_rate: 0.15,
-        avg_completion_time: 72,
-        completion_rate: 0.85
+      enrollment_stats: {
+        total: 120,
+        completed: 100,
+        pending: 20,
+        growth_rate: 0.15
       },
-      revenue_kpis: {
-        total: 90000,
-        growth_rate: 0.12,
-        avg_ticket: 2000,
-        projected_monthly: 30000
+      revenue_stats: {
+        total: 240000,
+        average_payment: 2000,
+        growth_rate: 0.08
       },
-      document_kpis: {
-        total_processed: 120,
-        validation_rate: 0.92,
-        avg_validation_time: 24,
-        rejection_rate: 0.08
+      conversion_stats: {
+        rate: 0.25,
+        leads_count: 400,
+        converted_count: 100,
+        avg_time: 48
       },
-      conversion_kpis: {
-        lead_to_enrollment_rate: 0.25,
-        cost_per_enrollment: 100,
-        highest_conversion_source: 'website',
-        avg_enrollment_value: 2000
+      document_stats: {
+        total_submitted: 350,
+        approved_rate: 0.92,
+        avg_validation_time: 24
+      },
+      retention_stats: {
+        rate: 0.85,
+        total_students: 120,
+        returning_students: 102
       }
     };
   }
   
   try {
-    // Determinar intervalos de datas
+    // Interpretar período
     let currentPeriodStart: Date, previousPeriodStart: Date;
-    const now = new Date();
     
-    switch (period) {
-      case '7days':
-        currentPeriodStart = new Date(now);
-        currentPeriodStart.setDate(now.getDate() - 7);
-        previousPeriodStart = new Date(currentPeriodStart);
-        previousPeriodStart.setDate(currentPeriodStart.getDate() - 7);
-        break;
+    if (period === '7days') {
+      currentPeriodStart = new Date();
+      currentPeriodStart.setDate(currentPeriodStart.getDate() - 7);
       
-      case '90days':
-        currentPeriodStart = new Date(now);
-        currentPeriodStart.setDate(now.getDate() - 90);
-        previousPeriodStart = new Date(currentPeriodStart);
-        previousPeriodStart.setDate(currentPeriodStart.getDate() - 90);
-        break;
-        
-      case '365days':
-        currentPeriodStart = new Date(now);
-        currentPeriodStart.setDate(now.getDate() - 365);
-        previousPeriodStart = new Date(currentPeriodStart);
-        previousPeriodStart.setDate(currentPeriodStart.getDate() - 365);
-        break;
-        
-      default: // 30days
-        currentPeriodStart = new Date(now);
-        currentPeriodStart.setDate(now.getDate() - 30);
-        previousPeriodStart = new Date(currentPeriodStart);
-        previousPeriodStart.setDate(currentPeriodStart.getDate() - 30);
+      previousPeriodStart = new Date(currentPeriodStart);
+      previousPeriodStart.setDate(previousPeriodStart.getDate() - 7);
+    } else if (period === '30days') {
+      currentPeriodStart = new Date();
+      currentPeriodStart.setDate(currentPeriodStart.getDate() - 30);
+      
+      previousPeriodStart = new Date(currentPeriodStart);
+      previousPeriodStart.setDate(previousPeriodStart.getDate() - 30);
+    } else if (period === '90days') {
+      currentPeriodStart = new Date();
+      currentPeriodStart.setDate(currentPeriodStart.getDate() - 90);
+      
+      previousPeriodStart = new Date(currentPeriodStart);
+      previousPeriodStart.setDate(previousPeriodStart.getDate() - 90);
+    } else if (period === '365days') {
+      currentPeriodStart = new Date();
+      currentPeriodStart.setDate(currentPeriodStart.getDate() - 365);
+      
+      previousPeriodStart = new Date(currentPeriodStart);
+      previousPeriodStart.setDate(previousPeriodStart.getDate() - 365);
+    } else {
+      // Padrão: 30 dias
+      currentPeriodStart = new Date();
+      currentPeriodStart.setDate(currentPeriodStart.getDate() - 30);
+      
+      previousPeriodStart = new Date(currentPeriodStart);
+      previousPeriodStart.setDate(previousPeriodStart.getDate() - 30);
     }
     
-    // Parâmetros para consultas
+    const now = new Date();
+    
+    // Parâmetros base
     const params = schoolId ? [schoolId] : [];
-    const currentPeriodFilter = `created_at BETWEEN '${currentPeriodStart.toISOString()}' AND '${now.toISOString()}'`;
-    const previousPeriodFilter = `created_at BETWEEN '${previousPeriodStart.toISOString()}' AND '${currentPeriodStart.toISOString()}'`;
-    const schoolFilter = schoolId ? `AND school_id = $1` : '';
+    const schoolFilter = schoolId ? 'AND school_id = $1' : '';
     
-    // KPIs de matrículas
+    // 1. Estatísticas de matrículas
     const enrollmentQuery = `
-      SELECT 
-        (SELECT COUNT(*) FROM enrollments WHERE ${currentPeriodFilter} ${schoolFilter}) as current_total,
-        (SELECT COUNT(*) FROM enrollments WHERE ${previousPeriodFilter} ${schoolFilter}) as previous_total,
-        (SELECT AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) / 3600) 
-         FROM enrollments 
-         WHERE ${currentPeriodFilter} ${schoolFilter} AND status IN ('completed', 'approved')) as avg_completion_time,
-        (SELECT COUNT(*) FROM enrollments 
-         WHERE ${currentPeriodFilter} ${schoolFilter} AND status IN ('completed', 'approved')) as completed_count
+      SELECT
+        (
+          SELECT COUNT(*) 
+          FROM enrollments 
+          WHERE created_at BETWEEN $${params.length + 1} AND $${params.length + 2}
+          ${schoolFilter}
+        ) as current_total,
+        (
+          SELECT COUNT(*) 
+          FROM enrollments 
+          WHERE created_at BETWEEN $${params.length + 3} AND $${params.length + 4}
+          ${schoolFilter}
+        ) as previous_total,
+        (
+          SELECT COUNT(*) 
+          FROM enrollments 
+          WHERE status = 'completed' AND created_at BETWEEN $${params.length + 1} AND $${params.length + 2}
+          ${schoolFilter}
+        ) as completed,
+        (
+          SELECT COUNT(*) 
+          FROM enrollments 
+          WHERE status IN ('pending', 'in_progress') AND created_at BETWEEN $${params.length + 1} AND $${params.length + 2}
+          ${schoolFilter}
+        ) as pending
     `;
     
-    const enrollmentResult = await db.execute(enrollmentQuery, params);
+    const enrollmentParams = [
+      ...params,
+      currentPeriodStart.toISOString(),
+      now.toISOString(),
+      previousPeriodStart.toISOString(),
+      currentPeriodStart.toISOString()
+    ];
     
-    const currentEnrollmentTotal = parseInt(enrollmentResult.rows[0].current_total) || 0;
-    const previousEnrollmentTotal = parseInt(enrollmentResult.rows[0].previous_total) || 0;
-    const enrollmentGrowthRate = previousEnrollmentTotal > 0 
-      ? (currentEnrollmentTotal - previousEnrollmentTotal) / previousEnrollmentTotal 
+    const enrollmentResult = await db.execute(enrollmentQuery, enrollmentParams);
+    const enrollmentRow = enrollmentResult.rows[0];
+    
+    const currentEnrollments = parseInt(enrollmentRow.current_total);
+    const previousEnrollments = parseInt(enrollmentRow.previous_total);
+    const growthRate = previousEnrollments > 0 
+      ? (currentEnrollments - previousEnrollments) / previousEnrollments
       : 0;
-    const avgCompletionTime = parseFloat(enrollmentResult.rows[0].avg_completion_time) || 0;
-    const completedCount = parseInt(enrollmentResult.rows[0].completed_count) || 0;
-    const completionRate = currentEnrollmentTotal > 0 ? completedCount / currentEnrollmentTotal : 0;
     
-    // KPIs de receita
+    const enrollmentStats = {
+      total: currentEnrollments,
+      completed: parseInt(enrollmentRow.completed),
+      pending: parseInt(enrollmentRow.pending),
+      growth_rate: Math.round(growthRate * 100) / 100
+    };
+    
+    // 2. Estatísticas de receita
     const revenueQuery = `
-      SELECT 
-        (SELECT SUM(amount) FROM payments p 
-         JOIN enrollments e ON p.enrollment_id = e.id 
-         WHERE p.status = 'completed' AND p.${currentPeriodFilter} ${schoolFilter.replace('school_id', 'e.school_id')}) as current_total,
-        (SELECT SUM(amount) FROM payments p 
-         JOIN enrollments e ON p.enrollment_id = e.id 
-         WHERE p.status = 'completed' AND p.${previousPeriodFilter} ${schoolFilter.replace('school_id', 'e.school_id')}) as previous_total,
-        (SELECT AVG(amount) FROM payments p 
-         JOIN enrollments e ON p.enrollment_id = e.id 
-         WHERE p.status = 'completed' AND p.${currentPeriodFilter} ${schoolFilter.replace('school_id', 'e.school_id')}) as avg_amount
+      SELECT
+        (
+          SELECT COALESCE(SUM(amount), 0) 
+          FROM payments 
+          WHERE created_at BETWEEN $${params.length + 1} AND $${params.length + 2}
+          ${schoolFilter}
+        ) as current_total,
+        (
+          SELECT COALESCE(SUM(amount), 0) 
+          FROM payments 
+          WHERE created_at BETWEEN $${params.length + 3} AND $${params.length + 4}
+          ${schoolFilter}
+        ) as previous_total,
+        (
+          SELECT COALESCE(AVG(amount), 0) 
+          FROM payments 
+          WHERE created_at BETWEEN $${params.length + 1} AND $${params.length + 2}
+          ${schoolFilter}
+        ) as average_payment
     `;
     
-    const revenueResult = await db.execute(revenueQuery, params);
+    const revenueParams = [
+      ...params,
+      currentPeriodStart.toISOString(),
+      now.toISOString(),
+      previousPeriodStart.toISOString(),
+      currentPeriodStart.toISOString()
+    ];
     
-    const currentRevenueTotal = parseFloat(revenueResult.rows[0].current_total) || 0;
-    const previousRevenueTotal = parseFloat(revenueResult.rows[0].previous_total) || 0;
-    const revenueGrowthRate = previousRevenueTotal > 0 
-      ? (currentRevenueTotal - previousRevenueTotal) / previousRevenueTotal 
+    const revenueResult = await db.execute(revenueQuery, revenueParams);
+    const revenueRow = revenueResult.rows[0];
+    
+    const currentRevenue = parseFloat(revenueRow.current_total);
+    const previousRevenue = parseFloat(revenueRow.previous_total);
+    const revenueGrowthRate = previousRevenue > 0 
+      ? (currentRevenue - previousRevenue) / previousRevenue
       : 0;
-    const avgTicket = parseFloat(revenueResult.rows[0].avg_amount) || 0;
     
-    // Projeção mensal (baseada na média diária)
-    const daysDiff = Math.round((now.getTime() - currentPeriodStart.getTime()) / (1000 * 60 * 60 * 24));
-    const dailyAvg = daysDiff > 0 ? currentRevenueTotal / daysDiff : 0;
-    const projectedMonthly = dailyAvg * 30;
+    const revenueStats = {
+      total: Math.round(currentRevenue),
+      average_payment: Math.round(parseFloat(revenueRow.average_payment)),
+      growth_rate: Math.round(revenueGrowthRate * 100) / 100
+    };
     
-    // KPIs de documentos
+    // 3. Estatísticas de conversão
+    const conversionMetrics = await getConversionMetrics(schoolId, period === '7days' ? 'last7days' : 
+      period === '30days' ? 'last30days' : 
+      period === '90days' ? 'last90days' : 'lastYear');
+    
+    const conversionStats = {
+      rate: conversionMetrics.conversion_rate,
+      leads_count: conversionMetrics.leads_count,
+      converted_count: conversionMetrics.converted_count,
+      avg_time: conversionMetrics.avg_conversion_time
+    };
+    
+    // 4. Estatísticas de documentos
     const documentQuery = `
-      SELECT 
-        (SELECT COUNT(*) FROM documents d 
-         JOIN enrollments e ON d.enrollment_id = e.id 
-         WHERE d.${currentPeriodFilter} ${schoolFilter.replace('school_id', 'e.school_id')}) as total_processed,
-        (SELECT COUNT(*) FROM documents d 
-         JOIN document_validations dv ON d.id = dv.document_id 
-         JOIN enrollments e ON d.enrollment_id = e.id 
-         WHERE dv.status = 'valid' AND d.${currentPeriodFilter} ${schoolFilter.replace('school_id', 'e.school_id')}) as valid_count,
-        (SELECT COUNT(*) FROM documents d 
-         JOIN document_validations dv ON d.id = dv.document_id 
-         JOIN enrollments e ON d.enrollment_id = e.id 
-         WHERE dv.status = 'invalid' AND d.${currentPeriodFilter} ${schoolFilter.replace('school_id', 'e.school_id')}) as invalid_count,
-        (SELECT AVG(EXTRACT(EPOCH FROM (dv.validated_at - d.created_at)) / 3600) 
-         FROM documents d 
-         JOIN document_validations dv ON d.id = dv.document_id 
-         JOIN enrollments e ON d.enrollment_id = e.id 
-         WHERE d.${currentPeriodFilter} ${schoolFilter.replace('school_id', 'e.school_id')}) as avg_validation_time
+      SELECT
+        COUNT(*) as total_submitted,
+        COALESCE(SUM(CASE WHEN dv.status = 'valid' THEN 1 ELSE 0 END), 0) as approved_count,
+        COALESCE(AVG(EXTRACT(EPOCH FROM (dv.updated_at - d.created_at))) / 3600, 0) as avg_time
+      FROM documents d
+      LEFT JOIN document_validations dv ON d.id = dv.document_id
+      WHERE d.created_at BETWEEN $${params.length + 1} AND $${params.length + 2}
+      ${schoolFilter}
     `;
     
-    const documentResult = await db.execute(documentQuery, params);
+    const documentParams = [
+      ...params,
+      currentPeriodStart.toISOString(),
+      now.toISOString()
+    ];
     
-    const totalProcessed = parseInt(documentResult.rows[0].total_processed) || 0;
-    const validCount = parseInt(documentResult.rows[0].valid_count) || 0;
-    const invalidCount = parseInt(documentResult.rows[0].invalid_count) || 0;
-    const validationRate = totalProcessed > 0 ? validCount / totalProcessed : 0;
-    const rejectionRate = totalProcessed > 0 ? invalidCount / totalProcessed : 0;
-    const avgValidationTime = parseFloat(documentResult.rows[0].avg_validation_time) || 0;
+    const documentResult = await db.execute(documentQuery, documentParams);
+    const documentRow = documentResult.rows[0];
     
-    // KPIs de conversão
-    const conversionQuery = `
+    const totalSubmitted = parseInt(documentRow.total_submitted);
+    const approvedCount = parseInt(documentRow.approved_count);
+    
+    const documentStats = {
+      total_submitted: totalSubmitted,
+      approved_rate: totalSubmitted > 0 ? approvedCount / totalSubmitted : 0,
+      avg_validation_time: Math.round(parseFloat(documentRow.avg_time) * 10) / 10
+    };
+    
+    // 5. Estatísticas de retenção (alunos que retornam)
+    const retentionQuery = `
+      WITH current_students AS (
+        SELECT DISTINCT student_id
+        FROM enrollments
+        WHERE created_at BETWEEN $${params.length + 1} AND $${params.length + 2}
+        ${schoolFilter}
+      ),
+      returning_students AS (
+        SELECT cs.student_id
+        FROM current_students cs
+        INNER JOIN enrollments e ON cs.student_id = e.student_id
+        WHERE e.created_at < $${params.length + 1}
+        ${schoolFilter}
+        GROUP BY cs.student_id
+      )
       SELECT 
-        (SELECT COUNT(*) FROM leads WHERE ${currentPeriodFilter} ${schoolFilter}) as leads_count,
-        (SELECT COUNT(*) FROM enrollments e 
-         JOIN leads l ON e.lead_id = l.id 
-         WHERE e.${currentPeriodFilter} ${schoolFilter}) as converted_count,
-        (SELECT l.source
-         FROM enrollments e 
-         JOIN leads l ON e.lead_id = l.id 
-         WHERE e.${currentPeriodFilter} ${schoolFilter}
-         GROUP BY l.source 
-         ORDER BY COUNT(*) DESC 
-         LIMIT 1) as top_source
+        (SELECT COUNT(*) FROM current_students) as total_students,
+        (SELECT COUNT(*) FROM returning_students) as returning_students
     `;
     
-    const conversionResult = await db.execute(conversionQuery, params);
+    const retentionParams = [
+      ...params,
+      currentPeriodStart.toISOString(),
+      now.toISOString()
+    ];
     
-    const leadsCount = parseInt(conversionResult.rows[0].leads_count) || 0;
-    const convertedCount = parseInt(conversionResult.rows[0].converted_count) || 0;
-    const leadToEnrollmentRate = leadsCount > 0 ? convertedCount / leadsCount : 0;
+    const retentionResult = await db.execute(retentionQuery, retentionParams);
+    const retentionRow = retentionResult.rows[0];
     
-    // Custo por matrícula (simulado, poderia ser de um cálculo real baseado em despesas de marketing)
-    // Em uma implementação real, poderia ser integrado com dados de campanhas de marketing
-    const costPerEnrollment = convertedCount > 0 ? 100 : 0;
+    const totalStudents = parseInt(retentionRow.total_students);
+    const returningStudents = parseInt(retentionRow.returning_students);
     
-    const highestConversionSource = conversionResult.rows[0].top_source || 'website';
-    const avgEnrollmentValue = convertedCount > 0 ? currentRevenueTotal / convertedCount : 0;
+    const retentionStats = {
+      rate: totalStudents > 0 ? returningStudents / totalStudents : 0,
+      total_students: totalStudents,
+      returning_students: returningStudents
+    };
     
     return {
-      enrollment_kpis: {
-        total: currentEnrollmentTotal,
-        growth_rate: Math.round(enrollmentGrowthRate * 100) / 100,
-        avg_completion_time: Math.round(avgCompletionTime * 10) / 10,
-        completion_rate: Math.round(completionRate * 100) / 100
-      },
-      revenue_kpis: {
-        total: Math.round(currentRevenueTotal * 100) / 100,
-        growth_rate: Math.round(revenueGrowthRate * 100) / 100,
-        avg_ticket: Math.round(avgTicket * 100) / 100,
-        projected_monthly: Math.round(projectedMonthly * 100) / 100
-      },
-      document_kpis: {
-        total_processed: totalProcessed,
-        validation_rate: Math.round(validationRate * 100) / 100,
-        avg_validation_time: Math.round(avgValidationTime * 10) / 10,
-        rejection_rate: Math.round(rejectionRate * 100) / 100
-      },
-      conversion_kpis: {
-        lead_to_enrollment_rate: Math.round(leadToEnrollmentRate * 100) / 100,
-        cost_per_enrollment: Math.round(costPerEnrollment * 100) / 100,
-        highest_conversion_source: highestConversionSource,
-        avg_enrollment_value: Math.round(avgEnrollmentValue * 100) / 100
-      }
+      enrollment_stats: enrollmentStats,
+      revenue_stats: revenueStats,
+      conversion_stats: conversionStats,
+      document_stats: documentStats,
+      retention_stats: retentionStats
     };
     
   } catch (error) {
-    console.error('Erro ao obter KPI dashboard:', error);
-    throw new Error(`Falha ao obter KPI dashboard: ${error.message}`);
+    console.error('Erro ao obter KPIs para dashboard:', error);
+    throw new Error(`Falha ao obter KPIs para dashboard: ${error.message}`);
   }
 }
 
@@ -1341,124 +1449,73 @@ export async function exportEntityData(entity: string, filters: {
   schoolId?: number;
   startDate?: Date;
   endDate?: Date;
-  [key: string]: any;
-}): Promise<any[]> {
+  format?: 'csv' | 'json' | 'xlsx';
+  limit?: number;
+}): Promise<{ data: any[]; totalCount: number }> {
   if (!analyticsService.isInitialized() || analyticsService.isInactiveMode()) {
-    console.log(`[AnalyticsService Inativo] Simulando exportação de ${entity}`);
-    // Retornar dados simulados para cada entidade
-    return Array.from({ length: 5 }, (_, i) => ({
-      id: i + 1,
-      name: `Item ${i + 1}`,
-      created_at: new Date().toISOString()
-    }));
+    console.log('[AnalyticsService Inativo] Simulando exportação de dados');
+    return {
+      data: Array(10).fill(0).map((_, i) => ({
+        id: i + 1,
+        name: `Item ${i+1}`,
+        created_at: new Date().toISOString()
+      })),
+      totalCount: 10
+    };
   }
   
   try {
-    // Construir filtros de consulta SQL
-    const params = [];
-    let paramCounter = 1;
+    const validEntities = ['enrollments', 'students', 'leads', 'courses', 'payments', 'documents', 'schools', 'users'];
     
-    let whereClause = '1=1';
-    
-    if (filters.schoolId) {
-      whereClause += ` AND school_id = $${paramCounter++}`;
-      params.push(filters.schoolId);
+    if (!validEntities.includes(entity)) {
+      throw new Error(`Entidade inválida: ${entity}`);
     }
     
+    // Configurar parâmetros
+    const params = [];
+    let paramCounter = 1;
+    let schoolFilter = '';
+    let dateFilter = '';
+    
+    // Filtro de escola
+    if (filters.schoolId) {
+      schoolFilter = ` WHERE school_id = $${paramCounter++}`;
+      params.push(filters.schoolId);
+    } else {
+      schoolFilter = ` WHERE 1=1`;
+    }
+    
+    // Filtro de data
     if (filters.startDate) {
-      whereClause += ` AND created_at >= $${paramCounter++}`;
+      dateFilter += ` AND created_at >= $${paramCounter++}`;
       params.push(filters.startDate);
     }
     
     if (filters.endDate) {
-      whereClause += ` AND created_at <= $${paramCounter++}`;
+      dateFilter += ` AND created_at <= $${paramCounter++}`;
       params.push(filters.endDate);
     }
     
-    // Consultas específicas para cada entidade
-    let query: string;
+    // Limite
+    const limit = filters.limit || 1000;
+    const limitClause = ` LIMIT $${paramCounter++}`;
+    params.push(limit);
     
-    switch (entity) {
-      case 'enrollments':
-        query = `
-          SELECT e.id, e.student_id, e.school_id, e.course_id, e.status, 
-            e.payment_status, e.created_at, e.updated_at, 
-            s.name as student_name, s.email as student_email, 
-            c.name as course_name, sc.name as school_name
-          FROM enrollments e
-          LEFT JOIN students s ON e.student_id = s.id
-          LEFT JOIN courses c ON e.course_id = c.id
-          LEFT JOIN schools sc ON e.school_id = sc.id
-          WHERE ${whereClause}
-          ORDER BY e.created_at DESC
-          LIMIT 5000
-        `;
-        break;
-        
-      case 'students':
-        query = `
-          SELECT s.id, s.name, s.email, s.phone, s.school_id, 
-            s.created_at, s.updated_at, sc.name as school_name,
-            (SELECT COUNT(*) FROM enrollments WHERE student_id = s.id) as enrollment_count
-          FROM students s
-          LEFT JOIN schools sc ON s.school_id = sc.id
-          WHERE ${whereClause}
-          ORDER BY s.created_at DESC
-          LIMIT 5000
-        `;
-        break;
-        
-      case 'leads':
-        query = `
-          SELECT l.id, l.name, l.email, l.phone, l.source, l.status, 
-            l.school_id, l.created_at, l.updated_at, sc.name as school_name,
-            (SELECT COUNT(*) FROM enrollments WHERE lead_id = l.id) as converted
-          FROM leads l
-          LEFT JOIN schools sc ON l.school_id = sc.id
-          WHERE ${whereClause}
-          ORDER BY l.created_at DESC
-          LIMIT 5000
-        `;
-        break;
-        
-      case 'courses':
-        query = `
-          SELECT c.id, c.name, c.description, c.price, c.school_id, 
-            c.created_at, c.updated_at, sc.name as school_name,
-            (SELECT COUNT(*) FROM enrollments WHERE course_id = c.id) as enrollment_count
-          FROM courses c
-          LEFT JOIN schools sc ON c.school_id = sc.id
-          WHERE ${whereClause}
-          ORDER BY c.created_at DESC
-          LIMIT 1000
-        `;
-        break;
-        
-      case 'payments':
-        query = `
-          SELECT p.id, p.enrollment_id, p.student_id, p.school_id, 
-            p.amount, p.payment_method, p.status, 
-            p.created_at, p.updated_at,
-            s.name as student_name, sc.name as school_name
-          FROM payments p
-          LEFT JOIN students s ON p.student_id = s.id
-          LEFT JOIN schools sc ON p.school_id = sc.id
-          WHERE ${whereClause}
-          ORDER BY p.created_at DESC
-          LIMIT 5000
-        `;
-        break;
-        
-      default:
-        throw new Error(`Entidade desconhecida para exportação: ${entity}`);
-    }
+    // Construir consulta
+    const query = `SELECT * FROM ${entity}${schoolFilter}${dateFilter}${limitClause}`;
+    const countQuery = `SELECT COUNT(*) as total FROM ${entity}${schoolFilter}${dateFilter}`;
     
-    // Executar consulta
+    // Executar consultas
     const result = await db.execute(query, params);
-    return result.rows;
+    const countResult = await db.execute(countQuery, params.slice(0, -1)); // Remover limite dos parâmetros
+    
+    return {
+      data: result.rows,
+      totalCount: parseInt(countResult.rows[0].total)
+    };
     
   } catch (error) {
-    console.error(`Erro ao exportar dados de ${entity}:`, error);
+    console.error('Erro ao exportar dados:', error);
     throw new Error(`Falha ao exportar dados: ${error.message}`);
   }
 }
