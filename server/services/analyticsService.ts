@@ -1552,4 +1552,35 @@ class AnalyticsService {
 }
 
 // Exportar instância única
-export const analyticsService = new AnalyticsService();
+// Importar extensões de Analytics e BI
+import {
+  getConversionMetrics,
+  getConversionDetails,
+  getDemandForecast,
+  getRevenueForecast,
+  getKpiDashboard,
+  exportEntityData
+} from './analyticsServiceExtensions';
+
+class AnalyticsServiceWithExtensions extends AnalyticsService {
+  // Expõe o estado de inicialização para as extensões
+  isInitialized(): boolean {
+    return this.initialized;
+  }
+  
+  // Métodos de métricas avançadas de conversão
+  getConversionMetrics = getConversionMetrics;
+  getConversionDetails = getConversionDetails;
+  
+  // Métodos de previsão de demanda e receita
+  getDemandForecast = getDemandForecast;
+  getRevenueForecast = getRevenueForecast;
+  
+  // Método de KPIs para dashboard
+  getKpiDashboard = getKpiDashboard;
+  
+  // Método de exportação de dados
+  exportEntityData = exportEntityData;
+}
+
+export const analyticsService = new AnalyticsServiceWithExtensions();

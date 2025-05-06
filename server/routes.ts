@@ -22,6 +22,8 @@ import { registerOcrRoutes } from "./routes.ocr";
 import { registerEnhancedPaymentRoutes } from "./routes.payment.enhanced";
 // Importar rotas de integrações adicionais
 import integrationRoutes from "./routes/index";
+// Importar rotas de analytics e BI
+import { registerAnalyticsRoutes } from "./routes/analytics.routes";
 // Importar rotas de monitoramento
 import { registerMonitoringRoutes } from "./routes.monitoring";
 import { z } from "zod";
@@ -176,6 +178,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerEvolutionApiRoutes(app, isAuthenticated);
   registerOcrRoutes(app, isAuthenticated);
   registerEnhancedPaymentRoutes(app, isAuthenticated);
+  
+  // Registrar rotas de analytics e business intelligence
+  registerAnalyticsRoutes(app, isAuthenticated);
   
   // Registrar rotas de integrações adicionais
   app.use(integrationRoutes);
