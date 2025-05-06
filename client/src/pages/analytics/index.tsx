@@ -31,7 +31,8 @@ import {
   PieChart,
   Cell,
 } from "recharts";
-import { Loader2, RefreshCw, ArrowUp, ArrowDown, DollarSign, Users, BarChart3, Activity } from "lucide-react";
+import { Link } from "wouter";
+import { Loader2, RefreshCw, ArrowUp, ArrowDown, DollarSign, Users, BarChart3, Activity, TrendingUp, BellRing, ChartBar } from "lucide-react";
 
 // Componente de card de métrica
 interface MetricCardProps {
@@ -557,6 +558,89 @@ export default function AnalyticsPage() {
           </Card>
         </TabsContent>
       </Tabs>
+      
+      {/* Cards para análises avançadas */}
+      <h2 className="text-xl font-semibold mt-8 mb-4">Análises Avançadas</h2>
+      
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Card para Métricas de Conversão */}
+        <Card className="hover:border-primary transition-colors">
+          <Link href="/analytics/conversion-metrics" className="block p-0">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">Métricas de Conversão</CardTitle>
+                <TrendingUp className="h-5 w-5 text-primary" />
+              </div>
+              <CardDescription>
+                Análise detalhada das conversões de leads para matrículas
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm text-neutral-600">
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Taxa de conversão por origem</li>
+                  <li>Tempo médio do ciclo de matrícula</li>
+                  <li>Análise de desempenho por curso</li>
+                </ul>
+              </div>
+            </CardContent>
+          </Link>
+        </Card>
+        
+        {/* Card para Previsão de Demanda */}
+        <Card className="hover:border-primary transition-colors">
+          <Link href="/analytics/demand-forecast" className="block p-0">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">Previsão de Demanda</CardTitle>
+                <ChartBar className="h-5 w-5 text-primary" />
+              </div>
+              <CardDescription>
+                Projeções futuras baseadas em dados históricos
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm text-neutral-600">
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Previsão de matrículas por período</li>
+                  <li>Distribuição estimada por curso</li>
+                  <li>Comparativo com períodos anteriores</li>
+                </ul>
+              </div>
+            </CardContent>
+          </Link>
+        </Card>
+        
+        {/* Card para Alertas */}
+        <Card className="hover:border-primary transition-colors">
+          <Link href="/analytics/alerts" className="block p-0">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">Alertas</CardTitle>
+                <BellRing className="h-5 w-5 text-primary" />
+              </div>
+              <CardDescription>
+                Configure alertas para monitorar métricas importantes
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm text-neutral-600">
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Alertas de queda em conversões</li>
+                  <li>Notificações para objetivos não atingidos</li>
+                  <li>Monitoramento contínuo de indicadores</li>
+                </ul>
+              </div>
+            </CardContent>
+          </Link>
+        </Card>
+      </div>
+      
+      <div className="text-sm text-neutral-500 mt-4">
+        <p>
+          Dados atualizados em: {new Date().toLocaleString('pt-BR')}
+        </p>
+      </div>
     </div>
   );
 }
