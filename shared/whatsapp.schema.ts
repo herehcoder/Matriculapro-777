@@ -8,11 +8,12 @@ import { z } from "zod";
 export const whatsappInstances = pgTable('whatsapp_instances', {
   id: serial('id').primaryKey(),
   schoolId: integer('school_id').notNull().references(() => 'schools.id'),
-  name: varchar('name', { length: 255 }).notNull(),
-  instanceKey: varchar('instance_key', { length: 255 }).notNull().unique(),
-  status: varchar('status', { length: 50 }).default('created'),
+  instanceName: text('instance_name').notNull(),
+  status: text('status').default('disconnected'),
   qrCode: text('qr_code'),
-  lastError: text('last_error'),
+  webhookUrl: text('webhook_url'),
+  webhookSecret: text('webhook_secret'),
+  lastConnected: timestamp('last_connected'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow()
 });
@@ -80,8 +81,7 @@ export const whatsappTemplates = pgTable('whatsapp_templates', {
 
 // Criar Zod schemas para validação
 export const insertWhatsappInstanceSchema = createInsertSchema(whatsappInstances, {
-  name: z.string().min(3, 'O nome deve ter pelo menos 3 caracteres'),
-  instanceKey: z.string().min(5, 'A chave deve ter pelo menos 5 caracteres'),
+  instanceName: z.string().min(3, 'O nome da instância deve ter pelo menos 3 caracteres'),
   schoolId: z.number().int().positive('ID da escola deve ser um número positivo')
 }).omit({ id: true, createdAt: true, updatedAt: true });
 

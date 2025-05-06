@@ -174,11 +174,11 @@ export function registerWhatsAppRoutes(app: Express) {
         return res.status(403).json({ message: 'Acesso negado a esta escola' });
       }
       
-      // Verifica se já existe uma instância com esta chave
+      // Verifica se já existe uma instância com este nome
       const [existingInstance] = await db
         .select()
         .from(whatsappInstances)
-        .where(eq(whatsappInstances.instanceKey, validatedData.instanceId));
+        .where(eq(whatsappInstances.instanceName, validatedData.instanceId));
       
       if (existingInstance) {
         return res.status(400).json({ message: 'Já existe uma instância com este ID' });
@@ -198,8 +198,8 @@ export function registerWhatsAppRoutes(app: Express) {
       const [newInstance] = await db
         .insert(whatsappInstances)
         .values({
-          name: validatedData.instanceId, // Usar instanceId como nome da instância
-          instanceKey: validatedData.instanceToken, // Usar instanceToken como chave
+          instanceName: validatedData.instanceId, // Usar instanceId como nome da instância
+          webhookSecret: validatedData.instanceToken, // Usar instanceToken como secret
           schoolId: validatedData.schoolId,
           status: 'disconnected',
           createdAt: new Date(),
@@ -280,22 +280,23 @@ export function registerWhatsAppRoutes(app: Express) {
       const [updatedInstance] = await db
         .update(whatsappInstances)
         .set({
-          name: validatedData.instanceId, // Usar instanceId como nome da instância
-          instanceKey: validatedData.instanceToken, // Usar instanceToken como chave
+          instanceName: validatedData.instanceId, // Usar instanceId como nome da instância
+          webhookSecret: validatedData.instanceToken, // Usar instanceToken como secret
+          webhookUrl: validatedData.webhookUrl,
           updatedAt: new Date()
         })
         .where(eq(whatsappInstances.id, instanceId))
         .returning();
       
       // Se for admin, retorna todas as informações
-      // Se for escola, oculta a chave
+      // Se for escola, oculta a chave secreta
       if (req.user.role === 'admin') {
         return res.json(updatedInstance);
       } else {
-        const { instanceKey, ...instanceWithoutKey } = updatedInstance;
+        const { webhookSecret, ...instanceWithoutSecret } = updatedInstance;
         return res.json({
-          ...instanceWithoutKey,
-          instanceKey: '••••••••',
+          ...instanceWithoutSecret,
+          webhookSecret: '••••••••',
         });
       }
     } catch (error) {
