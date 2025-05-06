@@ -123,7 +123,7 @@ export async function handleConnectionUpdate(
     // Buscar instância no banco de dados
     const [dbInstance] = await db.select()
       .from(whatsappInstances)
-      .where(eq(whatsappInstances.instanceKey, instanceId));
+      .where(eq(whatsappInstances.instanceName, instanceId));
     
     if (!dbInstance) {
       return {
@@ -137,7 +137,8 @@ export async function handleConnectionUpdate(
       .set({
         status: status,
         updatedAt: new Date(),
-        metadata: { ...dbInstance.metadata, lastConnectionEvent: data }
+        // Remover referência ao campo metadata que não existe
+        // metadata: { ...dbInstance.metadata, lastConnectionEvent: data }
       })
       .where(eq(whatsappInstances.id, dbInstance.id));
     
@@ -208,7 +209,7 @@ export async function handleQrUpdate(
     // Buscar instância no banco de dados
     const [dbInstance] = await db.select()
       .from(whatsappInstances)
-      .where(eq(whatsappInstances.instanceKey, instanceId));
+      .where(eq(whatsappInstances.instanceName, instanceId));
     
     if (!dbInstance) {
       return {
@@ -283,7 +284,7 @@ export async function handleIncomingMessage(
     // Buscar instância no banco de dados
     const [dbInstance] = await db.select()
       .from(whatsappInstances)
-      .where(eq(whatsappInstances.instanceKey, instanceId));
+      .where(eq(whatsappInstances.instanceName, instanceId));
     
     if (!dbInstance) {
       return {
@@ -456,7 +457,7 @@ export async function handleMessageStatus(
     // Buscar instância no banco de dados
     const [dbInstance] = await db.select()
       .from(whatsappInstances)
-      .where(eq(whatsappInstances.instanceKey, instanceId));
+      .where(eq(whatsappInstances.instanceName, instanceId));
     
     if (!dbInstance) {
       return {
