@@ -1,486 +1,423 @@
 /**
- * Serviço de filas para processamento assíncrono
- * Implementa sistema de enfileiramento, retry e logging para mensagens
+ * Serviço de Filas
+ * Implementa processamento de tarefas assíncronas usando Bull
  */
 
-import { v4 as uuidv4 } from 'uuid';
-import fs from 'fs';
-import path from 'path';
-import { db } from '../db';
-import { logAction } from './securityService';
+import Queue, { Job, JobOptions } from 'bull';
+import IORedis from 'ioredis';
+import { sendUserNotification } from '../pusher';
+import os from 'os';
 
-// Interface para itens da fila
-export interface QueueItem {
-  id: string;
+// Configuração do Redis
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+
+// Definir número de workers baseado em CPUs disponíveis
+const MAX_WORKERS = Math.max(1, Math.min(os.cpus().length - 1, 4));
+
+// Lista de filas disponíveis
+export enum QueueType {
+  OCR = 'ocr',
+  DOCUMENT_PROCESSING = 'document-processing',
+  NOTIFICATIONS = 'notifications',
+  EMAIL = 'email',
+  WHATSAPP = 'whatsapp',
+  REPORTS = 'reports',
+  INTEGRATIONS = 'integrations',
+  DATA_EXPORT = 'data-export',
+  PAYMENTS = 'payments',
+  ANALYTICS = 'analytics'
+}
+
+// Níveis de prioridade
+export enum Priority {
+  LOW = 10,
+  MEDIUM = 5,
+  HIGH = 1,
+  CRITICAL = 0
+}
+
+/**
+ * Interface base para jobs
+ */
+interface BaseJobData {
   type: string;
-  data: any;
-  priority: number;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  attempts: number;
-  maxAttempts: number;
-  createdAt: Date;
-  updatedAt: Date;
-  processedAt?: Date;
-  error?: string;
+  userId?: number;
+  schoolId?: number;
+  priority?: Priority;
+  [key: string]: any;
 }
 
-export class QueueService {
-  private queue: Map<string, QueueItem> = new Map();
-  private processing: boolean = false;
-  private queueDir: string;
-  private persistenceEnabled: boolean = true;
-  private inactiveMode: boolean = false;
-  
-  constructor() {
-    this.queueDir = path.join(process.cwd(), 'data', 'queue');
+/**
+ * Opções para processadores
+ */
+interface ProcessorOptions {
+  concurrency?: number;
+  removeOnComplete?: boolean | number;
+  removeOnFail?: boolean | number;
+}
+
+// Mapa de filas
+const queues: Map<string, Queue.Queue> = new Map();
+
+// Mapa de processadores registrados
+const processors: Map<string, Map<string, Function>> = new Map();
+
+// Cliente Redis para conectividade
+let redisClient: IORedis.Redis | null = null;
+
+/**
+ * Inicializa o serviço de filas
+ */
+export async function initializeQueueService(): Promise<void> {
+  try {
+    // Inicializar cliente Redis
+    redisClient = new IORedis(REDIS_URL, {
+      maxRetriesPerRequest: 3,
+      retryStrategy: (times) => Math.min(times * 100, 3000)
+    });
     
-    // Criar diretório de persistência se não existir
-    if (!fs.existsSync(this.queueDir)) {
-      try {
-        fs.mkdirSync(this.queueDir, { recursive: true });
-      } catch (err) {
-        console.error('Erro ao criar diretório de fila:', err);
-        this.persistenceEnabled = false;
-      }
+    redisClient.on('error', (err) => {
+      console.error('Erro na conexão Redis para filas:', err);
+    });
+
+    console.log(`Serviço de filas inicializado com ${MAX_WORKERS} workers disponíveis`);
+    
+    // Inicializar filas pré-definidas
+    for (const queueName of Object.values(QueueType)) {
+      getQueue(queueName);
     }
     
-    // Carregar itens persistidos no startup
-    this.loadPersistedItems();
-  }
-  
-  /**
-   * Define modo inativo para o serviço
-   * @param inactive true para ativar modo inativo/fallback
-   */
-  setInactiveMode(inactive: boolean): void {
-    this.inactiveMode = inactive;
-    if (inactive) {
-      console.log('QueueService ativou modo inativo (fallback)');
-    }
-  }
-  
-  /**
-   * Verifica se o serviço está em modo inativo
-   * @returns Estado do modo inativo
-   */
-  isInactiveMode(): boolean {
-    return this.inactiveMode;
-  }
-  
-  /**
-   * Adiciona um item à fila
-   * @param type Tipo do item (ex: 'whatsapp_message', 'email', etc)
-   * @param data Dados associados
-   * @param options Opções de configuração
-   * @returns ID do item criado
-   */
-  async enqueue(
-    type: string,
-    data: any,
-    options: {
-      priority?: number;
-      maxAttempts?: number;
-      userId?: number;
-    } = {}
-  ): Promise<string> {
-    const id = uuidv4();
-    const now = new Date();
+    // Conectar processadores registrados
+    connectProcessors();
     
-    const item: QueueItem = {
-      id,
-      type,
-      data,
-      priority: options.priority || 0,
-      status: 'pending',
-      attempts: 0,
-      maxAttempts: options.maxAttempts || 3,
-      createdAt: now,
-      updatedAt: now
-    };
+    // Monitorar estado das filas
+    startQueueMonitoring();
     
-    // Adicionar à fila em memória
-    this.queue.set(id, item);
-    
-    // Persistir item
-    if (this.persistenceEnabled) {
-      this.persistItem(item);
-    }
-    
-    // Registrar na auditoria
-    if (options.userId) {
-      await logAction(
-        options.userId,
-        'enqueue_item',
-        `queue_${type}`,
-        id,
-        { type, priority: item.priority },
-        'info'
-      );
-    }
-    
-    // Iniciar processamento se não estiver em andamento
-    if (!this.processing) {
-      this.processQueue();
-    }
-    
-    return id;
-  }
-  
-  /**
-   * Processa os itens da fila
-   */
-  private async processQueue(): Promise<void> {
-    if (this.processing || this.queue.size === 0) {
-      return;
-    }
-    
-    this.processing = true;
-    
-    try {
-      // Ordenar itens por prioridade (maior prioridade primeiro)
-      const items = Array.from(this.queue.values())
-        .filter(item => item.status === 'pending')
-        .sort((a, b) => b.priority - a.priority);
-      
-      if (items.length === 0) {
-        this.processing = false;
-        return;
-      }
-      
-      // Processar cada item
-      for (const item of items) {
-        try {
-          // Atualizar status
-          item.status = 'processing';
-          item.attempts += 1;
-          item.updatedAt = new Date();
-          
-          if (this.persistenceEnabled) {
-            this.persistItem(item);
-          }
-          
-          // Processar baseado no tipo
-          let result;
-          
-          switch(item.type) {
-            case 'whatsapp_message':
-              result = await this.processWhatsAppMessage(item);
-              break;
-            case 'email':
-              result = await this.processEmail(item);
-              break;
-            case 'notification':
-              result = await this.processNotification(item);
-              break;
-            default:
-              throw new Error(`Tipo de item desconhecido: ${item.type}`);
-          }
-          
-          // Marcar como concluído
-          item.status = 'completed';
-          item.processedAt = new Date();
-          item.updatedAt = new Date();
-          
-          // Guardar resultado
-          if (result) {
-            item.data.result = result;
-          }
-          
-          if (this.persistenceEnabled) {
-            this.persistItem(item);
-          }
-          
-          // Remover da fila em memória
-          this.queue.delete(item.id);
-          
-        } catch (error) {
-          console.error(`Erro ao processar item ${item.id}:`, error);
-          
-          // Atualizar status e erro
-          item.status = item.attempts >= item.maxAttempts ? 'failed' : 'pending';
-          item.error = error instanceof Error ? error.message : String(error);
-          item.updatedAt = new Date();
-          
-          if (this.persistenceEnabled) {
-            this.persistItem(item);
-          }
-          
-          // Se falhou definitivamente, registrar na auditoria
-          if (item.status === 'failed') {
-            await logAction(
-              0, // System
-              'queue_item_failed',
-              `queue_${item.type}`,
-              item.id,
-              { 
-                type: item.type, 
-                attempts: item.attempts,
-                error: item.error
-              },
-              'error'
-            );
-          }
-        }
-      }
-    } finally {
-      this.processing = false;
-      
-      // Verificar se há mais itens para processar
-      if (Array.from(this.queue.values()).some(item => item.status === 'pending')) {
-        // Aguardar um intervalo antes de processar a próxima leva
-        setTimeout(() => this.processQueue(), 1000);
-      }
-    }
-  }
-  
-  /**
-   * Processa uma mensagem de WhatsApp
-   * @param item Item da fila
-   * @returns Resultado do processamento
-   */
-  private async processWhatsAppMessage(item: QueueItem): Promise<any> {
-    const { instanceId, contactId, content, type = 'text' } = item.data;
-    
-    if (this.inactiveMode) {
-      console.log(`[QueueService] Modo inativo - Simulando envio de mensagem WhatsApp: ${content}`);
-      
-      // Simular delay de processamento
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Registrar no banco de dados, se possível
-      try {
-        await db.execute(`
-          INSERT INTO whatsapp_messages (
-            external_id, 
-            instance_id, 
-            contact_id, 
-            content, 
-            status, 
-            direction,
-            created_at
-          ) VALUES (
-            '${uuidv4()}',
-            ${instanceId},
-            ${contactId},
-            '${content.replace(/'/g, "''")}',
-            'sent',
-            'outbound',
-            NOW()
-          )
-        `);
-      } catch (dbError) {
-        console.error('Erro ao registrar mensagem WhatsApp no banco:', dbError);
-      }
-      
-      return { success: true, mode: 'inactive' };
-    }
-    
-    try {
-      // Implementar chamada real à Evolution API aqui
-      // Por enquanto, vamos simular o funcionamento
-      
-      // Simular delay de rede
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // TODO: Implementar envio real via evolutionApiService
-      
-      // Registrar no banco de dados
-      const result = await db.execute(`
-        INSERT INTO whatsapp_messages (
-          message_id, 
-          instance_id, 
-          from_number, 
-          content, 
-          status, 
-          from_me,
-          created_at
-        ) VALUES (
-          '${uuidv4()}',
-          '${instanceId}',
-          '${contactId}',
-          '${content.replace(/'/g, "''")}',
-          'sent',
-          true,
-          NOW()
-        ) RETURNING id
-      `);
-      
-      const messageId = result.rows[0].id;
-      
-      return { success: true, messageId };
-    } catch (error) {
-      console.error('Erro ao enviar mensagem WhatsApp:', error);
-      
-      // Se estamos na última tentativa, registrar como falha no banco
-      if (item.attempts >= item.maxAttempts) {
-        try {
-          await db.execute(`
-            INSERT INTO whatsapp_messages (
-              message_id, 
-              instance_id, 
-              from_number, 
-              content, 
-              status, 
-              from_me,
-              created_at
-            ) VALUES (
-              '${uuidv4()}',
-              '${instanceId}',
-              '${contactId}',
-              '${content.replace(/'/g, "''")}',
-              'failed',
-              true,
-              NOW()
-            )
-          `);
-        } catch (dbError) {
-          console.error('Erro ao registrar falha de mensagem:', dbError);
-        }
-      }
-      
-      throw error;
-    }
-  }
-  
-  /**
-   * Processa um email
-   * @param item Item da fila
-   * @returns Resultado do processamento
-   */
-  private async processEmail(item: QueueItem): Promise<any> {
-    // Implementação futura
-    return { success: true };
-  }
-  
-  /**
-   * Processa uma notificação
-   * @param item Item da fila
-   * @returns Resultado do processamento
-   */
-  private async processNotification(item: QueueItem): Promise<any> {
-    // Implementação futura
-    return { success: true };
-  }
-  
-  /**
-   * Persiste um item em disco
-   * @param item Item para persistir
-   */
-  private persistItem(item: QueueItem): void {
-    if (!this.persistenceEnabled) return;
-    
-    try {
-      const filePath = path.join(this.queueDir, `${item.id}.json`);
-      fs.writeFileSync(filePath, JSON.stringify(item, null, 2), 'utf8');
-      
-      // Se completo ou falhou, mover para subdiretório apropriado
-      if (item.status === 'completed' || item.status === 'failed') {
-        const targetDir = path.join(this.queueDir, item.status);
-        
-        if (!fs.existsSync(targetDir)) {
-          fs.mkdirSync(targetDir, { recursive: true });
-        }
-        
-        const targetPath = path.join(targetDir, `${item.id}.json`);
-        fs.renameSync(filePath, targetPath);
-      }
-    } catch (error) {
-      console.error(`Erro ao persistir item ${item.id}:`, error);
-    }
-  }
-  
-  /**
-   * Carrega itens persistidos em disco
-   */
-  private loadPersistedItems(): void {
-    if (!this.persistenceEnabled) return;
-    
-    try {
-      // Verificar se há itens pendentes
-      const files = fs.readdirSync(this.queueDir)
-        .filter(file => file.endsWith('.json'));
-      
-      if (files.length === 0) {
-        return;
-      }
-      
-      console.log(`Carregando ${files.length} itens pendentes da fila...`);
-      
-      for (const file of files) {
-        try {
-          const filePath = path.join(this.queueDir, file);
-          const content = fs.readFileSync(filePath, 'utf8');
-          const item: QueueItem = JSON.parse(content);
-          
-          // Adicionar à fila em memória
-          this.queue.set(item.id, item);
-        } catch (error) {
-          console.error(`Erro ao carregar item de fila ${file}:`, error);
-        }
-      }
-      
-      // Iniciar processamento se houver itens
-      if (this.queue.size > 0) {
-        this.processQueue();
-      }
-    } catch (error) {
-      console.error('Erro ao carregar itens persistidos:', error);
-    }
-  }
-  
-  /**
-   * Obtém estatísticas da fila
-   * @returns Objeto com estatísticas
-   */
-  getStats(): {
-    total: number;
-    pending: number;
-    processing: number;
-    completed: number;
-    failed: number;
-  } {
-    const items = Array.from(this.queue.values());
-    
-    return {
-      total: items.length,
-      pending: items.filter(item => item.status === 'pending').length,
-      processing: items.filter(item => item.status === 'processing').length,
-      completed: items.filter(item => item.status === 'completed').length,
-      failed: items.filter(item => item.status === 'failed').length
-    };
-  }
-  
-  /**
-   * Tenta reprocessar itens com falha
-   * @returns Quantidade de itens reprocessados
-   */
-  async retryFailed(): Promise<number> {
-    const failedItems = Array.from(this.queue.values())
-      .filter(item => item.status === 'failed');
-      
-    if (failedItems.length === 0) {
-      return 0;
-    }
-    
-    for (const item of failedItems) {
-      item.status = 'pending';
-      item.attempts = 0;
-      item.error = undefined;
-      item.updatedAt = new Date();
-      
-      if (this.persistenceEnabled) {
-        this.persistItem(item);
-      }
-    }
-    
-    // Iniciar processamento
-    if (!this.processing) {
-      this.processQueue();
-    }
-    
-    return failedItems.length;
+  } catch (error) {
+    console.error('Erro ao inicializar serviço de filas:', error);
+    throw error;
   }
 }
 
-// Exportar instância singleton
-export const queueService = new QueueService();
+/**
+ * Obtém uma fila existente ou cria uma nova
+ * @param queueName Nome da fila
+ * @returns Instância da fila
+ */
+export function getQueue(queueName: string): Queue.Queue {
+  if (!queues.has(queueName)) {
+    const queue = new Queue(queueName, {
+      redis: REDIS_URL,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 5000
+        },
+        removeOnComplete: 100,  // Manter últimos 100 jobs completados
+        removeOnFail: 200       // Manter últimos 200 jobs falhados
+      }
+    });
+    
+    // Configurar eventos padrão
+    queue.on('error', (error) => {
+      console.error(`Erro na fila ${queueName}:`, error);
+    });
+    
+    queue.on('failed', (job, error) => {
+      console.error(`Job falhou na fila ${queueName}:`, {
+        jobId: job.id,
+        type: job.data.type,
+        error: error.message
+      });
+    });
+    
+    queues.set(queueName, queue);
+  }
+  
+  return queues.get(queueName)!;
+}
+
+/**
+ * Registra um processador para um tipo específico de job
+ * @param queueName Nome da fila
+ * @param jobType Tipo de job
+ * @param processor Função processadora
+ * @param options Opções do processador
+ */
+export function registerProcessor<T extends BaseJobData>(
+  queueName: string,
+  jobType: string,
+  processor: (job: Job<T>) => Promise<any>,
+  options: ProcessorOptions = {}
+): void {
+  // Criar mapa de processadores para a fila se não existir
+  if (!processors.has(queueName)) {
+    processors.set(queueName, new Map());
+  }
+  
+  // Armazenar o processador
+  processors.get(queueName)!.set(jobType, processor);
+  
+  // Conectar imediatamente se a fila já existir
+  if (queues.has(queueName)) {
+    const queue = queues.get(queueName)!;
+    
+    queue.process(
+      jobType,
+      options.concurrency || 1,
+      async (job: Job<T>) => {
+        return await processor(job);
+      }
+    );
+  }
+}
+
+/**
+ * Conecta processadores registrados às filas
+ */
+function connectProcessors(): void {
+  for (const [queueName, jobProcessors] of processors.entries()) {
+    const queue = getQueue(queueName);
+    
+    for (const [jobType, processor] of jobProcessors.entries()) {
+      queue.process(jobType, 1, async (job) => {
+        return await processor(job);
+      });
+    }
+  }
+}
+
+/**
+ * Adiciona um job a uma fila
+ * @param queueName Nome da fila
+ * @param data Dados do job
+ * @param options Opções do job
+ * @returns ID do job criado
+ */
+export async function addJob<T extends BaseJobData>(
+  queueName: string,
+  data: T,
+  options: JobOptions = {}
+): Promise<string> {
+  try {
+    const queue = getQueue(queueName);
+    
+    // Definir prioridade baseada nos dados ou padrão
+    const priority = data.priority !== undefined ? data.priority : Priority.MEDIUM;
+    
+    // Definir opções padrão se não fornecidas
+    const jobOptions: JobOptions = {
+      priority,
+      ...options
+    };
+    
+    // Adicionar job à fila
+    const job = await queue.add(data.type, data, jobOptions);
+    
+    return job.id.toString();
+  } catch (error) {
+    console.error(`Erro ao adicionar job à fila ${queueName}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Monitora e gera métricas das filas
+ */
+function startQueueMonitoring(): void {
+  const INTERVAL = 60000; // 1 minuto
+  
+  setInterval(async () => {
+    try {
+      const metrics: any = {};
+      
+      for (const [queueName, queue] of queues.entries()) {
+        const counts = await Promise.all([
+          queue.getJobCounts(),
+          queue.getCompleted(0, 10),
+          queue.getFailed(0, 10)
+        ]);
+        
+        metrics[queueName] = {
+          counts: counts[0],
+          processingSpeed: calculateProcessingSpeed(counts[1]),
+          recentFailures: counts[2].length
+        };
+      }
+      
+      // Registrar métricas
+      console.debug('Métricas de filas:', metrics);
+      
+      // Alertar sobre filas muito longas ou muitas falhas
+      for (const [queueName, metric] of Object.entries(metrics)) {
+        const counts = (metric as any).counts;
+        
+        if (counts.waiting > 100 || counts.failed > 50) {
+          console.warn(`Alerta: Fila ${queueName} com muitos jobs pendentes/falhos:`, counts);
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao monitorar filas:', error);
+    }
+  }, INTERVAL);
+}
+
+/**
+ * Calcula velocidade de processamento baseado em jobs completados
+ * @param completedJobs Lista de jobs completados
+ * @returns Jobs por minuto
+ */
+function calculateProcessingSpeed(completedJobs: Job[]): number {
+  if (completedJobs.length < 2) return 0;
+  
+  try {
+    // Ordenar por timestamp de finalização
+    const sorted = [...completedJobs].sort((a, b) => {
+      return new Date(b.finishedOn || 0).getTime() - new Date(a.finishedOn || 0).getTime();
+    });
+    
+    // Pegar primeiro e último
+    const newest = sorted[0];
+    const oldest = sorted[sorted.length - 1];
+    
+    // Calcular diferença de tempo
+    const newestTime = new Date(newest.finishedOn || 0).getTime();
+    const oldestTime = new Date(oldest.finishedOn || 0).getTime();
+    
+    // Calcular jobs por minuto
+    const diffMinutes = (newestTime - oldestTime) / (1000 * 60);
+    if (diffMinutes <= 0) return 0;
+    
+    return sorted.length / diffMinutes;
+  } catch (error) {
+    console.error('Erro ao calcular velocidade de processamento:', error);
+    return 0;
+  }
+}
+
+/**
+ * Obtém estatísticas de todas as filas
+ * @returns Estatísticas das filas
+ */
+export async function getQueueStats(): Promise<any> {
+  const stats: any = {};
+  
+  for (const [queueName, queue] of queues.entries()) {
+    stats[queueName] = await queue.getJobCounts();
+  }
+  
+  return stats;
+}
+
+/**
+ * Limpa todos os jobs de uma fila
+ * @param queueName Nome da fila
+ */
+export async function clearQueue(queueName: string): Promise<void> {
+  const queue = getQueue(queueName);
+  await queue.empty();
+  console.log(`Fila ${queueName} esvaziada`);
+}
+
+/**
+ * Fecha todas as conexões de filas
+ */
+export async function shutdown(): Promise<void> {
+  try {
+    for (const queue of queues.values()) {
+      await queue.close();
+    }
+    
+    if (redisClient) {
+      redisClient.disconnect();
+    }
+    
+    console.log('Serviço de filas encerrado com sucesso');
+  } catch (error) {
+    console.error('Erro ao encerrar serviço de filas:', error);
+  }
+}
+
+/**
+ * Configura processadores para filas internas
+ */
+export function setupDefaultProcessors(): void {
+  // Processador para notificações
+  registerProcessor(
+    QueueType.NOTIFICATIONS,
+    'user-notification',
+    async (job: Job<{
+      userId: number;
+      notification: {
+        title: string;
+        message: string;
+        type: string;
+      }
+    }>) => {
+      const { userId, notification } = job.data;
+      await sendUserNotification(userId, notification);
+      return { success: true };
+    },
+    { concurrency: 5 }
+  );
+  
+  // Processador para analytics
+  registerProcessor(
+    QueueType.ANALYTICS,
+    'process-analytics',
+    async (job: Job<{
+      type: string;
+      schoolId?: number;
+      dateRange?: { start: string; end: string };
+    }>) => {
+      // Código para processar analytics
+      const result = { processed: true, timestamp: new Date() };
+      
+      // Simular processamento pesado
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      return result;
+    },
+    { concurrency: 1 }
+  );
+  
+  // Processador para exportação de dados
+  registerProcessor(
+    QueueType.DATA_EXPORT,
+    'generate-report',
+    async (job: Job<{
+      type: string;
+      reportType: string;
+      userId: number;
+      filters: any;
+    }>) => {
+      // Código para gerar relatório
+      const result = { 
+        reportUrl: `/reports/report_${Date.now()}.pdf`,
+        generatedAt: new Date()
+      };
+      
+      // Simular processamento pesado
+      await new Promise(resolve => setTimeout(resolve, 15000));
+      
+      return result;
+    },
+    { concurrency: 2 }
+  );
+  
+  console.log('Processadores padrão configurados');
+}
+
+export default {
+  initializeQueueService,
+  getQueue,
+  registerProcessor,
+  addJob,
+  getQueueStats,
+  clearQueue,
+  shutdown,
+  setupDefaultProcessors,
+  QueueType,
+  Priority
+};

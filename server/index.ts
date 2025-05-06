@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import path from 'path';
 import fs from 'fs';
+import compression from 'compression';
 
 // Importar serviços
 import { securityService } from './services/securityService';
@@ -12,9 +13,18 @@ import { paymentProcessor } from './services/paymentProcessor';
 import { advancedOcrService } from './services/advancedOcr';
 import { initializeMonitoring } from './routes.monitoring.init';
 
+// Importar serviços de otimização de performance
+import { cacheService } from './services/cacheService';
+import { setupQueryOptimizer, createPerformanceIndices } from './middleware/queryOptimizer';
+import { initializeQueueService, setupDefaultProcessors } from './services/queueService';
+import cdnService from './services/cdnService';
+
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+
+// Aplicar compressão para reduzir tamanho das respostas
+app.use(compression());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 
 app.use((req, res, next) => {
   const start = Date.now();
