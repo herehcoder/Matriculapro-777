@@ -80,16 +80,27 @@ const WhatsAppConnection: React.FC<WhatsAppConnectionProps> = ({ schoolId }) => 
   } = useQuery({
     queryKey: ['/api/whatsapp/instance/school', schoolId],
     queryFn: async () => {
-      const response = await apiRequest('GET', `/api/whatsapp/instance/school/${schoolId}`);
-      if (!response.ok) {
-        const errorData = await response.json();
-        if (response.status === 404) {
-          return null;
+      try {
+        const response = await apiRequest('GET', `/api/whatsapp/instance/school/${schoolId}`);
+        if (!response.ok) {
+          // Para erro 404, retornamos null sem lançar erro
+          if (response.status === 404) {
+            console.log('Nenhuma instância WhatsApp configurada para esta escola');
+            return null;
+          }
+          
+          // Para outros erros, tentamos obter a mensagem do corpo
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || `Erro ao buscar instância: ${response.status}`);
         }
-        throw new Error(errorData.message || 'Erro ao buscar instância');
+        return await response.json();
+      } catch (error) {
+        console.error('Erro ao buscar instância WhatsApp:', error);
+        // Rethrow para que o React Query possa lidar com o erro
+        throw error;
       }
-      return await response.json();
     },
+    retry: false, // Não tentar novamente automaticamente
   });
 
   // Reset formulário quando a instância mudar
@@ -578,7 +589,8 @@ const WhatsAppConnection: React.FC<WhatsAppConnectionProps> = ({ schoolId }) => 
     );
   }
 
-  if (instanceError) {
+  // Só exibimos o erro se não for um erro 404 (instância não encontrada)
+  if (instanceError && !(instanceError as Error).message.includes('404')) {
     return (
       <Card>
         <CardHeader>
