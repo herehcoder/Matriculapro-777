@@ -17,7 +17,7 @@ import {
 import { eq, and, desc } from 'drizzle-orm';
 import { cacheService } from './cacheService';
 import { logAction } from './securityService';
-import { queueService } from './queueService';
+import queueService from './queueService';
 
 const CACHE_TTL = 60 * 5; // 5 minutos
 
@@ -314,7 +314,10 @@ class LegacySystemService {
         await this.processSyncJob(jobData);
       } else {
         // Adiciona à fila de sincronização
-        await queueService.add('legacySync', jobData, {
+        await queueService.addJob('legacySync', {
+          type: 'legacySync',
+          ...jobData
+        }, {
           attempts: 3,
           backoff: {
             type: 'exponential',

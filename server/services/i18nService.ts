@@ -21,7 +21,7 @@ import {
 import { eq, and, or, like, isNull } from 'drizzle-orm';
 import { cacheService } from './cacheService';
 import { logAction } from './securityService';
-import { queueService } from './queueService';
+import queueService from './queueService';
 import axios from 'axios';
 
 // Tempo de cache para traduções (30 minutos)
@@ -514,7 +514,8 @@ class I18nService {
       }).returning();
       
       // Adicionar job à fila de processamento
-      await queueService.add('i18nTranslation', {
+      await queueService.addJob('i18nTranslation', {
+        type: 'i18nTranslation',
         jobId: job.id,
         sourceLanguageId,
         targetLanguageId,

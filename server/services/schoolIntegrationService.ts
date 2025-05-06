@@ -19,7 +19,7 @@ import {
 import { eq, and, desc } from 'drizzle-orm';
 import { cacheService } from './cacheService';
 import { logAction } from './securityService';
-import { queueService } from './queueService';
+import queueService from './queueService';
 
 // Tempo de vida do cache (5 minutos)
 const CACHE_TTL = 60 * 5;
@@ -377,7 +377,8 @@ class SchoolIntegrationService {
       }).returning();
       
       // Enfileirar processamento do webhook
-      await queueService.add('processWebhook', {
+      await queueService.addJob('processWebhook', {
+        type: 'processWebhook',
         webhookId: webhook.id,
         systemId,
         event,
@@ -563,7 +564,8 @@ class SchoolIntegrationService {
         await this.executeSyncTask(task.id);
       } else {
         // Enfileirar para processamento assíncrono
-        await queueService.add('schoolSystemSync', {
+        await queueService.addJob('schoolSystemSync', {
+          type: 'schoolSystemSync',
           taskId: task.id
         }, {
           delay: options.scheduledFor 

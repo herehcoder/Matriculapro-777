@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { i18nService } from '../services/i18nService';
 import { requireAuth, requireAdmin, requireSchoolAdmin } from '../middleware/auth';
 import {
@@ -164,7 +164,7 @@ router.post('/translations', requireSchoolAdmin, async (req, res) => {
 });
 
 // Atualizar tradução
-router.put('/translations/:id', requireSchoolAdmin, async (req, res) => {
+router.put('/translations/:id', requireSchoolAdmin, async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     
@@ -175,10 +175,11 @@ router.put('/translations/:id', requireSchoolAdmin, async (req, res) => {
     // Validar parcialmente os dados (permitir atualização parcial)
     const validatedData = insertTranslationSchema.partial().parse(req.body);
     
-    // Usar ID do usuário autenticado (ou req.user.id)
-    const translation = await i18nService.updateTranslation(id, validatedData, req.user.id);
+    // Usar ID do usuário autenticado
+    const user = req.user as any;
+    const translation = await i18nService.updateTranslation(id, validatedData, user.id);
     return res.json(translation);
-  } catch (error) {
+  } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ message: 'Dados inválidos', errors: error.errors });
     }
@@ -190,24 +191,26 @@ router.put('/translations/:id', requireSchoolAdmin, async (req, res) => {
 // ----- Preferências de idioma do usuário -----
 
 // Obter preferência de idioma do usuário
-router.get('/user-preferences', async (req, res) => {
+router.get('/user-preferences', async (req: Request, res: Response) => {
   try {
-    const preference = await i18nService.getUserLanguagePreference(req.user.id);
+    const user = req.user as any;
+    const preference = await i18nService.getUserLanguagePreference(user.id);
     return res.json(preference || { languageId: null });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Erro ao obter preferência de idioma:', error);
     return res.status(500).json({ message: 'Erro ao obter preferência de idioma', error: error.message });
   }
 });
 
 // Definir preferência de idioma do usuário
-router.post('/user-preferences', async (req, res) => {
+router.post('/user-preferences', async (req: Request, res: Response) => {
   try {
-    const data = { ...req.body, userId: req.user.id };
+    const user = req.user as any;
+    const data = { ...req.body, userId: user.id };
     const validatedData = insertUserLanguagePreferenceSchema.parse(data);
     const preference = await i18nService.setUserLanguagePreference(validatedData);
     return res.json(preference);
-  } catch (error) {
+  } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ message: 'Dados inválidos', errors: error.errors });
     }

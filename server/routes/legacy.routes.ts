@@ -24,7 +24,7 @@ router.get('/school/:schoolId', requireSchoolAdmin, async (req, res) => {
     
     const systems = await legacySystemService.getLegacySystemsBySchool(schoolId);
     return res.json(systems);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Erro ao obter sistemas legados:', error);
     return res.status(500).json({ message: 'Erro ao obter sistemas legados', error: error.message });
   }

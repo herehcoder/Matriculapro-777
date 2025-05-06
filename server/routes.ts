@@ -20,6 +20,8 @@ import { registerWhatsappTemplateRoutes } from "./routes.whatsapp.templates";
 import { registerEvolutionApiRoutes } from "./routes.evolution";
 import { registerOcrRoutes } from "./routes.ocr";
 import { registerEnhancedPaymentRoutes } from "./routes.payment.enhanced";
+// Importar rotas de integrações adicionais
+import integrationRoutes from "./routes/index";
 // Importar rotas de monitoramento
 import { registerMonitoringRoutes } from "./routes.monitoring";
 import { z } from "zod";
@@ -174,6 +176,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerEvolutionApiRoutes(app, isAuthenticated);
   registerOcrRoutes(app, isAuthenticated);
   registerEnhancedPaymentRoutes(app, isAuthenticated);
+  
+  // Registrar rotas de integrações adicionais
+  app.use(integrationRoutes);
   
   // Registrar rotas de monitoramento
   app.use('/api/monitoring', isAuthenticated, hasRole(["admin"]), registerMonitoringRoutes());
