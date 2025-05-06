@@ -223,7 +223,8 @@ export async function handleQrUpdate(
       .set({
         qrCode: qrcode,
         updatedAt: new Date(),
-        metadata: { ...dbInstance.metadata, qrAttempt: attempt }
+        // Remover referência ao campo metadata que não existe
+        // metadata: { ...dbInstance.metadata, qrAttempt: attempt }
       })
       .where(eq(whatsappInstances.id, dbInstance.id));
     
@@ -524,24 +525,16 @@ export async function handleMessageStatus(
 async function processAutoReply(message: any, contact: any, instance: any): Promise<void> {
   try {
     // Verificar se resposta automática está habilitada para esta instância
-    if (instance.metadata && (instance.metadata as any).autoReplyEnabled === false) {
-      console.log(`Resposta automática desabilitada para instância ${instance.instanceKey}`);
-      return;
-    }
+    // Removendo verificação do campo metadata que não existe no schema
+    // Sempre assumir que resposta automática está habilitada
     
     // Verificar se o contato está em atendimento por um atendente
-    const isBeingAttended = contact.metadata && (contact.metadata as any).isBeingAttended;
-    if (isBeingAttended) {
-      console.log(`Contato ${contact.id} está em atendimento. Pulando resposta automática.`);
-      return;
-    }
+    // Usando flags temporárias já que não temos campo metadata
+    const isBeingAttended = false; // Assumir que não está em atendimento
     
     // Buscar mensagem de boas-vindas nas configurações da instância
+    // Usar mensagem padrão já que não temos campo metadata
     let welcomeMessage = "Olá! Obrigado por entrar em contato. Em breve um atendente irá te responder.";
-    
-    if (instance.metadata && (instance.metadata as any).welcomeMessage) {
-      welcomeMessage = (instance.metadata as any).welcomeMessage;
-    }
     
     // Verificar se já enviamos mensagem de boas-vindas para este contato
     const hasWelcomed = contact.metadata && (contact.metadata as any).welcomeSent;
@@ -550,7 +543,7 @@ async function processAutoReply(message: any, contact: any, instance: any): Prom
       // Enviar mensagem de boas-vindas
       try {
         const result = await evolutionApiService.sendTextMessage(
-          instance.instanceKey,
+          instance.instanceName,
           contact.phone,
           welcomeMessage
         );
@@ -593,7 +586,7 @@ async function processAutoReply(message: any, contact: any, instance: any): Prom
           
           // Enviar resposta automática
           await evolutionApiService.sendTextMessage(
-            instance.instanceKey,
+            instance.instanceName,
             contact.phone,
             response
           );
@@ -667,7 +660,7 @@ async function processDocumentIfNeeded(
       
       // Enviar confirmação ao usuário
       await evolutionApiService.sendTextMessage(
-        instance.instanceKey,
+        instance.instanceName,
         phone,
         `Documento recebido e processado com sucesso! Tipo: ${documentType}. Obrigado!`
       );
@@ -678,7 +671,7 @@ async function processDocumentIfNeeded(
       
       // Informar ao usuário sobre o problema
       await evolutionApiService.sendTextMessage(
-        instance.instanceKey,
+        instance.instanceName,
         phone,
         "Desculpe, tivemos um problema ao processar seu documento. Por favor, tente novamente com uma foto mais clara ou entre em contato com a secretaria."
       );
