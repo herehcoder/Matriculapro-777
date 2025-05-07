@@ -57,13 +57,33 @@ export default function PaymentGatewayList() {
   const [selectedGateway, setSelectedGateway] = useState<PaymentGatewaySettings | null>(null);
 
   // Buscar gateways de pagamento
-  const { data: gateways, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['/api/admin/payment/gateways'],
     queryFn: async () => {
       const response = await apiRequest('GET', '/api/admin/payment/gateways');
-      return await response.json() as PaymentGatewaySettings[];
+      const responseData = await response.json();
+      // Garantir que temos um array, mesmo se a API retornar um objeto ou estrutura diferente
+      if (Array.isArray(responseData)) {
+        return responseData as PaymentGatewaySettings[];
+      } else if (responseData && typeof responseData === 'object') {
+        // Se a API retornar um objeto com uma propriedade que contém a lista (comom data, results, etc.)
+        if (responseData.data && Array.isArray(responseData.data)) {
+          return responseData.data as PaymentGatewaySettings[];
+        } else if (responseData.results && Array.isArray(responseData.results)) {
+          return responseData.results as PaymentGatewaySettings[];
+        } else if (responseData.items && Array.isArray(responseData.items)) {
+          return responseData.items as PaymentGatewaySettings[];
+        }
+        // Se for um objeto mas sem arrays conhecidos, converter para array se possível
+        return [] as PaymentGatewaySettings[];
+      }
+      // Fallback para array vazio
+      return [] as PaymentGatewaySettings[];
     }
   });
+  
+  // Garantir que sempre temos um array para trabalhar
+  const gateways = Array.isArray(data) ? data : [];
 
   // Mutação para ativar/desativar gateway
   const toggleActiveMutation = useMutation({
