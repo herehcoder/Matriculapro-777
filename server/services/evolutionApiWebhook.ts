@@ -229,7 +229,7 @@ class EvolutionApiWebhookService {
         });
         
         // Salvar resposta do chatbot como mensagem de saída
-        await this.saveMessage({
+        const savedMessage = await this.saveMessage({
           instanceId,
           contactId,
           content: response,
@@ -243,10 +243,10 @@ class EvolutionApiWebhookService {
           }
         });
         
-        // Aqui chamaríamos a API para enviar a mensagem
-        // await this.sendWhatsAppMessage(instanceId, contactId, response);
+        // Enviar a mensagem via Evolution API
+        await this.sendWhatsAppMessage(instanceId, contactId, response, savedMessage.id);
         
-        console.log(`Resposta automática gerada para mensagem ${message.id}`);
+        console.log(`Resposta automática gerada e enviada para mensagem ${message.id}`);
       }
     } catch (error) {
       console.error('Erro ao processar mensagem de texto:', error);
@@ -307,8 +307,24 @@ class EvolutionApiWebhookService {
             { tipo: content.type === 'image' ? 'imagem' : 'documento' }
           );
           
-          // Aqui chamaríamos a API para enviar a mensagem de confirmação
-          // await this.sendWhatsAppMessage(instanceId, contactId, responseText);
+          // Enviar mensagem de confirmação
+          const responseMessage = await this.saveMessage({
+            instanceId,
+            contactId,
+            content: responseText,
+            direction: 'outbound',
+            status: 'pending',
+            externalId: `response_${message.id}`,
+            metadata: {
+              messageType: 'text',
+              autoResponse: true,
+              processingConfirmation: true,
+              relatedToMessage: message.id
+            }
+          });
+          
+          // Enviar a mensagem via Evolution API
+          await this.sendWhatsAppMessage(instanceId, contactId, responseText, responseMessage.id);
           
           // Download da mídia e processamento OCR
           try {
@@ -624,6 +640,75 @@ class EvolutionApiWebhookService {
     };
     
     return documentNames[docType] || 'Documento';
+  }
+  
+  /**
+   * Envia uma mensagem via WhatsApp
+   * @param instanceId ID da instância WhatsApp
+   * @param contactId ID do contato
+   * @param message Conteúdo da mensagem
+   * @param messageId ID da mensagem no banco de dados (opcional)
+   * @returns Resultado do envio
+   */
+  private async sendWhatsAppMessage(
+    instanceId: number,
+    contactId: number,
+    message: string,
+    messageId?: number
+  ): Promise<any> {
+    try {
+      // Obter a instância e o contato
+      const instance = await this.getInstance(instanceId);
+      const contact = await this.getContact(contactId);
+      
+      if (!instance || !contact) {
+        throw new Error(`Instância ou contato não encontrado: instanceId=${instanceId}, contactId=${contactId}`);
+      }
+      
+      // Importar o serviço EvolutionApi
+      const evolutionApiService = await import('../services/evolutionApi').then(m => m.default);
+      
+      if (!evolutionApiService) {
+        throw new Error('Serviço Evolution API não disponível');
+      }
+      
+      // Enviar a mensagem
+      const result = await evolutionApiService.sendTextMessage(
+        instance.instanceName,
+        contact.phone,
+        message
+      );
+      
+      // Se a mensagem foi enviada com sucesso e temos o ID da mensagem no banco
+      if (result && result.key && result.key.id && messageId) {
+        // Atualizar status e ID externo da mensagem
+        await db.update(whatsappMessages)
+          .set({
+            status: 'sent',
+            externalId: result.key.id,
+            sentAt: new Date()
+          })
+          .where(eq(whatsappMessages.id, messageId));
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('Erro ao enviar mensagem WhatsApp:', error);
+      
+      // Se temos o ID da mensagem, atualizar o status para erro
+      if (messageId) {
+        await db.update(whatsappMessages)
+          .set({
+            status: 'error',
+            metadata: {
+              error: error instanceof Error ? error.message : 'Erro desconhecido'
+            }
+          })
+          .where(eq(whatsappMessages.id, messageId));
+      }
+      
+      throw error;
+    }
   }
   
   /**
@@ -1244,6 +1329,76 @@ class EvolutionApiWebhookService {
       // Determinar mensagem baseada no tipo de documento e status
       let message = 'Recebemos seu documento! ';
       
+      // Adicionar informação sobre o tipo de documento
+      if (documentType) {
+        const docName = this.getDocumentTypeName(documentType);
+        message += `\n\nTipo de documento: ${docName}`;
+      }
+      
+      // Adicionar confirmação de validação
+      if (status === 'valid') {
+        message += '\n\n✅ Documento validado com sucesso! Ele foi anexado ao seu processo de matrícula.';
+      } else if (status === 'pending') {
+        message += '\n\n⌛ Documento recebido e aguardando validação pela nossa equipe.';
+      } else if (status === 'invalid') {
+        message += '\n\n⚠️ Documento apresenta problemas. Um atendente entrará em contato para orientá-lo.';
+      }
+      
+      // Adicionar os dados extraídos do documento se disponível
+      if (processingResult.extractedData && Object.keys(processingResult.extractedData).length > 0) {
+        message += '\n\nDados identificados:';
+        
+        // Mapear nomes amigáveis para os campos
+        const fieldLabels: Record<string, string> = {
+          name: 'Nome',
+          fullName: 'Nome completo',
+          birthDate: 'Data de nascimento',
+          documentNumber: 'Número do documento',
+          cpf: 'CPF',
+          rg: 'RG',
+          address: 'Endereço',
+          city: 'Cidade',
+          state: 'Estado',
+          zipCode: 'CEP',
+          issueDate: 'Data de emissão',
+          school: 'Escola',
+          grade: 'Série/Ano'
+        };
+        
+        // Incluir os principais dados extraídos (limitar a 5 campos para não ficar muito longo)
+        let fieldsAdded = 0;
+        for (const [field, value] of Object.entries(processingResult.extractedData)) {
+          if (fieldsAdded >= 5) break;
+          
+          const label = fieldLabels[field] || field;
+          if (value && String(value).trim()) {
+            message += `\n- ${label}: ${value}`;
+            fieldsAdded++;
+          }
+        }
+      }
+      
+      // Adicionar instruções para o próximo passo
+      message += '\n\nCaso haja algum problema ou dúvida, nossa equipe entrará em contato.';
+      
+      // Registrar e enviar a mensagem
+      const savedMessage = await this.saveMessage({
+        instanceId,
+        contactId,
+        content: message,
+        direction: 'outbound',
+        status: 'pending',
+        metadata: {
+          messageType: 'text',
+          documentConfirmation: true,
+          documentType,
+          documentStatus: status
+        }
+      });
+      
+      // Enviar a mensagem via Evolution API
+      await this.sendWhatsAppMessage(instanceId, contactId, message, savedMessage.id);
+      
       // Adicionar detalhes pelo tipo
       switch (documentType) {
         case 'rg':
@@ -1319,7 +1474,7 @@ class EvolutionApiWebhookService {
       const message = `${errorMessage} Por favor, tente enviar uma nova imagem com boa iluminação e foco.`;
       
       // Salvar e enviar a mensagem
-      await this.saveMessage({
+      const savedMessage = await this.saveMessage({
         instanceId,
         contactId,
         content: message,
@@ -1333,8 +1488,8 @@ class EvolutionApiWebhookService {
         }
       });
       
-      // Aqui chamaríamos a API para enviar a mensagem
-      // Em produção: await evolutionApiService.sendTextMessage(instanceKey, phoneNumber, message);
+      // Enviar a mensagem via Evolution API
+      await this.sendWhatsAppMessage(instanceId, contactId, message, savedMessage.id);
     } catch (error) {
       console.error('Erro ao enviar mensagem de falha no processamento:', error);
     }
