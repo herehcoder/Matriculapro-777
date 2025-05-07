@@ -56,7 +56,7 @@ export class MercadoPagoProcessor {
         this.client.configurations.sandbox = true;
       }
       
-      console.log('Processador Mercado Pago configurado com sucesso');
+      console.log(`Processador Mercado Pago configurado com sucesso [Modo ${this.config.sandboxMode ? 'TESTE (SANDBOX)' : 'PRODUÇÃO'}]`);
       this.isConfigured = true;
       return true;
     } catch (error) {

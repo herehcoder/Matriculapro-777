@@ -50,7 +50,7 @@ export class AsaasProcessor {
         sandbox: this.config.sandboxMode
       });
       
-      console.log('Processador Asaas configurado com sucesso');
+      console.log(`Processador Asaas configurado com sucesso [Modo ${this.config.sandboxMode ? 'TESTE (SANDBOX)' : 'PRODUÇÃO'}]`);
       this.isConfigured = true;
       return true;
     } catch (error) {
