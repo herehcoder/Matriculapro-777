@@ -68,9 +68,12 @@ export default function Register() {
     queryKey: ["/api/schools"],
     queryFn: async () => {
       try {
+        console.log("Buscando escolas para o formulário de registro");
         const response = await fetch("/api/schools");
         if (!response.ok) throw new Error("Falha ao buscar escolas");
-        return await response.json();
+        const data = await response.json();
+        console.log("Escolas retornadas:", data);
+        return data;
       } catch (error) {
         console.error("Erro ao buscar escolas:", error);
         return [];
