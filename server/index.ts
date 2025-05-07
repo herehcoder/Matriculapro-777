@@ -4,6 +4,7 @@ import { setupVite, serveStatic, log } from "./vite";
 import path from 'path';
 import fs from 'fs';
 import compression from 'compression';
+import * as zlib from 'zlib';
 
 // Importar serviços
 import { securityService } from './services/securityService';
@@ -21,8 +22,22 @@ import cdnService from './services/cdnService';
 
 const app = express();
 
-// Aplicar compressão para reduzir tamanho das respostas
-app.use(compression());
+// Aplicar compressão avançada para reduzir tamanho das respostas
+app.use(compression({
+  // Comprimir todas as respostas acima de 1kb
+  threshold: 1024,
+  // Nível de compressão (0-9), onde 9 é máxima compressão/mais CPU 
+  level: 6,
+  // Não comprimir para navegadores antigos que não suportam
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) {
+      return false;
+    }
+    return compression.filter(req, res);
+  },
+  // Comprimir imediatamente, sem pausa para o primeiro chunk
+  flush: zlib.constants.Z_SYNC_FLUSH
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 

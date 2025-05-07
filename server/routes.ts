@@ -32,6 +32,7 @@ import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
 import { db } from "./db";
 import { and, desc, eq, gte, lt, lte, sql } from "drizzle-orm";
+import { cacheService } from "./services/cacheService";
 import {
   insertUserSchema,
   insertSchoolSchema,
@@ -254,29 +255,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // User routes
+  // User routes - otimizado com cache
   app.get("/api/users", isAuthenticated, hasRole(["admin"]), async (req, res) => {
-    const users = await storage.listUsers();
-    res.json(users);
+    try {
+      // Usar cache para otimizar consulta frequente
+      const users = await cacheService.getOrSet(
+        'users:list', 
+        async () => {
+          console.log('Cache miss: carregando lista de usuários do banco');
+          return await storage.listUsers();
+        },
+        { ttl: 300 } // Cache por 5 minutos
+      );
+      
+      res.json(users || []);
+    } catch (error) {
+      console.error('Erro ao listar usuários:', error);
+      res.status(500).json({ message: 'Erro ao listar usuários' });
+    }
   });
 
   app.get("/api/users/:id", isAuthenticated, async (req, res) => {
-    const userId = parseInt(req.params.id);
-    const user = await storage.getUser(userId);
+    try {
+      const userId = parseInt(req.params.id);
+      
+      // Usar cache para perfil de usuário
+      const user = await cacheService.getOrSet(
+        `users:${userId}`,
+        async () => {
+          console.log(`Cache miss: carregando usuário ${userId} do banco`);
+          return await storage.getUser(userId);
+        },
+        { ttl: 300 } // Cache por 5 minutos
+      );
     
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      // Only allow users to access their own profile, unless they're an admin
+      const currentUser = req.user as any;
+      if (currentUser.id !== userId && currentUser.role !== "admin") {
+        return res.status(403).json({ message: "Forbidden - You can only access your own profile" });
+      }
+      
+      // Don't return the password
+      const { password, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      console.error(`Erro ao obter usuário ${req.params.id}:`, error);
+      res.status(500).json({ message: "Erro ao obter dados do usuário" });
     }
-    
-    // Only allow users to access their own profile, unless they're an admin
-    const currentUser = req.user as any;
-    if (currentUser.id !== userId && currentUser.role !== "admin") {
-      return res.status(403).json({ message: "Forbidden - You can only access your own profile" });
-    }
-    
-    // Don't return the password
-    const { password, ...userWithoutPassword } = user;
-    res.json(userWithoutPassword);
   });
   
   app.put("/api/users/:id", isAuthenticated, async (req, res, next) => {
@@ -305,6 +334,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       delete updateData.password;
       
       const updatedUser = await storage.updateUser(userId, updateData);
+      
+      // Invalidar cache do usuário após atualização
+      await cacheService.del(`users:${userId}`);
       
       // Don't return the password
       const { password, ...userWithoutPassword } = updatedUser!;

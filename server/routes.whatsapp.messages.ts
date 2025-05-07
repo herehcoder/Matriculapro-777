@@ -143,15 +143,27 @@ export function registerWhatsappMessageRoutes(app: Express, isAuthenticated: any
         }
       }
       
-      // Construir query base para contagem
+      // Otimização: Construir query base para contagem com menos joins
       const countQuery = db.select({ count: db.func.count() })
-        .from(whatsappMessages)
-        .innerJoin(whatsappContacts, eq(whatsappMessages.contactId, whatsappContacts.id))
-        .innerJoin(whatsappInstances, eq(whatsappMessages.instanceId, whatsappInstances.id));
+        .from(whatsappMessages);
       
-      // Construir query base para dados
+      // Construir query base para dados com select otimizado
       const dataQuery = db.select({
-        message: whatsappMessages,
+        message: {
+          id: whatsappMessages.id,
+          content: whatsappMessages.content,
+          direction: whatsappMessages.direction,
+          status: whatsappMessages.status,
+          externalId: whatsappMessages.externalId,
+          metadata: whatsappMessages.metadata,
+          sentAt: whatsappMessages.sentAt,
+          deliveredAt: whatsappMessages.deliveredAt,
+          readAt: whatsappMessages.readAt,
+          createdAt: whatsappMessages.createdAt,
+          updatedAt: whatsappMessages.updatedAt,
+          instanceId: whatsappMessages.instanceId,
+          contactId: whatsappMessages.contactId,
+        },
         contact: {
           id: whatsappContacts.id,
           phone: whatsappContacts.phone,
