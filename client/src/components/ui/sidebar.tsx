@@ -17,6 +17,7 @@ import {
   LineChart,
   PlusCircle,
   BookOpen,
+  CreditCard,
 } from "lucide-react";
 
 interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -53,6 +54,12 @@ export function Sidebar({ className, isOpen, onClose, ...props }: SidebarProps) 
                 href="/schools"
                 icon={<School size={18} />}
                 label="Escolas"
+                onClick={onClose}
+              />
+              <SidebarItem
+                href="/admin/payment-settings"
+                icon={<CreditCard size={18} />}
+                label="Configurações de Pagamento"
                 onClick={onClose}
               />
             </>

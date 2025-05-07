@@ -258,7 +258,7 @@ export default function PaymentGatewayForm({ gateway, onSave }: PaymentGatewayFo
     const processedData = { ...data };
     
     // Processar campos de configuração
-    if (gatewayTypes && selectedGatewayType) {
+    if (gatewayTypes && Array.isArray(gatewayTypes) && selectedGatewayType) {
       const gatewayType = gatewayTypes.find(g => g.id === selectedGatewayType);
       
       if (gatewayType) {
@@ -291,7 +291,7 @@ export default function PaymentGatewayForm({ gateway, onSave }: PaymentGatewayFo
 
   // Renderização de campos específicos com base no tipo de gateway
   const renderGatewaySpecificFields = () => {
-    if (!gatewayTypes || !selectedGatewayType) return null;
+    if (!gatewayTypes || !Array.isArray(gatewayTypes) || !selectedGatewayType) return null;
     
     const gatewayType = gatewayTypes.find(g => g.id === selectedGatewayType);
     if (!gatewayType) return null;
@@ -379,7 +379,7 @@ export default function PaymentGatewayForm({ gateway, onSave }: PaymentGatewayFo
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {gatewayTypes?.map((type) => (
+                        {Array.isArray(gatewayTypes) && gatewayTypes.map((type) => (
                           <SelectItem key={type.id} value={type.id}>
                             {type.name}
                           </SelectItem>
