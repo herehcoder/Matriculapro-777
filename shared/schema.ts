@@ -12,6 +12,53 @@ import { sql } from 'drizzle-orm';
 // Re-export das entidades de configurações de usuário
 export * from './schema.user-settings';
 
+// Tabela de cursos
+export const courses = pgTable('courses', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
+  schoolId: integer('school_id').notNull(),
+  category: text('category'),
+  duration: text('duration'),
+  price: text('price'),
+  schedule: text('schedule'),
+  startDate: timestamp('start_date'),
+  endDate: timestamp('end_date'),
+  maxStudents: integer('max_students'),
+  status: text('status', { 
+    enum: ['active', 'inactive', 'draft', 'finished'] 
+  }).default('active'),
+  instructorId: integer('instructor_id'),
+  thumbnail: text('thumbnail'),
+  syllabus: jsonb('syllabus'),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Schema Zod para cursos
+export const courseSchema = createInsertSchema(courses, {
+  name: z.string().min(1, 'Nome do curso é obrigatório'),
+  description: z.string().optional(),
+  schoolId: z.number(),
+  category: z.string().optional(),
+  duration: z.string().optional(),
+  price: z.string().optional(),
+  schedule: z.string().optional(),
+  startDate: z.date().optional(),
+  endDate: z.date().optional(),
+  maxStudents: z.number().optional(),
+  status: z.enum(['active', 'inactive', 'draft', 'finished']).optional(),
+  instructorId: z.number().optional(),
+  thumbnail: z.string().optional(),
+  syllabus: z.any().optional(),
+  metadata: z.any().optional(),
+}).omit({ id: true, createdAt: true, updatedAt: true });
+
+// Tipos TypeScript para cursos
+export type Course = typeof courses.$inferSelect;
+export type InsertCourse = z.infer<typeof courseSchema>;
+
 // Tabela de notificações
 export const notifications = pgTable('notifications', {
   id: serial('id').primaryKey(),

@@ -1,8 +1,8 @@
 import {
-  users, schools, enrollments, 
+  users, schools, enrollments, courses,
   notifications, messages, userSettings,
   type User, type InsertUser, type School, type InsertSchool,
-  type Enrollment, type InsertEnrollment, 
+  type Enrollment, type InsertEnrollment, type Course, type InsertCourse,
   type Notification, type InsertNotification, type Message, type InsertMessage, 
   type UserSettings, type InsertUserSettings
 } from "@shared/schema";
