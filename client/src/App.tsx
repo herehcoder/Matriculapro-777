@@ -33,6 +33,7 @@ import WhatsAppPage from "@/pages/whatsapp/index";
 import SchoolWhatsAppPage from "@/pages/school/whatsapp";
 import WhatsAppConfigPage from "@/pages/admin/whatsapp-config";
 import MonitoringDashboardPage from "@/pages/admin/monitoring-dashboard";
+import PaymentSettingsPage from "@/pages/admin/PaymentSettingsPage";
 import AnalyticsPage from "@/pages/analytics/index";
 import ConversionMetricsPage from "@/pages/analytics/conversion-metrics";
 import DemandForecastPage from "@/pages/analytics/demand-forecast";
@@ -133,6 +134,7 @@ function AppRoutes() {
         <Route path="/whatsapp" component={WhatsAppPage} />
         <Route path="/admin/whatsapp-config" component={WhatsAppConfigPage} />
         <Route path="/admin/monitoring" component={MonitoringDashboardPage} />
+        <Route path="/admin/payment-settings" component={PaymentSettingsPage} />
         <Route path="/analytics" component={AnalyticsPage} />
         <Route path="/analytics/conversion-metrics" component={ConversionMetricsPage} />
         <Route path="/analytics/demand-forecast" component={DemandForecastPage} />

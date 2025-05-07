@@ -12,6 +12,7 @@ import {
 } from './models/paymentGatewaySettings';
 import { enhancedPaymentProcessor } from './services/paymentProcessor.enhanced';
 import { logAction } from './services/securityService';
+import { db } from './db';
 
 /**
  * Registra as rotas administrativas para gerenciamento de gateways de pagamento

@@ -184,6 +184,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerEvolutionApiRoutes(app, isAuthenticated);
   registerOcrRoutes(app, isAuthenticated);
   registerEnhancedPaymentRoutes(app, isAuthenticated);
+  registerAdminPaymentRoutes(app, isAuthenticated);
   
   // Registrar rotas de analytics e business intelligence
   registerAnalyticsRoutes(app, isAuthenticated);

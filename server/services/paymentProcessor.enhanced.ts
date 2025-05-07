@@ -11,9 +11,35 @@ import { MercadoPagoProcessor } from './paymentGateways/mercadoPagoProcessor';
 import { AsaasProcessor } from './paymentGateways/asaasProcessor';
 import { createPaymentGatewaySettingsTable, getDefaultPaymentGatewaySetting } from '../models/paymentGatewaySettings';
 
-// Re-exportando tipos do processador original
-export { PaymentStatus, PaymentMethod, PaymentGateway, BillingOptions } from './paymentProcessor';
-import { PaymentStatus, PaymentMethod, PaymentGateway, BillingOptions } from './paymentProcessor';
+// Importando apenas o tipo BillingOptions do processador original
+import type { BillingOptions } from './paymentProcessor';
+
+// Definindo os tipos localmente em vez de importá-los
+export type PaymentStatus = 
+  'pending' | 
+  'processing' |
+  'paid' |
+  'canceled' | 
+  'refunded' | 
+  'failed' |
+  'expired' |
+  'partial';
+
+export type PaymentMethod = 
+  'credit_card' | 
+  'bank_slip' | 
+  'pix' | 
+  'bank_transfer' | 
+  'cash' | 
+  'other';
+
+export type PaymentGateway = 
+  'stripe' | 
+  'mercadopago' |
+  'asaas' | 
+  'gerencianet' | 
+  'internal' | 
+  'manual';
 
 // Opções para criação de pagamento
 export interface PaymentOptions {
