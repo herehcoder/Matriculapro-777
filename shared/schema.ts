@@ -227,3 +227,40 @@ export const documentSchema = createInsertSchema(documents, {
 // Tipos TypeScript
 export type Document = typeof documents.$inferSelect;
 export type InsertDocument = z.infer<typeof documentSchema>;
+
+// Tabela de leads (potenciais alunos/interessados)
+export const leads = pgTable('leads', {
+  id: serial('id').primaryKey(),
+  fullName: text('full_name').notNull(),
+  email: text('email'),
+  phone: text('phone'),
+  schoolId: integer('school_id').notNull(),
+  courseId: integer('course_id'),
+  source: text('source'), // origem: site, whatsapp, indicação, etc.
+  status: text('status', {
+    enum: ['new', 'contacted', 'interested', 'converted', 'lost']
+  }).default('new'),
+  notes: text('notes'),
+  assignedTo: integer('assigned_to'),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Schema Zod para leads
+export const leadSchema = createInsertSchema(leads, {
+  fullName: z.string().min(1, 'Nome é obrigatório'),
+  email: z.string().email('Email inválido').optional(),
+  phone: z.string().optional(),
+  schoolId: z.number(),
+  courseId: z.number().optional(),
+  source: z.string().optional(),
+  status: z.enum(['new', 'contacted', 'interested', 'converted', 'lost']).optional(),
+  notes: z.string().optional(),
+  assignedTo: z.number().optional(),
+  metadata: z.any().optional(),
+}).omit({ id: true, createdAt: true, updatedAt: true });
+
+// Tipos TypeScript
+export type Lead = typeof leads.$inferSelect;
+export type InsertLead = z.infer<typeof leadSchema>;
