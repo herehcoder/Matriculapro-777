@@ -85,13 +85,68 @@ export default function PaymentGatewayForm({ gateway, onSave }: PaymentGatewayFo
   const [selectedGatewayType, setSelectedGatewayType] = useState<string | null>(null);
 
   // Buscar tipos de gateways disponíveis
-  const { data: gatewayTypes, isLoading: isLoadingTypes } = useQuery({
+  const { data, isLoading: isLoadingTypes } = useQuery({
     queryKey: ['/api/admin/payment/gateways/types'],
     queryFn: async () => {
-      const response = await apiRequest('GET', '/api/admin/payment/gateways/types');
-      return await response.json() as GatewayType[];
+      try {
+        const response = await apiRequest('GET', '/api/admin/payment/gateways/types');
+        const responseData = await response.json();
+        
+        // Garantir que temos um array, mesmo se a API retornar um objeto ou estrutura diferente
+        if (Array.isArray(responseData)) {
+          return responseData as GatewayType[];
+        } else if (responseData && typeof responseData === 'object') {
+          // Se a API retornar um objeto com uma propriedade que contém a lista (comom data, results, etc.)
+          if (responseData.data && Array.isArray(responseData.data)) {
+            return responseData.data as GatewayType[];
+          } else if (responseData.results && Array.isArray(responseData.results)) {
+            return responseData.results as GatewayType[];
+          } else if (responseData.items && Array.isArray(responseData.items)) {
+            return responseData.items as GatewayType[];
+          } else if (responseData.gatewayTypes && Array.isArray(responseData.gatewayTypes)) {
+            return responseData.gatewayTypes as GatewayType[];
+          }
+          // Se for um objeto mas sem arrays conhecidos, criar array hardcoded
+          console.warn('Resposta inesperada da API de tipos de gateway:', responseData);
+        }
+        
+        // Fallback para array de gateway hardcoded
+        return [
+          {
+            id: 'mercadopago',
+            name: 'Mercado Pago',
+            logo: '/assets/logos/mercadopago.svg',
+            fields: [
+              { name: 'apiKey', label: 'Access Token', type: 'password', required: true, description: 'Access Token do Mercado Pago' },
+              { name: 'apiSecret', label: 'Public Key', type: 'password', required: false, description: 'Public Key do Mercado Pago' }
+            ]
+          },
+          {
+            id: 'asaas',
+            name: 'Asaas',
+            logo: '/assets/logos/asaas.svg',
+            fields: [
+              { name: 'apiKey', label: 'API Key', type: 'password', required: true, description: 'Chave de API do Asaas' }
+            ]
+          },
+          {
+            id: 'internal',
+            name: 'Sistema Interno',
+            logo: '/assets/logos/internal.svg',
+            fields: [
+              { name: 'apiKey', label: 'Chave Interna', type: 'text', required: true, description: 'Identificador interno para pagamentos manuais' }
+            ]
+          }
+        ] as GatewayType[];
+      } catch (error) {
+        console.error('Erro ao buscar tipos de gateway:', error);
+        return [];
+      }
     }
   });
+  
+  // Garantir que sempre temos um array para trabalhar
+  const gatewayTypes = Array.isArray(data) ? data : [];
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
