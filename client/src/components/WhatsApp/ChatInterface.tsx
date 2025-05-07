@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Send, Image, Paperclip, Search, Loader2, Phone, User } from 'lucide-react';
+import LazyImage from '@/components/LazyImage';
 
 // Tipos para os dados
 interface Contact {
@@ -263,10 +264,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ instanceId }) => {
                 >
                   {message.mediaUrl && message.mediaType === 'image' && (
                     <div className="mb-2">
-                      <img 
+                      <LazyImage 
                         src={message.mediaUrl} 
                         alt="Imagem" 
                         className="rounded-md max-w-full max-h-64 object-contain"
+                        threshold={0.05} // Baixo threshold para carregar rapidamente em chats
                       />
                     </div>
                   )}

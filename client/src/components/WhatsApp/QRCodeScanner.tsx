@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from "@/components/ui/button";
 import { Loader2, QrCode, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { apiRequest } from '@/lib/queryClient';
+import LazyImage from '@/components/LazyImage';
 
 interface QRCodeScannerProps {
   instanceId: number;
@@ -159,10 +160,13 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ instanceId, onStatusChang
             {qrCode ? (
               <>
                 <div className="qrcode-container p-3 bg-white rounded-lg shadow-md">
-                  <img 
+                  <LazyImage 
                     src={`data:image/png;base64,${qrCode}`} 
                     alt="QR Code para autenticar WhatsApp" 
                     className="w-64 h-64"
+                    width={256}
+                    height={256}
+                    threshold={0.01} // Carregar o QR code quase imediatamente já que é crítico
                   />
                 </div>
                 <p className="mt-4 text-center text-sm text-muted-foreground">
