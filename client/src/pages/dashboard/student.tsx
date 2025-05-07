@@ -239,8 +239,13 @@ export default function StudentDashboard() {
   const { data: documentsData, isLoading: isLoadingDocuments } = useQuery({
     queryKey: ["/api/documents/student"],
     queryFn: async () => {
-      const res = await apiRequest("GET", "/api/documents/student");
-      return await res.json();
+      try {
+        const res = await apiRequest("GET", "/api/documents/student");
+        return await res.json();
+      } catch (error) {
+        console.error("Erro ao carregar documentos:", error);
+        return [];
+      }
     },
   });
 
@@ -248,29 +253,40 @@ export default function StudentDashboard() {
   const { data: announcementsData, isLoading: isLoadingAnnouncements } = useQuery({
     queryKey: ["/api/announcements/student"],
     queryFn: async () => {
-      const res = await apiRequest("GET", "/api/announcements/student");
-      return await res.json();
+      try {
+        const res = await apiRequest("GET", "/api/announcements/student");
+        return await res.json();
+      } catch (error) {
+        console.error("Erro ao carregar avisos:", error);
+        return [];
+      }
     },
   });
 
   // Processar dados para o dashboard
-  const activeEnrollments = enrollmentsData?.filter((e: any) => 
-    e.status === "in_progress" || e.status === "pending"
-  ) || [];
+  // Garantir que enrollmentsData seja um array antes de usar filter
+  const enrollmentsArray = Array.isArray(enrollmentsData) ? enrollmentsData : [];
   
-  const completedEnrollments = enrollmentsData?.filter((e: any) => 
+  const activeEnrollments = enrollmentsArray.filter((e: any) => 
+    e.status === "in_progress" || e.status === "pending"
+  );
+  
+  const completedEnrollments = enrollmentsArray.filter((e: any) => 
     e.status === "completed"
-  ) || [];
+  );
 
-  const upcomingTasks = tasksData?.filter((t: any) => 
+  // Garantir que tasksData seja um array antes de usar filter
+  const tasksArray = Array.isArray(tasksData) ? tasksData : [];
+  
+  const upcomingTasks = tasksArray.filter((t: any) => 
     !t.completed && new Date(t.dueDate) > new Date()
   ).sort((a: any, b: any) => 
     new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
-  ).slice(0, 5) || [];
+  ).slice(0, 5);
 
-  const lateTasks = tasksData?.filter((t: any) => 
+  const lateTasks = tasksArray.filter((t: any) => 
     !t.completed && new Date(t.dueDate) < new Date()
-  ) || [];
+  );
 
   if (isLoadingEnrollments || isLoadingTasks || isLoadingDocuments || isLoadingAnnouncements) {
     return (
