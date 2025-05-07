@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FileText, CheckCircle, XCircle, AlertCircle, Eye, Download, Search, Upload } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import DocumentAnalyzer from './DocumentAnalyzer';
+import LazyImage from '@/components/LazyImage';
 
 interface Document {
   id: number;
@@ -239,10 +240,11 @@ const DocumentsView: React.FC<DocumentsViewProps> = ({
               <div className="md:w-3/5 p-4 border-r">
                 <div className="h-full overflow-auto">
                   {selectedDoc.fileType.includes('image') ? (
-                    <img 
+                    <LazyImage 
                       src={selectedDoc.fileUrl} 
                       alt={selectedDoc.fileName}
                       className="max-w-full mx-auto"
+                      threshold={0.01} // Carregar quase imediatamente já que está visível
                     />
                   ) : selectedDoc.fileType.includes('pdf') ? (
                     <iframe 
