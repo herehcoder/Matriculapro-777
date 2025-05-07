@@ -1441,6 +1441,71 @@ class EvolutionApiWebhookService {
     // Remove sufixos como @s.whatsapp.net ou @c.us
     return phoneWithMeta.split('@')[0];
   }
+  
+  /**
+   * Detecta o tipo de documento com base no conteúdo da mensagem e da imagem
+   * @param messageContent Conteúdo da mensagem
+   * @param caption Legenda da mensagem (opcional)
+   * @param fileName Nome do arquivo (opcional)
+   * @returns Tipo de documento detectado ou undefined
+   */
+  private detectDocumentType(messageContent: string, caption?: string, fileName?: string): string | undefined {
+    // Texto para análise (combinando todas as fontes de texto)
+    const textToAnalyze = `${messageContent} ${caption || ''} ${fileName || ''}`.toLowerCase();
+    
+    // Padrões para detectar tipos de documento
+    const patterns = {
+      rg: [
+        /rg/i, 
+        /identidade/i, 
+        /carteira\s+de\s+identidade/i, 
+        /documento\s+de\s+identidade/i,
+        /registro\s+geral/i
+      ],
+      cpf: [
+        /cpf/i, 
+        /cadastro\s+de\s+pessoa/i
+      ],
+      address_proof: [
+        /comprovante\s+de\s+endere[çc]o/i, 
+        /comprovante\s+de\s+resid[êe]ncia/i, 
+        /conta\s+(de\s+)?(luz|[áa]gua|g[áa]s|telefone|internet)/i,
+        /iptu/i,
+        /fatura/i
+      ],
+      school_certificate: [
+        /certificado/i, 
+        /diploma/i, 
+        /hist[óo]rico\s+escolar/i,
+        /boletim/i,
+        /escolar/i,
+        /escola/i
+      ],
+      birth_certificate: [
+        /certid[ãa]o\s+de\s+nascimento/i, 
+        /nascimento/i,
+        /registro\s+civil/i
+      ]
+    };
+    
+    // Verificar cada padrão
+    for (const [docType, regexList] of Object.entries(patterns)) {
+      for (const regex of regexList) {
+        if (regex.test(textToAnalyze)) {
+          console.log(`[DOCUMENT DETECTION] Documento do tipo ${docType} detectado no texto: "${textToAnalyze}"`);
+          return docType;
+        }
+      }
+    }
+    
+    // Verificar se o texto menciona algum tipo de documento de forma genérica
+    if (/documento|documenta[çc][ãa]o|anexo|foto|imagen?s?/i.test(textToAnalyze)) {
+      console.log(`[DOCUMENT DETECTION] Documento genérico detectado no texto: "${textToAnalyze}"`);
+      return 'other';
+    }
+    
+    return undefined;
+  }
 
   /**
    * Extrai o conteúdo de uma mensagem do WhatsApp

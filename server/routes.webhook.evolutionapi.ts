@@ -7,6 +7,20 @@ import { Express, Request, Response } from 'express';
 import { evolutionApiWebhookService } from './services/evolutionApiWebhook';
 import { logAction } from './services/securityService';
 
+// Tipos de mensagens e eventos que podemos receber da Evolution API
+enum WebhookEventType {
+  MESSAGE = 'messages.upsert',
+  MESSAGE_ACK = 'message.ack',
+  CONNECTION_UPDATE = 'connection.update',
+  QR_CODE = 'qr.update',
+  GROUP_UPDATE = 'group.update',
+  PRESENCE_UPDATE = 'presence.update',
+  UNREAD_MESSAGES = 'messages.unread.update',
+  READY = 'ready',
+  CALL_UPDATE = 'call.update',
+  TYPING = 'typing'
+}
+
 /**
  * Registra as rotas de webhook da Evolution API
  * @param app Aplicação Express
@@ -177,6 +191,72 @@ export function registerEvolutionApiWebhookRoutes(app: Express) {
       res.status(500).json({ 
         success: false, 
         error: error instanceof Error ? error.message : 'Erro interno do servidor',
+        test: true
+      });
+    }
+  });
+  
+  /**
+   * @route POST /api/evolutionapi/webhook/test/document
+   * @desc Endpoint para testar o processamento de documentos via webhook
+   * @access Private (mas não autenticado para permitir testes fáceis)
+   */
+  app.post('/api/evolutionapi/webhook/test/document', async (req: Request, res: Response) => {
+    try {
+      const { phone, documentType, mediaUrl, caption, instanceId } = req.body;
+      
+      if (!phone || !mediaUrl) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Parâmetros obrigatórios não fornecidos. Necessário: phone, mediaUrl' 
+        });
+      }
+      
+      console.log(`[WEBHOOK DOCUMENT TEST] Testando processamento de documento: ${documentType || 'sem tipo'} para ${phone}`);
+      
+      // Simular uma mensagem com mídia
+      const messagePayload = {
+        key: {
+          remoteJid: `${phone}@s.whatsapp.net`,
+          fromMe: false,
+          id: `test_${Date.now()}`
+        },
+        pushName: 'Teste Document',
+        message: {
+          imageMessage: {
+            url: mediaUrl,
+            caption: caption || '',
+            mimetype: 'image/jpeg'
+          }
+        },
+        messageTimestamp: Math.floor(Date.now() / 1000),
+        instanceKey: 'test_instance',
+        _test: true
+      };
+      
+      // Usar o tipo de evento MESSAGE da enum WebhookEventType
+      
+      // Processar o webhook simulando uma mensagem com mídia
+      const result = await evolutionApiWebhookService.processWebhook(WebhookEventType.MESSAGE, { 
+        data: messagePayload,
+        instance: {
+          key: 'test_instance',
+          id: instanceId || 1
+        }
+      });
+      
+      res.json({
+        ...result,
+        test: true,
+        message: 'Teste de processamento de documento iniciado com sucesso',
+        imageUrl: mediaUrl,
+        phone: phone
+      });
+    } catch (error) {
+      console.error('Erro ao processar teste de documento:', error);
+      res.status(500).json({ 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Erro desconhecido',
         test: true
       });
     }
