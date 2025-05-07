@@ -272,10 +272,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const schools = await storage.listSchools();
       const activeSchools = schools.filter(school => school.active !== false);
       
-      res.json(activeSchools);
+      // Mapear campos para garantir consistência com o frontend
+      const mappedSchools = activeSchools.map(school => ({
+        id: school.id,
+        name: school.name || '',
+        logo: school.logoUrl || null, // mapeando logoUrl para logo
+        city: school.city || '',
+        state: school.state || '',
+        address: school.address || '',
+        zipCode: school.zipCode || '',
+        phone: school.phone || '',
+        email: school.email || '',
+        website: school.website || '',
+        active: school.active !== false,
+        createdAt: school.createdAt || new Date(),
+        updatedAt: school.updatedAt || new Date()
+      }));
+      
+      res.json(mappedSchools);
     } catch (error) {
       console.error("Erro ao buscar escolas:", error);
-      next(error);
+      res.status(500).json({ message: error.message });
     }
   });
 

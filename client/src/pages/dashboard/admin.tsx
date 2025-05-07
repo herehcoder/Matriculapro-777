@@ -228,11 +228,11 @@ export default function AdminDashboard() {
   });
 
   // Filtra escolas com base na busca
-  const filteredSchools = schoolsData
+  const filteredSchools = Array.isArray(schoolsData)
     ? schoolsData.filter((school: any) =>
-        school.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        school.city.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        school.state.toLowerCase().includes(searchQuery.toLowerCase())
+        (school.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+        (school.city?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+        (school.state?.toLowerCase() || '').includes(searchQuery.toLowerCase())
       )
     : [];
 
