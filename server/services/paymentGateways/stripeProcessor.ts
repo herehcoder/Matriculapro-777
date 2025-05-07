@@ -18,22 +18,17 @@ export class StripeProcessor {
    */
   async initialize(): Promise<boolean> {
     try {
-      // Buscar configurações do banco de dados
-      const settings = await getPaymentGatewaySettingsByType('stripe');
+      // Buscar configuração ativa do banco de dados
+      const activeSetting = await getActivePaymentGatewaySettingsByType('stripe');
       
-      if (!settings || !settings.length || !settings.some(s => s.isActive)) {
+      if (!activeSetting) {
         // Se não tiver configuração ativa
         console.log('API Key para stripe não configurada - usando modo simulado');
         this.initialized = false;
         return false;
       }
       
-      // Usar a configuração ativa ou a padrão se houver várias
-      const activeSetting = settings.find(s => s.isActive && s.isDefault) 
-        || settings.find(s => s.isActive) 
-        || settings[0];
-      
-      if (!activeSetting || !activeSetting.apiKey) {
+      if (!activeSetting.apiKey) {
         console.log('API Key para stripe não configurada - usando modo simulado');
         this.initialized = false;
         return false;
