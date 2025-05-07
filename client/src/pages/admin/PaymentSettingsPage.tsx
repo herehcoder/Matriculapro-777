@@ -21,7 +21,7 @@ export default function PaymentSettingsPage() {
 
   // Verificar se o usuário está autenticado e é administrador
   if (!user) {
-    setLocation("/login");
+    setLocation("/auth");
     return null;
   }
 

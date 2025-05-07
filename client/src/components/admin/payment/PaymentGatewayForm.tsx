@@ -215,11 +215,16 @@ export default function PaymentGatewayForm({ gateway, onSave }: PaymentGatewayFo
           }));
         
         if (configFields.length > 0) {
+          // Garantir que a configuração existe
           processedData.configuration = processedData.configuration || {};
           
+          // Processar cada campo de configuração
           configFields.forEach(field => {
             if (field.value !== undefined && field.value !== '') {
-              processedData.configuration[field.key] = field.value;
+              // Agora é seguro acessar, pois garantimos que configuration existe
+              if (processedData.configuration) {
+                processedData.configuration[field.key] = field.value;
+              }
             }
           });
         }
