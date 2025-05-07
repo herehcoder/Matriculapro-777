@@ -91,14 +91,14 @@ export default function Register() {
     }
   }, [watchRole, form]);
 
-  const { register } = useAuth();
+  const { registerMutation } = useAuth();
   
   const onSubmit = async (values: z.infer<typeof registerSchema>) => {
     setError(null);
     setIsLoading(true);
     
     try {
-      await register(values);
+      await registerMutation.mutateAsync(values);
       // Navegação e toast são manipulados pelo hook auth
     } catch (err: any) {
       setError(err.message || "Erro ao registrar usuário. Tente novamente.");
