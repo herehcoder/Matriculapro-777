@@ -49,7 +49,7 @@ export class StripeProcessor {
       });
       
       this.initialized = true;
-      console.log('Processador Stripe configurado com sucesso');
+      console.log(`Processador Stripe configurado com sucesso (Modo ${this.isLive ? 'LIVE' : 'SANDBOX'})`);
       return true;
     } catch (error) {
       console.error('Erro ao inicializar processador Stripe:', error);
