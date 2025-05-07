@@ -11,7 +11,6 @@ import {
 type Attendant = any;
 type Student = any;
 type Lead = any;
-type Course = any;
 type Question = any;
 type Answer = any;
 type ChatMessage = any;
@@ -19,7 +18,6 @@ type Metric = any;
 type PasswordResetToken = any;
 type InsertStudent = any;
 type InsertLead = any;
-type InsertCourse = any;
 type InsertQuestion = any;
 type InsertAnswer = any;
 type InsertChatMessage = any;
@@ -1405,7 +1403,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCoursesBySchool(schoolId: number): Promise<Course[]> {
-    return db.select().from(courses).where(eq(courses.schoolId, schoolId));
+    try {
+      return await db.select().from(courses).where(eq(courses.schoolId, schoolId));
+    } catch (error) {
+      console.error(`Error fetching courses for school ${schoolId}:`, error);
+      return []; // Retorna array vazio em caso de erro
+    }
   }
 
   async createCourse(course: InsertCourse): Promise<Course> {

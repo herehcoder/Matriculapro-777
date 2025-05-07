@@ -33,9 +33,13 @@ const registerSchema = z.object({
   fullName: z.string().min(3, "Nome completo é obrigatório"),
   role: z.string().min(1, "Selecione um tipo de usuário"),
   schoolId: z.number().optional().refine(
-    (val) => {
+    (val, ctx) => {
       // Se for um estudante, o schoolId é obrigatório
-      const role = document.querySelector('select[name="role"]')?.value;
+      const formValues = ctx.path ? ctx.path[0] : undefined;
+      if (!formValues || typeof formValues !== 'object' || !('role' in formValues)) {
+        return true; // Não podemos validar sem o contexto completo
+      }
+      const role = (formValues as any).role;
       return role !== 'student' || (val != null && val > 0);
     },
     {

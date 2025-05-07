@@ -907,8 +907,8 @@ export default function StudentDashboard() {
                 
                 <TabsContent value="personal">
                   <div className="rounded-md border">
-                    {documentsData?.filter((d: any) => d.type === "Pessoal").length > 0 ? (
-                      documentsData
+                    {documentsArray.filter((d: any) => d.type === "Pessoal").length > 0 ? (
+                      documentsArray
                         .filter((d: any) => d.type === "Pessoal")
                         .map((doc: any) => (
                           <div key={doc.id} className="p-4 border-b last:border-b-0 flex justify-between items-center">

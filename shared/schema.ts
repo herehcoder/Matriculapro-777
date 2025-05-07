@@ -179,16 +179,20 @@ export const schools = pgTable('schools', {
 // Schema Zod para escolas
 export const schoolSchema = createInsertSchema(schools, {
   name: z.string().min(3, 'Nome da escola deve ter pelo menos 3 caracteres'),
-  logoUrl: z.string().optional(),
+  logo: z.string().optional(),
   address: z.string().optional(),
   city: z.string().optional(),
   state: z.string().optional(),
   zipCode: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().email('Email inválido').optional(),
-  website: z.string().optional(),
+  description: z.string().optional(),
+  whatsappNumber: z.string().optional(),
+  whatsappEnabled: z.boolean().optional(),
+  apiKey: z.string().optional(),
+  webhookUrl: z.string().optional(),
   active: z.boolean().optional(),
-  settings: z.any().optional(),
+  mainCourse: z.string().optional(),
 }).omit({ id: true, createdAt: true, updatedAt: true });
 
 // Tipos TypeScript
