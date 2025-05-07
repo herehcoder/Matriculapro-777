@@ -221,8 +221,17 @@ export default function StudentDashboard() {
   const { data: enrollmentsData, isLoading: isLoadingEnrollments } = useQuery({
     queryKey: ["/api/enrollments/student"],
     queryFn: async () => {
-      const res = await apiRequest("GET", "/api/enrollments/student");
-      return await res.json();
+      try {
+        const res = await apiRequest("GET", "/api/enrollments/student");
+        if (!res.ok) {
+          console.error("Erro ao buscar matrículas:", await res.text());
+          return [];
+        }
+        return await res.json();
+      } catch (error) {
+        console.error("Erro ao carregar matrículas:", error);
+        return [];
+      }
     },
   });
 
@@ -230,8 +239,17 @@ export default function StudentDashboard() {
   const { data: tasksData, isLoading: isLoadingTasks } = useQuery({
     queryKey: ["/api/tasks/student"],
     queryFn: async () => {
-      const res = await apiRequest("GET", "/api/tasks/student");
-      return await res.json();
+      try {
+        const res = await apiRequest("GET", "/api/tasks/student");
+        if (!res.ok) {
+          console.error("Erro ao buscar tarefas:", await res.text());
+          return [];
+        }
+        return await res.json();
+      } catch (error) {
+        console.error("Erro ao carregar tarefas:", error);
+        return [];
+      }
     },
   });
 
@@ -241,7 +259,13 @@ export default function StudentDashboard() {
     queryFn: async () => {
       try {
         const res = await apiRequest("GET", "/api/documents/student");
-        return await res.json();
+        if (!res.ok) {
+          console.error("Erro ao buscar documentos:", await res.text());
+          return [];
+        }
+        const data = await res.json();
+        // Garantir que retornamos um array
+        return Array.isArray(data) ? data : [];
       } catch (error) {
         console.error("Erro ao carregar documentos:", error);
         return [];
@@ -255,7 +279,13 @@ export default function StudentDashboard() {
     queryFn: async () => {
       try {
         const res = await apiRequest("GET", "/api/announcements/student");
-        return await res.json();
+        if (!res.ok) {
+          console.error("Erro ao buscar avisos:", await res.text());
+          return [];
+        }
+        const data = await res.json();
+        // Garantir que retornamos um array
+        return Array.isArray(data) ? data : [];
       } catch (error) {
         console.error("Erro ao carregar avisos:", error);
         return [];
@@ -277,6 +307,12 @@ export default function StudentDashboard() {
 
   // Garantir que tasksData seja um array antes de usar filter
   const tasksArray = Array.isArray(tasksData) ? tasksData : [];
+  
+  // Garantir que documentsData seja um array antes de usar filter
+  const documentsArray = Array.isArray(documentsData) ? documentsData : [];
+  
+  // Garantir que announcementsData seja um array antes de usar filter
+  const announcementsArray = Array.isArray(announcementsData) ? announcementsData : [];
   
   const upcomingTasks = tasksArray.filter((t: any) => 
     !t.completed && new Date(t.dueDate) > new Date()
@@ -485,8 +521,8 @@ export default function StudentDashboard() {
               </CardHeader>
               <CardContent>
                 <div>
-                  {documentsData && documentsData.length > 0 ? (
-                    documentsData.slice(0, 5).map((doc: any) => (
+                  {documentsArray.length > 0 ? (
+                    documentsArray.slice(0, 5).map((doc: any) => (
                       <DocumentItem key={doc.id} document={doc} />
                     ))
                   ) : (
@@ -659,8 +695,8 @@ export default function StudentDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {tasksData && tasksData.length > 0 ? (
-                      tasksData.map((task: any) => (
+                    {tasksArray.length > 0 ? (
+                      tasksArray.map((task: any) => (
                         <TableRow key={task.id}>
                           <TableCell>
                             <div className={`w-6 h-6 rounded-full flex items-center justify-center 
@@ -750,8 +786,8 @@ export default function StudentDashboard() {
                 
                 <TabsContent value="all">
                   <div className="rounded-md border">
-                    {documentsData && documentsData.length > 0 ? (
-                      documentsData.map((doc: any) => (
+                    {documentsArray.length > 0 ? (
+                      documentsArray.map((doc: any) => (
                         <div key={doc.id} className="p-4 border-b last:border-b-0 flex justify-between items-center">
                           <div className="flex items-center space-x-3">
                             <div className="w-10 h-10 rounded bg-primary/10 flex items-center justify-center">
@@ -795,8 +831,8 @@ export default function StudentDashboard() {
                 
                 <TabsContent value="certificates">
                   <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-                    {documentsData?.filter((d: any) => d.type === "Certificado").length > 0 ? (
-                      documentsData
+                    {documentsArray.filter((d: any) => d.type === "Certificado").length > 0 ? (
+                      documentsArray
                         .filter((d: any) => d.type === "Certificado")
                         .map((cert: any) => (
                           <Card key={cert.id} className="overflow-hidden">
@@ -833,8 +869,8 @@ export default function StudentDashboard() {
                 
                 <TabsContent value="submissions">
                   <div className="rounded-md border">
-                    {documentsData?.filter((d: any) => d.type === "Entrega").length > 0 ? (
-                      documentsData
+                    {documentsArray.filter((d: any) => d.type === "Entrega").length > 0 ? (
+                      documentsArray
                         .filter((d: any) => d.type === "Entrega")
                         .map((doc: any) => (
                           <div key={doc.id} className="p-4 border-b last:border-b-0 flex justify-between items-center">
