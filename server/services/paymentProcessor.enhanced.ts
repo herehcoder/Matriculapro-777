@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { sendUserNotification } from '../pusher';
 import { MercadoPagoProcessor } from './paymentGateways/mercadoPagoProcessor';
 import { AsaasProcessor } from './paymentGateways/asaasProcessor';
+import { StripeProcessor } from './paymentGateways/stripeProcessor';
 import { createPaymentGatewaySettingsTable, getDefaultPaymentGatewaySetting } from '../models/paymentGatewaySettings';
 
 // Importando apenas o tipo BillingOptions do processador original
@@ -104,6 +105,12 @@ class EnhancedPaymentProcessorService {
       await createPaymentGatewaySettingsTable();
       
       // Criar e inicializar processadores
+      const stripeProcessor = new StripeProcessor();
+      const stripeSuccess = await stripeProcessor.initialize();
+      if (stripeSuccess) {
+        this.processors.set('stripe', stripeProcessor);
+      }
+      
       const mercadoPagoProcessor = new MercadoPagoProcessor();
       const mercadoPagoSuccess = await mercadoPagoProcessor.initialize();
       if (mercadoPagoSuccess) {
