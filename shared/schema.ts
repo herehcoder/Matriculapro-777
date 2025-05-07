@@ -7,6 +7,7 @@
 import { pgTable, serial, text, boolean, timestamp, integer, jsonb } from 'drizzle-orm/pg-core';
 import { createInsertSchema } from 'drizzle-zod';
 import { z } from 'zod';
+import { sql } from 'drizzle-orm';
 
 // Re-export das entidades de configurações de usuário
 export * from './schema.user-settings';
