@@ -268,29 +268,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // School routes
   app.get("/api/schools", async (req, res, next) => {
     try {
-      // Usar diretamente o banco de dados para buscar escolas reais
+      // Buscar escolas diretamente do banco de dados
       const dbSchools = await db.select().from(schools);
       
-      // Se não existirem escolas no banco, vamos inserir uma
-      if (!dbSchools || dbSchools.length === 0) {
+      // Mapear para o formato esperado pelo frontend (logoUrl -> logo)
+      const mappedSchools = dbSchools.map(school => ({
+        id: school.id,
+        name: school.name || '',
+        logo: school.logoUrl || 'https://via.placeholder.com/150', // mapear logoUrl para logo
+        city: school.city || '',
+        state: school.state || '',
+        address: school.address || '',
+        zipCode: school.zipCode || '',
+        phone: school.phone || '',
+        email: school.email || '',
+        website: school.website || '',
+        active: school.active !== false,
+        createdAt: school.createdAt || new Date(),
+        updatedAt: school.updatedAt || new Date()
+      }));
+      
+      // Se não existirem escolas no banco, inserir uma escola inicial
+      if (mappedSchools.length === 0) {
         const newSchool = {
           name: 'Escola São Paulo',
           logoUrl: 'https://via.placeholder.com/150',
           city: 'São Paulo',
           state: 'SP',
           address: 'Av. Paulista, 1000',
+          zipCode: '01310-100',
           phone: '(11) 3000-1000',
           email: 'contato@escolasp.edu.br',
-          active: true,
+          website: 'www.escolasp.edu.br',
+          active: true
         };
         
-        const insertedSchools = await db.insert(schools).values(newSchool).returning();
-        res.json(insertedSchools);
+        const insertedSchool = await db.insert(schools).values(newSchool).returning();
+        
+        // Mapear a escola inserida para o formato esperado pelo frontend
+        const mappedInsertedSchool = insertedSchool.map(school => ({
+          id: school.id,
+          name: school.name || '',
+          logo: school.logoUrl || 'https://via.placeholder.com/150', // mapear logoUrl para logo
+          city: school.city || '',
+          state: school.state || '',
+          address: school.address || '',
+          zipCode: school.zipCode || '',
+          phone: school.phone || '',
+          email: school.email || '',
+          website: school.website || '',
+          active: school.active !== false,
+          createdAt: school.createdAt || new Date(),
+          updatedAt: school.updatedAt || new Date()
+        }));
+        
+        res.json(mappedInsertedSchool);
         return;
       }
       
-      // Retornar as escolas encontradas no banco
-      res.json(dbSchools);
+      // Retornar as escolas mapeadas
+      res.json(mappedSchools);
     } catch (error) {
       console.error("Erro ao buscar escolas:", error);
       res.status(500).json({ message: error.message });
