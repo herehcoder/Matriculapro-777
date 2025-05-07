@@ -196,10 +196,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/monitoring', isAuthenticated, hasRole(["admin"]), registerMonitoringRoutes());
   
   // Registrar webhook handlers para Evolution API
-  // Importando diretamente usando imports ES6
+  // Importando as rotas de webhook
   try {
-    import('./routes.webhook.evolutionapi.js').then(module => {
-      module.registerEvolutionApiWebhookRoutes(app);
+    import('./routes.webhook').then(module => {
+      module.registerWebhookRoutes(app);
       console.log("Rotas de webhook da Evolution API registradas com sucesso");
     }).catch(error => {
       console.error("Erro ao carregar módulo de webhook da Evolution API:", error);

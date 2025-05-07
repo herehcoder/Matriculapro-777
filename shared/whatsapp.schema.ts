@@ -1,21 +1,25 @@
-import { pgTable, serial, integer, varchar, text, timestamp, boolean, json } from "drizzle-orm/pg-core";
-import { createInsertSchema, createSelectSchema } from "drizzle-zod";
-import { z } from "zod";
+/**
+ * Schema para as entidades relacionadas ao WhatsApp
+ */
+import { pgTable, serial, text, integer, boolean, timestamp, jsonb } from 'drizzle-orm/pg-core';
+import { createInsertSchema } from 'drizzle-zod';
+import { z } from 'zod';
 
 /**
  * Tabela de instâncias do WhatsApp
  */
 export const whatsappInstances = pgTable('whatsapp_instances', {
   id: serial('id').primaryKey(),
-  schoolId: integer('school_id').notNull().references(() => 'schools.id'),
-  instanceName: text('instance_name').notNull(),
-  status: text('status').default('disconnected'),
+  key: text('key').notNull().unique(),
+  name: text('name').notNull(),
+  phone: text('phone'),
+  schoolId: integer('school_id'),
+  status: text('status').default('pending'),
   qrCode: text('qr_code'),
-  webhookUrl: text('webhook_url'),
-  webhookSecret: text('webhook_secret'),
-  lastConnected: timestamp('last_connected'),
+  qrCodeTimestamp: timestamp('qr_code_timestamp'),
+  metadata: jsonb('metadata'),
   createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow()
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
 /**
@@ -23,14 +27,20 @@ export const whatsappInstances = pgTable('whatsapp_instances', {
  */
 export const whatsappContacts = pgTable('whatsapp_contacts', {
   id: serial('id').primaryKey(),
-  instanceId: integer('instance_id').notNull().references(() => whatsappInstances.id),
-  phone: varchar('phone', { length: 50 }).notNull(),
-  name: varchar('name', { length: 255 }),
-  studentId: integer('student_id').references(() => 'users.id'),
-  leadId: integer('lead_id').references(() => 'leads.id'),
-  metadata: json('metadata'),
+  instanceId: integer('instance_id').notNull(),
+  waId: text('wa_id').notNull(),
+  name: text('name'),
+  phone: text('phone'),
+  profileImage: text('profile_image'),
+  isGroup: boolean('is_group').default(false),
+  isBlocked: boolean('is_blocked').default(false),
+  assignedUserId: integer('assigned_user_id'),
+  studentId: integer('student_id'),
+  leadId: integer('lead_id'),
+  metadata: jsonb('metadata'),
+  lastActivity: timestamp('last_activity'),
   createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow()
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
 /**
@@ -38,76 +48,97 @@ export const whatsappContacts = pgTable('whatsapp_contacts', {
  */
 export const whatsappMessages = pgTable('whatsapp_messages', {
   id: serial('id').primaryKey(),
-  instanceId: integer('instance_id').notNull().references(() => whatsappInstances.id),
-  contactId: integer('contact_id').notNull().references(() => whatsappContacts.id),
+  instanceId: integer('instance_id').notNull(),
+  contactId: integer('contact_id').notNull(),
   content: text('content'),
-  direction: varchar('direction', { length: 20 }).notNull().default('outbound'),
-  status: varchar('status', { length: 50 }).notNull().default('pending'),
-  externalId: varchar('external_id', { length: 255 }),
-  metadata: json('metadata'),
+  mediaType: text('media_type'),
+  mediaUrl: text('media_url'),
+  mediaMimeType: text('media_mime_type'),
+  direction: text('direction').notNull().default('received'),
+  status: text('status').notNull().default('pending'),
+  externalId: text('external_id'),
+  metadata: jsonb('metadata'),
+  receivedAt: timestamp('received_at'),
   sentAt: timestamp('sent_at'),
   deliveredAt: timestamp('delivered_at'),
   readAt: timestamp('read_at'),
   createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow()
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
 /**
- * Tabela de configurações da API do WhatsApp
- */
-export const whatsappApiConfigs = pgTable('whatsapp_api_configs', {
-  id: serial('id').primaryKey(),
-  baseUrl: varchar('base_url', { length: 255 }).notNull(),
-  apiKey: varchar('api_key', { length: 255 }).notNull(),
-  active: boolean('active').default(true),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow()
-});
-
-/**
- * Tabela de mensagens automáticas do WhatsApp
+ * Tabela de templates de mensagens do WhatsApp
  */
 export const whatsappTemplates = pgTable('whatsapp_templates', {
   id: serial('id').primaryKey(),
-  schoolId: integer('school_id').references(() => 'schools.id'),
-  name: varchar('name', { length: 255 }).notNull(),
+  schoolId: integer('school_id'),
+  name: text('name').notNull(),
+  type: text('type').notNull().default('text'),
   content: text('content').notNull(),
-  variables: json('variables'),
-  category: varchar('category', { length: 50 }),
-  active: boolean('active').default(true),
+  variables: jsonb('variables'),
+  isActive: boolean('is_active').default(true),
+  createdBy: integer('created_by'),
   createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow()
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
-// Criar Zod schemas para validação
+// Schemas Zod para validação e inserção
+
 export const insertWhatsappInstanceSchema = createInsertSchema(whatsappInstances, {
-  instanceName: z.string().min(3, 'O nome da instância deve ter pelo menos 3 caracteres'),
-  schoolId: z.number().int().positive('ID da escola deve ser um número positivo')
+  key: z.string().min(1, 'Chave da instância é obrigatória'),
+  name: z.string().min(1, 'Nome da instância é obrigatório'),
+  phone: z.string().optional(),
+  schoolId: z.number().optional(),
+  status: z.string().optional(),
+  qrCode: z.string().optional(),
+  qrCodeTimestamp: z.date().optional(),
+  metadata: z.any().optional(),
 }).omit({ id: true, createdAt: true, updatedAt: true });
 
 export const insertWhatsappContactSchema = createInsertSchema(whatsappContacts, {
-  phone: z.string().min(8, 'Telefone inválido').max(20, 'Telefone inválido'),
-  instanceId: z.number().int().positive('ID da instância deve ser um número positivo')
+  instanceId: z.number().min(1, 'ID da instância é obrigatório'),
+  waId: z.string().min(1, 'ID do WhatsApp é obrigatório'),
+  name: z.string().optional(),
+  phone: z.string().optional(),
+  profileImage: z.string().optional(),
+  isGroup: z.boolean().optional(),
+  isBlocked: z.boolean().optional(),
+  assignedUserId: z.number().optional(),
+  studentId: z.number().optional(),
+  leadId: z.number().optional(),
+  metadata: z.any().optional(),
+  lastActivity: z.date().optional(),
 }).omit({ id: true, createdAt: true, updatedAt: true });
 
 export const insertWhatsappMessageSchema = createInsertSchema(whatsappMessages, {
-  instanceId: z.number().int().positive('ID da instância deve ser um número positivo'),
-  contactId: z.number().int().positive('ID do contato deve ser um número positivo'),
-  content: z.string().min(1, 'A mensagem não pode estar vazia')
-}).omit({ id: true, createdAt: true, updatedAt: true });
-
-export const insertWhatsappApiConfigSchema = createInsertSchema(whatsappApiConfigs, {
-  baseUrl: z.string().url('URL da API inválida'),
-  apiKey: z.string().min(5, 'API Key inválida')
+  instanceId: z.number().min(1, 'ID da instância é obrigatório'),
+  contactId: z.number().min(1, 'ID do contato é obrigatório'),
+  content: z.string().optional(),
+  mediaType: z.string().optional(),
+  mediaUrl: z.string().optional(),
+  mediaMimeType: z.string().optional(),
+  direction: z.string().optional(),
+  status: z.string().optional(),
+  externalId: z.string().optional(),
+  metadata: z.any().optional(),
+  receivedAt: z.date().optional(),
+  sentAt: z.date().optional(),
+  deliveredAt: z.date().optional(),
+  readAt: z.date().optional(),
 }).omit({ id: true, createdAt: true, updatedAt: true });
 
 export const insertWhatsappTemplateSchema = createInsertSchema(whatsappTemplates, {
-  name: z.string().min(3, 'O nome deve ter pelo menos 3 caracteres'),
-  content: z.string().min(5, 'O conteúdo deve ter pelo menos 5 caracteres'),
-  schoolId: z.number().int().positive('ID da escola deve ser um número positivo').optional()
+  schoolId: z.number().optional(),
+  name: z.string().min(1, 'Nome do template é obrigatório'),
+  type: z.string().optional(),
+  content: z.string().min(1, 'Conteúdo do template é obrigatório'),
+  variables: z.any().optional(),
+  isActive: z.boolean().optional(),
+  createdBy: z.number().optional(),
 }).omit({ id: true, createdAt: true, updatedAt: true });
 
-// Tipos TypeScript
+// Tipos TypeScript para as entidades
+
 export type WhatsappInstance = typeof whatsappInstances.$inferSelect;
 export type InsertWhatsappInstance = z.infer<typeof insertWhatsappInstanceSchema>;
 
@@ -116,9 +147,6 @@ export type InsertWhatsappContact = z.infer<typeof insertWhatsappContactSchema>;
 
 export type WhatsappMessage = typeof whatsappMessages.$inferSelect;
 export type InsertWhatsappMessage = z.infer<typeof insertWhatsappMessageSchema>;
-
-export type WhatsappApiConfig = typeof whatsappApiConfigs.$inferSelect;
-export type InsertWhatsappApiConfig = z.infer<typeof insertWhatsappApiConfigSchema>;
 
 export type WhatsappTemplate = typeof whatsappTemplates.$inferSelect;
 export type InsertWhatsappTemplate = z.infer<typeof insertWhatsappTemplateSchema>;

@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { Express } from 'express';
 import { z } from 'zod';
 import { db } from './db';
-import { whatsappApiConfigs, whatsappApiConfigSchema } from '../shared/whatsapp-config.schema';
+import { whatsappApiConfigs, whatsappApiConfigSchema } from '@shared/whatsapp-config.schema';
 import { eq } from 'drizzle-orm';
 
 /**

@@ -1,26 +1,35 @@
-import { pgTable, serial, varchar, boolean, timestamp, json } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
+/**
+ * Schema para as configurações do WhatsApp Evolution API
+ */
+import { pgTable, serial, text, boolean, timestamp, jsonb } from 'drizzle-orm/pg-core';
+import { createInsertSchema } from 'drizzle-zod';
+import { z } from 'zod';
 
 /**
  * Tabela de configurações da API do WhatsApp
  */
 export const whatsappApiConfigs = pgTable('whatsapp_api_configs', {
   id: serial('id').primaryKey(),
-  baseUrl: varchar('base_url', { length: 255 }).notNull(),
-  apiKey: varchar('api_key', { length: 255 }).notNull(),
+  apiBaseUrl: text('api_base_url').notNull(),
+  apiKey: text('api_key').notNull(),
+  webhookUrl: text('webhook_url'),
+  webhookSecret: text('webhook_secret'),
   active: boolean('active').default(true),
-  settings: json('settings'),
+  settings: jsonb('settings'),
   createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow()
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
-// Criar Zod schema para validação
-export const insertWhatsappApiConfigSchema = createInsertSchema(whatsappApiConfigs, {
-  baseUrl: z.string().url('A URL base deve ser uma URL válida'),
-  apiKey: z.string().min(10, 'A chave da API deve ter pelo menos 10 caracteres')
+// Schema Zod para validação e inserção
+export const whatsappApiConfigSchema = createInsertSchema(whatsappApiConfigs, {
+  apiBaseUrl: z.string().url('URL base inválida'),
+  apiKey: z.string().min(1, 'Chave de API é obrigatória'),
+  webhookUrl: z.string().url('URL de webhook inválida').optional(),
+  webhookSecret: z.string().optional(),
+  active: z.boolean().optional(),
+  settings: z.any().optional(),
 }).omit({ id: true, createdAt: true, updatedAt: true });
 
-// Tipos TypeScript
+// Tipos TypeScript para as entidades
 export type WhatsappApiConfig = typeof whatsappApiConfigs.$inferSelect;
-export type InsertWhatsappApiConfig = z.infer<typeof insertWhatsappApiConfigSchema>;
+export type InsertWhatsappApiConfig = z.infer<typeof whatsappApiConfigSchema>;

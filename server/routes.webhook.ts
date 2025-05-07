@@ -12,13 +12,13 @@ import { Request, Response } from 'express';
 import { Express } from 'express';
 import { z } from 'zod';
 import { db } from './db';
-import { whatsappApiConfigs } from '../shared/whatsapp-config.schema';
-import { whatsappInstances } from '../shared/whatsapp.schema';
+import { whatsappApiConfigs } from '@shared/whatsapp-config.schema';
+import { whatsappInstances } from '@shared/whatsapp.schema';
 import { eq } from 'drizzle-orm';
-import { EvolutionApiWebhookService } from './services/evolutionApiWebhook';
+import { default as webhookServiceInstance } from './services/evolutionApiWebhook';
 
-// Instanciar o serviço de webhook
-const webhookService = new EvolutionApiWebhookService();
+// Usar a instância do serviço de webhook
+const webhookService = webhookServiceInstance;
 
 // Schema para validação do payload de webhook
 const webhookSchema = z.object({
