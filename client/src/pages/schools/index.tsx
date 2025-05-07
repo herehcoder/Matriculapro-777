@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
 import { Link } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -49,30 +48,60 @@ import {
 export default function SchoolsPage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
+  const [schools, setSchools] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   
-  // Buscar escolas
-  const { data: schools, isLoading, refetch } = useQuery({
-    queryKey: ["/api/schools"],
-    queryFn: async () => {
-      const res = await apiRequest("GET", "/api/schools");
-      return await res.json();
-    },
-  });
+  // Função para buscar escolas
+  const fetchSchools = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch("/api/schools");
+      
+      if (!response.ok) {
+        throw new Error("Erro ao buscar escolas");
+      }
+      
+      const data = await response.json();
+      
+      // Garantir que os dados são um array
+      const schoolsArray = Array.isArray(data) ? data : [];
+      setSchools(schoolsArray);
+    } catch (error) {
+      console.error("Erro ao carregar escolas:", error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível carregar a lista de escolas.",
+        variant: "destructive"
+      });
+      setSchools([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Carregar escolas ao montar o componente
+  useEffect(() => {
+    fetchSchools();
+  }, []);
   
   // Filtrar escolas com base na busca
-  const filteredSchools = schools
-    ? schools.filter((school: any) =>
-        school.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        school.city.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        school.state.toLowerCase().includes(searchQuery.toLowerCase())
+  // Garantir que schools sempre seja um array antes de chamar filter
+  const schoolsArray = Array.isArray(schools) ? schools : [];
+  
+  const filteredSchools = searchQuery
+    ? schoolsArray.filter((school: any) =>
+        (school.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (school.city || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (school.state || '').toLowerCase().includes(searchQuery.toLowerCase())
       )
-    : [];
+    : schoolsArray;
   
   // Função para ativar/desativar uma escola
   const toggleSchoolStatus = async (id: number, active: boolean) => {
     try {
       await apiRequest("PATCH", `/api/schools/${id}`, { active: !active });
-      refetch();
+      // Recarregar as escolas após a atualização
+      fetchSchools();
       toast({
         title: active ? "Escola desativada" : "Escola ativada",
         description: `A escola foi ${active ? "desativada" : "ativada"} com sucesso.`,
@@ -138,7 +167,7 @@ export default function SchoolsPage() {
               <Button size="icon" variant="outline">
                 <Filter className="h-4 w-4" />
               </Button>
-              <Button size="icon" variant="outline" onClick={() => refetch()}>
+              <Button size="icon" variant="outline" onClick={() => fetchSchools()}>
                 <RefreshCw className="h-4 w-4" />
               </Button>
             </div>
@@ -275,7 +304,7 @@ export default function SchoolsPage() {
         </CardContent>
         <CardFooter className="border-t px-6 py-4">
           <div className="text-xs text-muted-foreground">
-            Mostrando {filteredSchools.length} de {schools?.length || 0} escolas
+            Mostrando {filteredSchools.length} de {schoolsArray.length} escolas
           </div>
         </CardFooter>
       </Card>
