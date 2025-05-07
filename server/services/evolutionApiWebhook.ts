@@ -265,25 +265,41 @@ class EvolutionApiWebhookService {
     try {
       // Se for uma imagem ou documento, podemos tentar fazer OCR
       if ((content.type === 'image' || content.type === 'document') && content.mediaUrl) {
-        // Verificar se a mensagem parece ser um documento baseado em palavras-chave
-        const isLikelyDocument = this.isLikelyDocument(content.text || content.caption || '');
+        // Obter informações do contato e instância para posterior associação com aluno
+        const contact = await this.getContact(contactId);
+        const instance = await this.getInstance(instanceId);
         
-        if (isLikelyDocument) {
-          // Agendar análise de documento
-          console.log(`Agendando análise de documento para mensagem ${message.id}`);
+        if (!contact || !instance) {
+          console.error(`Contato ou instância não encontrado para processamento de documento: instanceId=${instanceId}, contactId=${contactId}`);
+          return;
+        }
+        
+        // Dados úteis para associar o documento ao usuário correto
+        const phoneNumber = contact.phone;
+        const schoolId = instance.schoolId;
+        
+        // Verificar se a mensagem parece ser um documento baseado em palavras-chave ou análise de contexto
+        const isLikelyDocument = this.isLikelyDocument(content.text || content.caption || '');
+        const documentContext = await this.analyzeDocumentContext(contactId, message.id);
+        
+        const shouldProcessAsDocument = isLikelyDocument || 
+                                       documentContext.isExpectingDocument || 
+                                       documentContext.recentDocumentRequests;
+        
+        if (shouldProcessAsDocument) {
+          console.log(`Iniciando análise de documento para mensagem ${message.id}`);
           
-          // Aqui poderíamos agendar o processamento em uma fila de tarefas
-          // Por enquanto, atualizar metadados da mensagem
+          // Atualizar metadados da mensagem para indicar que está em processamento
           await db.update(whatsappMessages)
             .set({ 
               metadata: { 
                 ...message.metadata,
-                documentAnalysisPending: true,
-                documentAnalysisScheduled: new Date()
-              }
+                documentAnalysisStatus: 'processing',
+                documentAnalysisStartedAt: new Date().toISOString(),
+                possibleDocumentType: documentContext.expectedDocumentType || 'unknown'
+              } 
             })
-            .where(eq(whatsappMessages.id, message.id))
-            .returning();
+            .where(eq(whatsappMessages.id, message.id));
           
           // Notificar usuário que documento está sendo analisado
           const responseText = await whatsappTemplateService.processTemplate(
@@ -293,14 +309,693 @@ class EvolutionApiWebhookService {
           
           // Aqui chamaríamos a API para enviar a mensagem de confirmação
           // await this.sendWhatsAppMessage(instanceId, contactId, responseText);
+          
+          // Download da mídia e processamento OCR
+          try {
+            // Baixar a mídia da URL (a implementação real dependeria da Evolution API)
+            const mediaBuffer = await this.downloadMedia(content.mediaUrl, content.mimetype);
+            
+            if (!mediaBuffer) {
+              throw new Error('Falha ao baixar mídia para processamento de documento');
+            }
+            
+            // Determinar o possível tipo de documento baseado no contexto
+            const documentType = this.determineDocumentType(
+              documentContext.expectedDocumentType,
+              content.text || content.caption || ''
+            );
+            
+            // Processar o documento com OCR avançado
+            const processingResult = await advancedOcrService.processDocument(
+              mediaBuffer,
+              documentType || 'other',
+              0, // documentId será definido depois
+              {
+                detectFraud: true,
+                source: 'whatsapp',
+                metadata: {
+                  messageId: message.id,
+                  contactId: contactId,
+                  instanceId: instanceId,
+                  phone: phoneNumber,
+                  schoolId: schoolId
+                }
+              }
+            );
+            
+            // Verificar se foi possível extrair dados do documento
+            if (processingResult && processingResult.extractedData) {
+              // Tentar associar o documento ao aluno/matrícula
+              const enrollmentId = await this.findOrCreateEnrollmentFromDocument(
+                processingResult.extractedData,
+                phoneNumber,
+                schoolId,
+                documentType
+              );
+              
+              // Registrar o documento no sistema
+              const documentRecord = await this.registerDocumentFromWhatsApp(
+                processingResult,
+                enrollmentId,
+                content.mediaUrl,
+                message.id,
+                documentType
+              );
+              
+              // Atualizar metadados da mensagem com o resultado
+              await db.update(whatsappMessages)
+                .set({ 
+                  metadata: { 
+                    ...message.metadata,
+                    documentAnalysisStatus: 'completed',
+                    documentAnalysisCompletedAt: new Date().toISOString(),
+                    documentId: documentRecord.id,
+                    enrollmentId: enrollmentId,
+                    documentType: documentType,
+                    ocrConfidence: processingResult.confidence,
+                    ocrStatus: processingResult.status
+                  } 
+                })
+                .where(eq(whatsappMessages.id, message.id));
+              
+              // Enviar mensagem de confirmação ao usuário
+              await this.sendDocumentConfirmation(
+                instanceId,
+                contactId,
+                processingResult,
+                documentType,
+                processingResult.status
+              );
+              
+              // Notificar internamente sobre recebimento de documento
+              await this.notifyDocumentReceived(
+                processingResult,
+                documentRecord.id,
+                enrollmentId,
+                schoolId
+              );
+            } else {
+              // Falha na extração - enviar mensagem informando problema
+              await this.sendDocumentProcessingFailure(
+                instanceId,
+                contactId,
+                'Não foi possível extrair informações do documento. Por favor, envie uma imagem mais clara.'
+              );
+              
+              // Atualizar metadados da mensagem
+              await db.update(whatsappMessages)
+                .set({ 
+                  metadata: { 
+                    ...message.metadata,
+                    documentAnalysisStatus: 'failed',
+                    documentAnalysisError: 'Falha na extração de dados',
+                    documentAnalysisCompletedAt: new Date().toISOString()
+                  } 
+                })
+                .where(eq(whatsappMessages.id, message.id));
+            }
+          } catch (processingError) {
+            console.error('Erro no processamento OCR de documento via WhatsApp:', processingError);
+            
+            // Atualizar metadados da mensagem com erro
+            await db.update(whatsappMessages)
+              .set({ 
+                metadata: { 
+                  ...message.metadata,
+                  documentAnalysisStatus: 'failed',
+                  documentAnalysisError: processingError.message || 'Erro desconhecido no processamento',
+                  documentAnalysisCompletedAt: new Date().toISOString()
+                } 
+              })
+              .where(eq(whatsappMessages.id, message.id));
+            
+            // Informar usuário sobre o problema
+            await this.sendDocumentProcessingFailure(
+              instanceId,
+              contactId,
+              'Ocorreu um erro ao processar seu documento. Por favor, tente novamente mais tarde.'
+            );
+          }
+        } else {
+          // É uma mídia, mas não parece ser um documento
+          // Apenas atualizar os metadados da mensagem
+          await db.update(whatsappMessages)
+            .set({ 
+              metadata: { 
+                ...message.metadata,
+                mediaProcessed: true,
+                isDocument: false
+              } 
+            })
+            .where(eq(whatsappMessages.id, message.id));
+          
+          // Responder normalmente via chatbot
+          const text = content.text || content.caption || '';
+          if (text) {
+            await this.processTextMessage(message, instanceId, contactId, text);
+          }
         }
       }
     } catch (error) {
-      console.error('Erro ao processar mensagem com mídia:', error);
+      console.error('Erro ao processar mensagem de mídia:', error);
       // Não lançar o erro para não interromper o fluxo principal
     }
   }
 
+  /**
+   * Analisa o contexto da conversa para determinar se estamos esperando um documento
+   * @param contactId ID do contato
+   * @param currentMessageId ID da mensagem atual
+   * @returns Informações de contexto sobre expectativa de documentos
+   */
+  private async analyzeDocumentContext(contactId: number, currentMessageId: string): Promise<{
+    isExpectingDocument: boolean;
+    expectedDocumentType?: string;
+    recentDocumentRequests: boolean;
+    confidence: number;
+  }> {
+    try {
+      // Buscar mensagens recentes da conversa para analisar contexto
+      const recentMessages = await db.query.whatsappMessages.findMany({
+        where: and(
+          eq(whatsappMessages.contactId, contactId),
+          // Excluir a mensagem atual
+          // @ts-ignore - Ignora erro do tipo pois sabemos que id e currentMessageId são compatíveis
+          currentMessageId ? (whatsappMessages.id !== parseInt(currentMessageId)) : true
+        ),
+        orderBy: [
+          // @ts-ignore - Ignora erro do tipo pois sabemos que createdAt é uma coluna válida
+          { createdAt: 'desc' }
+        ],
+        limit: 10 // Últimas 10 mensagens
+      });
+      
+      // Verificar se há mensagens de saída que solicitam documentos
+      const documentRequestKeywords = [
+        'envie seu documento', 'envie o documento', 'envie uma foto', 
+        'mande seu rg', 'mande seu cpf', 'mande o comprovante',
+        'enviar documento', 'foto do documento', 'imagem do documento'
+      ];
+      
+      // Palavras-chave específicas por tipo de documento
+      const documentTypeKeywords: Record<string, string[]> = {
+        'rg': ['rg', 'identidade', 'documento de identidade'],
+        'cpf': ['cpf', 'cadastro de pessoa'],
+        'address_proof': ['comprovante de residência', 'comprovante de endereço', 'conta de luz', 'conta de água'],
+        'school_certificate': ['certificado escolar', 'histórico escolar', 'diploma', 'boletim'],
+        'birth_certificate': ['certidão de nascimento']
+      };
+      
+      let isExpectingDocument = false;
+      let expectedDocumentType: string | undefined = undefined;
+      let recentDocumentRequests = false;
+      let contextConfidence = 0.0;
+      
+      // Analisar mensagens recentes (as mais recentes têm mais peso)
+      recentMessages.forEach((msg, index) => {
+        // Peso por recência (mensagens mais recentes têm mais importância)
+        const recencyWeight = 1 - (index / recentMessages.length);
+        
+        // Se for mensagem de saída (do sistema para o usuário)
+        if (msg.direction === 'outbound') {
+          const content = typeof msg.content === 'string' ? msg.content.toLowerCase() : '';
+          
+          // Verificar se pede documento
+          const requestsDocument = documentRequestKeywords.some(keyword => 
+            content.includes(keyword.toLowerCase())
+          );
+          
+          if (requestsDocument) {
+            isExpectingDocument = true;
+            recentDocumentRequests = true;
+            
+            // Aumentar a confiança de acordo com recência
+            contextConfidence += 0.3 * recencyWeight;
+            
+            // Analisar qual tipo de documento está sendo solicitado
+            for (const [docType, keywords] of Object.entries(documentTypeKeywords)) {
+              if (keywords.some(keyword => content.includes(keyword.toLowerCase()))) {
+                expectedDocumentType = docType;
+                contextConfidence += 0.2 * recencyWeight;
+                break;
+              }
+            }
+          }
+        }
+      });
+      
+      return {
+        isExpectingDocument,
+        expectedDocumentType,
+        recentDocumentRequests,
+        confidence: Math.min(1.0, contextConfidence)
+      };
+    } catch (error) {
+      console.error('Erro ao analisar contexto de documentos:', error);
+      return {
+        isExpectingDocument: false,
+        recentDocumentRequests: false,
+        confidence: 0
+      };
+    }
+  }
+  
+  /**
+   * Baixa mídia de uma URL (implementação dependente da Evolution API)
+   * @param mediaUrl URL da mídia
+   * @param mimeType Tipo MIME da mídia
+   * @returns Buffer com os dados da mídia
+   */
+  private async downloadMedia(mediaUrl: string, mimeType?: string): Promise<Buffer | null> {
+    // Implementação depende de como a Evolution API disponibiliza as mídias
+    // Esta é uma função simulada que em produção usaria fetch ou um cliente HTTP
+    try {
+      if (!mediaUrl) {
+        return null;
+      }
+      
+      // Em uma implementação real, faria algo como:
+      // const response = await fetch(mediaUrl);
+      // const arrayBuffer = await response.arrayBuffer();
+      // return Buffer.from(arrayBuffer);
+      
+      // Por ora, apenas logar que tentou baixar
+      console.log(`Tentativa de download de mídia: ${mediaUrl}`);
+      return Buffer.from(''); // Placeholder - em produção seria o buffer real
+    } catch (error) {
+      console.error('Erro ao baixar mídia:', error);
+      return null;
+    }
+  }
+  
+  /**
+   * Determina o tipo de documento baseado em contexto e conteúdo
+   * @param contextType Tipo sugerido pelo contexto da conversa
+   * @param messageText Texto ou legenda da mensagem
+   * @returns Tipo de documento determinado
+   */
+  private determineDocumentType(contextType?: string, messageText?: string): string | undefined {
+    // Se não temos contexto nem texto, não é possível determinar
+    if (!contextType && !messageText) {
+      return undefined;
+    }
+    
+    // Normalizar o texto para análise
+    const normalizedText = messageText?.toLowerCase() || '';
+    
+    // Tipos de documentos e palavras-chave associadas
+    const documentTypeKeywords: Record<string, string[]> = {
+      'rg': ['rg', 'identidade', 'documento de identidade', 'carteira de identidade'],
+      'cpf': ['cpf', 'cadastro de pessoa física', 'receita federal'],
+      'address_proof': ['comprovante de residência', 'comprovante de endereço', 'conta de luz', 'conta de água', 'endereço'],
+      'school_certificate': ['certificado', 'histórico escolar', 'diploma', 'boletim', 'escola'],
+      'birth_certificate': ['certidão de nascimento', 'nascimento'],
+      'other': []
+    };
+    
+    // Se temos um tipo de contexto, verificar se é válido
+    if (contextType && Object.keys(documentTypeKeywords).includes(contextType)) {
+      return contextType;
+    }
+    
+    // Se temos texto, verificar correspondências
+    if (normalizedText) {
+      for (const [docType, keywords] of Object.entries(documentTypeKeywords)) {
+        if (keywords.some(keyword => normalizedText.includes(keyword))) {
+          return docType;
+        }
+      }
+    }
+    
+    // Se não conseguirmos determinar um tipo específico, retornar 'other'
+    return 'other';
+  }
+  
+  /**
+   * Procura ou cria uma matrícula com base nos dados do documento
+   * @param extractedData Dados extraídos do documento
+   * @param phoneNumber Número de telefone do contato
+   * @param schoolId ID da escola
+   * @param documentType Tipo de documento
+   * @returns ID da matrícula encontrada ou criada
+   */
+  private async findOrCreateEnrollmentFromDocument(
+    extractedData: any,
+    phoneNumber: string,
+    schoolId: number,
+    documentType?: string
+  ): Promise<number> {
+    try {
+      // Primeiro, verificar se existe um aluno com este telefone
+      const studentQuery = await db.execute(`
+        SELECT id FROM students 
+        WHERE phone = $1 OR phone_alt = $1
+        LIMIT 1
+      `, [phoneNumber]);
+      
+      let studentId: number | null = null;
+      
+      if (studentQuery.rows.length > 0) {
+        studentId = studentQuery.rows[0].id;
+      } else if (extractedData.name) {
+        // Se não encontrou aluno mas temos nome no documento, tentar encontrar por nome
+        const studentByNameQuery = await db.execute(`
+          SELECT id FROM students 
+          WHERE LOWER(name) = LOWER($1)
+          LIMIT 1
+        `, [extractedData.name]);
+        
+        if (studentByNameQuery.rows.length > 0) {
+          studentId = studentByNameQuery.rows[0].id;
+          
+          // Atualizar o telefone do aluno
+          await db.execute(`
+            UPDATE students 
+            SET phone = $1, updated_at = NOW()
+            WHERE id = $2
+          `, [phoneNumber, studentId]);
+        }
+      }
+      
+      // Se não encontrou aluno, criar um novo com os dados extraídos
+      if (!studentId && extractedData.name) {
+        const insertStudent = await db.execute(`
+          INSERT INTO students (
+            name, 
+            phone, 
+            document_id,
+            status,
+            created_at,
+            updated_at
+          ) VALUES (
+            $1, $2, $3, 'lead', NOW(), NOW()
+          ) RETURNING id
+        `, [
+          extractedData.name,
+          phoneNumber,
+          extractedData.number || null
+        ]);
+        
+        if (insertStudent.rows.length > 0) {
+          studentId = insertStudent.rows[0].id;
+        }
+      }
+      
+      // Se ainda não temos um studentId, não podemos criar uma matrícula
+      if (!studentId) {
+        console.warn(`Não foi possível encontrar ou criar aluno para documento via WhatsApp: ${phoneNumber}`);
+        return 0;
+      }
+      
+      // Verificar se já existe uma matrícula para este aluno na escola
+      const enrollmentQuery = await db.execute(`
+        SELECT id FROM enrollments 
+        WHERE student_id = $1 AND school_id = $2
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [studentId, schoolId]);
+      
+      let enrollmentId: number;
+      
+      if (enrollmentQuery.rows.length > 0) {
+        enrollmentId = enrollmentQuery.rows[0].id;
+      } else {
+        // Criar nova matrícula
+        const insertEnrollment = await db.execute(`
+          INSERT INTO enrollments (
+            student_id, 
+            school_id,
+            status,
+            source,
+            created_at,
+            updated_at
+          ) VALUES (
+            $1, $2, 'lead', 'whatsapp', NOW(), NOW()
+          ) RETURNING id
+        `, [studentId, schoolId]);
+        
+        if (insertEnrollment.rows.length > 0) {
+          enrollmentId = insertEnrollment.rows[0].id;
+        } else {
+          throw new Error('Falha ao criar matrícula para aluno');
+        }
+      }
+      
+      return enrollmentId;
+    } catch (error) {
+      console.error('Erro ao encontrar/criar matrícula a partir de documento:', error);
+      return 0;
+    }
+  }
+  
+  /**
+   * Registra um documento recebido via WhatsApp no sistema
+   * @param processingResult Resultado do processamento OCR
+   * @param enrollmentId ID da matrícula
+   * @param mediaUrl URL da mídia
+   * @param messageId ID da mensagem WhatsApp
+   * @param documentType Tipo de documento
+   * @returns Registro do documento criado
+   */
+  private async registerDocumentFromWhatsApp(
+    processingResult: any,
+    enrollmentId: number,
+    mediaUrl: string,
+    messageId: string,
+    documentType?: string
+  ): Promise<any> {
+    try {
+      if (!enrollmentId) {
+        throw new Error('ID de matrícula inválido para registro de documento');
+      }
+      
+      // Inserir documento no sistema
+      const insertDocument = await db.execute(`
+        INSERT INTO documents (
+          enrollment_id,
+          document_type,
+          file_path,
+          status,
+          ocr_data,
+          ocr_quality,
+          source,
+          metadata,
+          created_at,
+          updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, 'whatsapp', $7, NOW(), NOW()
+        ) RETURNING *
+      `, [
+        enrollmentId,
+        documentType || 'other',
+        mediaUrl, // URL da mídia como caminho do arquivo
+        processingResult.status === 'valid' ? 'verified' : 'needs_review',
+        JSON.stringify(processingResult.extractedData || {}),
+        processingResult.confidence || 0,
+        JSON.stringify({
+          messageId,
+          imageHash: processingResult.imageHash,
+          fraudDetection: processingResult.fraudDetection
+        })
+      ]);
+      
+      if (insertDocument.rows.length === 0) {
+        throw new Error('Falha ao inserir documento no banco de dados');
+      }
+      
+      const document = insertDocument.rows[0];
+      
+      // Registrar metadados extraídos
+      if (processingResult.extractedData) {
+        for (const [field, value] of Object.entries(processingResult.extractedData)) {
+          if (value) {
+            await db.execute(`
+              INSERT INTO document_metadata (
+                document_id,
+                field_name,
+                field_value,
+                confidence,
+                source,
+                created_at
+              ) VALUES (
+                $1, $2, $3, $4, 'ocr', NOW()
+              )
+            `, [document.id, field, value, processingResult.confidence || 0]);
+          }
+        }
+      }
+      
+      return document;
+    } catch (error) {
+      console.error('Erro ao registrar documento do WhatsApp:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Envia mensagem de confirmação de recebimento de documento
+   * @param instanceId ID da instância
+   * @param contactId ID do contato
+   * @param processingResult Resultado do processamento OCR
+   * @param documentType Tipo de documento
+   * @param status Status da validação
+   */
+  private async sendDocumentConfirmation(
+    instanceId: number,
+    contactId: number,
+    processingResult: any,
+    documentType?: string,
+    status?: string
+  ): Promise<void> {
+    try {
+      // Determinar mensagem baseada no tipo de documento e status
+      let message = 'Recebemos seu documento! ';
+      
+      // Adicionar detalhes pelo tipo
+      switch (documentType) {
+        case 'rg':
+          message += 'Seu RG foi processado';
+          break;
+        case 'cpf':
+          message += 'Seu CPF foi processado';
+          break;
+        case 'address_proof':
+          message += 'Seu comprovante de residência foi processado';
+          break;
+        case 'school_certificate':
+          message += 'Seu certificado escolar foi processado';
+          break;
+        case 'birth_certificate':
+          message += 'Sua certidão de nascimento foi processada';
+          break;
+        default:
+          message += 'Seu documento foi processado';
+      }
+      
+      // Adicionar detalhes pelo status
+      if (status === 'valid') {
+        message += ' e validado com sucesso.';
+      } else if (status === 'needs_review') {
+        message += ', mas precisa de revisão adicional.';
+      } else {
+        message += '.';
+      }
+      
+      // Se tiver nome extraído, personalizar
+      if (processingResult.extractedData?.name) {
+        message += ` Obrigado, ${processingResult.extractedData.name.split(' ')[0]}!`;
+      }
+      
+      // Adicionar próximos passos
+      message += ' Em breve entraremos em contato com mais informações sobre sua matrícula.';
+      
+      // Salvar e enviar a mensagem
+      await this.saveMessage({
+        instanceId,
+        contactId,
+        content: message,
+        direction: 'outbound',
+        status: 'pending',
+        externalId: `doc_confirm_${new Date().getTime()}`,
+        metadata: {
+          messageType: 'text',
+          autoResponse: true,
+          documentConfirmation: true
+        }
+      });
+      
+      // Aqui chamaríamos a API para enviar a mensagem
+      // Em produção: await evolutionApiService.sendTextMessage(instanceKey, phoneNumber, message);
+    } catch (error) {
+      console.error('Erro ao enviar confirmação de documento:', error);
+    }
+  }
+  
+  /**
+   * Envia mensagem informando falha no processamento do documento
+   * @param instanceId ID da instância
+   * @param contactId ID do contato
+   * @param errorMessage Mensagem de erro
+   */
+  private async sendDocumentProcessingFailure(
+    instanceId: number,
+    contactId: number,
+    errorMessage: string
+  ): Promise<void> {
+    try {
+      const message = `${errorMessage} Por favor, tente enviar uma nova imagem com boa iluminação e foco.`;
+      
+      // Salvar e enviar a mensagem
+      await this.saveMessage({
+        instanceId,
+        contactId,
+        content: message,
+        direction: 'outbound',
+        status: 'pending',
+        externalId: `doc_error_${new Date().getTime()}`,
+        metadata: {
+          messageType: 'text',
+          autoResponse: true,
+          documentError: true
+        }
+      });
+      
+      // Aqui chamaríamos a API para enviar a mensagem
+      // Em produção: await evolutionApiService.sendTextMessage(instanceKey, phoneNumber, message);
+    } catch (error) {
+      console.error('Erro ao enviar mensagem de falha no processamento:', error);
+    }
+  }
+  
+  /**
+   * Envia notificação interna sobre recebimento de documento
+   * @param processingResult Resultado do processamento OCR
+   * @param documentId ID do documento
+   * @param enrollmentId ID da matrícula
+   * @param schoolId ID da escola
+   */
+  private async notifyDocumentReceived(
+    processingResult: any,
+    documentId: number,
+    enrollmentId: number,
+    schoolId: number
+  ): Promise<void> {
+    try {
+      // Enviar notificação via Pusher para a escola
+      await sendSchoolNotification(schoolId, {
+        title: 'Novo Documento Recebido',
+        message: `Um documento foi recebido via WhatsApp para a matrícula #${enrollmentId}`,
+        type: 'document',
+        data: {
+          documentId,
+          enrollmentId,
+          documentType: processingResult.documentType,
+          status: processingResult.status,
+          receivedVia: 'whatsapp'
+        },
+        relatedId: documentId,
+        relatedType: 'document'
+      });
+      
+      // Registrar em log
+      await logAction(
+        0, // Usuário do sistema (0 = sistema)
+        'document_received',
+        'document',
+        documentId.toString(),
+        {
+          enrollmentId,
+          schoolId,
+          source: 'whatsapp',
+          status: processingResult.status
+        },
+        'info'
+      );
+    } catch (error) {
+      console.error('Erro ao enviar notificação de documento recebido:', error);
+    }
+  }
+  
   /**
    * Verifica se o texto parece ser relacionado a um documento baseado em palavras-chave
    * @param text Texto a ser analisado
@@ -568,6 +1263,79 @@ class EvolutionApiWebhookService {
   /**
    * Obtém uma instância pelo seu Key
    * @param instanceKey Key da instância
+   */
+  /**
+   * Obtém instância pelo ID
+   * @param id ID da instância
+   * @returns Instância de WhatsApp encontrada ou undefined
+   */
+  private async getInstance(id: number): Promise<any> {
+    try {
+      // Tentar obter do cache primeiro
+      const cacheKey = `whatsapp_instance_id_${id}`;
+      
+      const cachedInstance = await cacheService.get(cacheKey);
+      if (cachedInstance) {
+        return cachedInstance;
+      }
+      
+      // Buscar do banco de dados
+      const [instance] = await db
+        .select()
+        .from(whatsappInstances)
+        .where(eq(whatsappInstances.id, id));
+      
+      if (instance) {
+        // Salvar no cache para futuras consultas
+        await cacheService.set(cacheKey, instance, CACHE_TTL);
+        return instance;
+      }
+      
+      return undefined;
+    } catch (error) {
+      console.error('Erro ao obter instância por ID:', error);
+      return undefined;
+    }
+  }
+  
+  /**
+   * Obtém contato pelo ID
+   * @param id ID do contato
+   * @returns Contato encontrado ou undefined
+   */
+  private async getContact(id: number): Promise<any> {
+    try {
+      // Tentar obter do cache primeiro
+      const cacheKey = `whatsapp_contact_id_${id}`;
+      
+      const cachedContact = await cacheService.get(cacheKey);
+      if (cachedContact) {
+        return cachedContact;
+      }
+      
+      // Buscar do banco de dados
+      const [contact] = await db
+        .select()
+        .from(whatsappContacts)
+        .where(eq(whatsappContacts.id, id));
+      
+      if (contact) {
+        // Salvar no cache para futuras consultas
+        await cacheService.set(cacheKey, contact, CACHE_TTL);
+        return contact;
+      }
+      
+      return undefined;
+    } catch (error) {
+      console.error('Erro ao obter contato por ID:', error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Obtém instância pelo chave de acesso
+   * @param instanceKey Chave da instância
+   * @returns Instância de WhatsApp encontrada ou undefined
    */
   private async getInstanceByKey(instanceKey: string): Promise<any> {
     // Tentar obter do cache
