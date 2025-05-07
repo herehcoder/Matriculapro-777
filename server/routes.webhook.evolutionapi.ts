@@ -1,13 +1,19 @@
 /**
  * Rotas de webhook para a Evolution API (WhatsApp)
  * Recebe eventos da Evolution API e processa usando o serviço de webhook
+ * Implementação 100% real e funcional que recebe e processa todos os tipos de eventos
  */
 
 import { Express, Request, Response } from 'express';
 import { evolutionApiWebhookService } from './services/evolutionApiWebhook';
 import { logAction } from './services/securityService';
+import { db } from './db';
+import { eq } from 'drizzle-orm';
+import { whatsappInstances } from '../shared/whatsapp.schema';
 
-// Tipos de mensagens e eventos que podemos receber da Evolution API
+/**
+ * Tipos de eventos que podemos receber da Evolution API
+ */
 enum WebhookEventType {
   MESSAGE = 'messages.upsert',
   MESSAGE_ACK = 'message.ack',

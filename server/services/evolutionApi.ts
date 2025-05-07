@@ -378,6 +378,18 @@ export class EvolutionApiService {
     imageUrl: string, 
     caption?: string
   ): Promise<any> {
+    if (this.inactiveMode) {
+      console.warn(`EvolutionApiService em modo inativo: sendImageMessage para ${phoneNumber} via ${instanceName}, imagem: ${imageUrl}`);
+      return {
+        key: {
+          id: `inactive-${Date.now()}`,
+          fromMe: true
+        },
+        status: 'pending',
+        message: 'Mensagem de imagem enfileirada em modo inativo (não será enviada)'
+      };
+    }
+    
     try {
       const client = this.getClient();
       const response = await client.post(`/message/image/${instanceName}`, {
@@ -414,6 +426,18 @@ export class EvolutionApiService {
     fileName: string,
     caption?: string
   ): Promise<any> {
+    if (this.inactiveMode) {
+      console.warn(`EvolutionApiService em modo inativo: sendDocumentMessage para ${phoneNumber} via ${instanceName}, documento: ${documentUrl}`);
+      return {
+        key: {
+          id: `inactive-${Date.now()}`,
+          fromMe: true
+        },
+        status: 'pending',
+        message: 'Mensagem de documento enfileirada em modo inativo (não será enviada)'
+      };
+    }
+    
     try {
       const client = this.getClient();
       const response = await client.post(`/message/document/${instanceName}`, {

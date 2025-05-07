@@ -599,6 +599,250 @@ class EvolutionApiWebhookService {
   }
   
   /**
+   * Processa uma mensagem recebida com mídia (imagem ou documento)
+   * @param instance Instância WhatsApp que recebeu a mídia
+   * @param message Mensagem recebida
+   * @param mediaUrl URL da mídia
+   * @param mediaType Tipo de mídia (image, document, video)
+   * @param caption Legenda da mídia
+   * @param mimeType Tipo MIME da mídia
+   * @returns Resultado do processamento
+   */
+  /**
+   * Obtém o nome amigável para um tipo de documento
+   * @param docType Tipo do documento 
+   * @returns Nome amigável do documento
+   */
+  private getDocumentTypeName(docType: string): string {
+    const documentNames: Record<string, string> = {
+      'rg': 'RG (Identidade)',
+      'cpf': 'CPF',
+      'address_proof': 'Comprovante de Residência',
+      'school_certificate': 'Certificado Escolar',
+      'birth_certificate': 'Certidão de Nascimento',
+      'other': 'Documento'
+    };
+    
+    return documentNames[docType] || 'Documento';
+  }
+  
+  /**
+   * Envia uma resposta para um contato
+   * @param instance Instância WhatsApp
+   * @param phone Número de telefone do contato
+   * @param message Mensagem a ser enviada
+   */
+  private async sendResponseToContact(instance: any, phone: string, message: string): Promise<any> {
+    try {
+      // Obter o serviço da Evolution API
+      const apiClient = instance.client || null;
+      
+      if (!apiClient) {
+        console.warn(`Não foi possível enviar resposta para ${phone}: cliente não encontrado`);
+        return false;
+      }
+      
+      // Enviar mensagem
+      return await apiClient.sendTextMessage(instance.instanceKey, phone, message);
+    } catch (error) {
+      console.error(`Erro ao enviar resposta para ${phone}:`, error);
+      return false;
+    }
+  }
+  
+  /**
+   * Extrai o número de telefone de um ID remoto do WhatsApp
+   * @param remoteJid ID remoto do WhatsApp 
+   * @returns Número de telefone limpo
+   */
+  private extractPhoneNumber(remoteJid: string): string | null {
+    if (!remoteJid) return null;
+    
+    // Formato típico: 5519999999999@s.whatsapp.net ou 5519999999999-1234567890@g.us
+    const match = remoteJid.match(/(\d+)[@-]/);
+    return match ? match[1] : null;
+  }
+  
+  private async processMediaMessage(
+    instance: any,
+    message: MessagePayload,
+    mediaUrl: string,
+    mediaType: 'image' | 'document' | 'video',
+    caption: string = '',
+    mimeType: string = ''
+  ): Promise<any> {
+    try {
+      // 1. Extrair o número de telefone e ID de conversa
+      const phone = this.extractPhoneNumber(message.key.remoteJid);
+      if (!phone) {
+        console.error('Número de telefone inválido na mensagem com mídia', message.key);
+        return { success: false, error: 'Número de telefone inválido' };
+      }
+      
+      // 2. Obter o contato no banco ou criar se não existir
+      let contactId: number;
+      try {
+        contactId = await this.getOrCreateContact(instance.id, phone, message.pushName || 'Contato WhatsApp');
+      } catch (error) {
+        console.error('Erro ao buscar/criar contato para mídia:', error);
+        return { success: false, error: 'Falha ao processar contato' };
+      }
+      
+      // 3. Detectar o tipo de documento com base no contexto da mensagem
+      const messageText = message.message?.conversation || '';
+      const documentType = this.detectDocumentType(messageText, caption || '', '');
+      
+      // 4. Se for uma imagem que parece ser um documento, processar com OCR
+      if ((mediaType === 'image' || (mediaType === 'document' && mimeType.startsWith('image/'))) && documentType) {
+        try {
+          console.log(`Processando imagem como documento do tipo ${documentType}`);
+          
+          // 5. Registrar mensagem de mídia recebida
+          const [savedMessage] = await db.insert(whatsappMessages)
+            .values({
+              instanceId: instance.id,
+              contactId,
+              externalId: message.key.id,
+              direction: 'inbound',
+              message: caption || 'Imagem recebida',
+              mediaUrl,
+              mediaType,
+              status: 'received',
+              metadata: {
+                documentType,
+                mimeType,
+                processedAsDocument: true
+              },
+              createdAt: new Date()
+            })
+            .returning();
+          
+          // 6. Encaminhar para processamento de OCR avançado
+          const ocrResult = await advancedOcrService.processDocumentImage(
+            mediaUrl, 
+            {
+              documentType,
+              source: 'whatsapp',
+              messageId: savedMessage.id
+            }
+          );
+          
+          // 7. Se tiver estudante ou matrícula associada, vincular o documento
+          if (ocrResult && ocrResult.studentId) {
+            // Atualizar a mensagem com o vínculo ao estudante
+            await db.update(whatsappMessages)
+              .set({
+                studentId: ocrResult.studentId,
+                metadata: {
+                  ...savedMessage.metadata,
+                  ocrProcessed: true,
+                  ocrSuccess: true,
+                  documentProcessed: true
+                }
+              })
+              .where(eq(whatsappMessages.id, savedMessage.id));
+            
+            // 8. Enviar resposta ao usuário informando sobre o processamento do documento
+            const responseText = `✅ Documento ${this.getDocumentTypeName(documentType)} recebido e processado com sucesso! Obrigado.`;
+            await this.sendResponseToContact(instance, phone, responseText);
+            
+            return {
+              success: true,
+              messageId: savedMessage.id,
+              documentProcessed: true,
+              documentType,
+              studentId: ocrResult.studentId
+            };
+          } else {
+            // Documento não vinculado a nenhum estudante/matrícula
+            await db.update(whatsappMessages)
+              .set({
+                metadata: {
+                  ...savedMessage.metadata,
+                  ocrProcessed: true,
+                  documentProcessed: true,
+                  studentNotFound: true
+                }
+              })
+              .where(eq(whatsappMessages.id, savedMessage.id));
+            
+            const responseText = `📄 Documento ${this.getDocumentTypeName(documentType)} recebido. Não conseguimos vincular automaticamente a um processo de matrícula. Um de nossos atendentes irá analisar o documento em breve.`;
+            await this.sendResponseToContact(instance, phone, responseText);
+            
+            return {
+              success: true,
+              messageId: savedMessage.id,
+              documentProcessed: true,
+              documentType,
+              studentId: null
+            };
+          }
+        } catch (processingError) {
+          console.error('Erro ao processar documento via OCR:', processingError);
+          
+          // Registrar falha no processamento
+          await db.insert(whatsappMessages)
+            .values({
+              instanceId: instance.id,
+              contactId,
+              externalId: message.key.id,
+              direction: 'inbound',
+              message: caption || 'Imagem recebida',
+              mediaUrl,
+              mediaType,
+              status: 'error',
+              metadata: {
+                documentType,
+                error: String(processingError),
+                processingFailed: true
+              },
+              createdAt: new Date()
+            });
+            
+          await this.sendResponseToContact(
+            instance, 
+            phone, 
+            "Desculpe, ocorreu um erro ao processar seu documento. Por favor, tente enviar novamente ou entre em contato com suporte."
+          );
+          
+          return { 
+            success: false, 
+            error: 'Falha ao processar documento', 
+            details: String(processingError)
+          };
+        }
+      } else {
+        // Mídia normal (não é documento ou não foi identificado como documento)
+        // Registrar mensagem normal
+        const [savedMessage] = await db.insert(whatsappMessages)
+          .values({
+            instanceId: instance.id,
+            contactId,
+            externalId: message.key.id,
+            direction: 'inbound',
+            message: caption || `${mediaType} recebido`,
+            mediaUrl,
+            mediaType,
+            status: 'received',
+            metadata: { mimeType },
+            createdAt: new Date()
+          })
+          .returning();
+        
+        return {
+          success: true,
+          messageId: savedMessage.id,
+          mediaType,
+          isDocument: false
+        };
+      }
+    } catch (error) {
+      console.error('Erro geral ao processar mensagem com mídia:', error);
+      return { success: false, error: String(error) };
+    }
+  }
+  
+  /**
    * Detecta o tipo de documento com base no texto da mensagem, legenda ou nome do arquivo
    * @param messageText Texto da mensagem 
    * @param caption Legenda da imagem/documento
