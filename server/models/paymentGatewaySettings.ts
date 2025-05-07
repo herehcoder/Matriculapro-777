@@ -85,30 +85,35 @@ export async function getAllPaymentGatewaySettings(): Promise<PaymentGatewaySett
  * Obtém configuração de gateway de pagamento por ID
  */
 export async function getPaymentGatewaySettingsById(id: number): Promise<PaymentGatewaySettings | null> {
-  const result = await db.execute(`
-    SELECT * FROM payment_gateway_settings
-    WHERE id = $1
-  `, [id]);
-  
-  if (result.rows.length === 0) {
-    return null;
+  try {
+    const result = await db.execute(`
+      SELECT * FROM payment_gateway_settings
+      WHERE id = ${id}
+    `);
+    
+    if (result.rows.length === 0) {
+      return null;
+    }
+    
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      gateway: row.gateway,
+      name: row.name,
+      isActive: row.is_active,
+      isDefault: row.is_default,
+      apiKey: row.api_key,
+      apiSecret: row.api_secret,
+      apiEndpoint: row.api_endpoint,
+      sandboxMode: row.sandbox_mode,
+      configuration: row.configuration,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  } catch (error) {
+    console.error('Erro ao obter gateway por ID:', error);
+    throw error;
   }
-  
-  const row = result.rows[0];
-  return {
-    id: row.id,
-    gateway: row.gateway,
-    name: row.name,
-    isActive: row.is_active,
-    isDefault: row.is_default,
-    apiKey: row.api_key,
-    apiSecret: row.api_secret,
-    apiEndpoint: row.api_endpoint,
-    sandboxMode: row.sandbox_mode,
-    configuration: row.configuration,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
-  };
 }
 
 /**
@@ -235,8 +240,8 @@ export async function updatePaymentGatewaySetting(
     await db.execute(`
       UPDATE payment_gateway_settings
       SET is_default = FALSE, updated_at = NOW()
-      WHERE is_default = TRUE AND id != $1
-    `, [id]);
+      WHERE is_default = TRUE AND id != ${id}
+    `);
   }
   
   // Constrói a query de atualização dinamicamente com base nos campos fornecidos
@@ -288,46 +293,73 @@ export async function updatePaymentGatewaySetting(
   
   if (updateFields.length === 1) {
     // Se só tiver o updated_at, retorna o registro atual
-    return getPaymentGatewaySettingsById(id);
+    try {
+      return await getPaymentGatewaySettingsById(id);
+    } catch (error) {
+      console.error('Erro ao buscar gateway após atualização:', error);
+      throw error;
+    }
   }
   
-  const result = await db.execute(`
-    UPDATE payment_gateway_settings
-    SET ${updateFields.join(', ')}
-    WHERE id = $1
-    RETURNING *
-  `, values);
+  try {
+    // Construir a query com valores interpolados diretamente
+    let updateQuery = `
+      UPDATE payment_gateway_settings
+      SET ${updateFields.join(', ')}
+      WHERE id = ${id}
+      RETURNING *
+    `;
+    
+    // Substituir placeholders com valores reais
+    for (let i = 0; i < values.length - 1; i++) {
+      const placeholder = `$${i + 2}`;
+      const value = typeof values[i + 1] === 'string' 
+        ? `'${values[i + 1].replace(/'/g, "''")}'` 
+        : values[i + 1];
+      updateQuery = updateQuery.replace(placeholder, value);
+    }
+    
+    const result = await db.execute(updateQuery);
   
-  if (result.rows.length === 0) {
-    return null;
+    if (result.rows.length === 0) {
+      return null;
+    }
+    
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      gateway: row.gateway,
+      name: row.name,
+      isActive: row.is_active,
+      isDefault: row.is_default,
+      apiKey: row.api_key,
+      apiSecret: row.api_secret,
+      apiEndpoint: row.api_endpoint,
+      sandboxMode: row.sandbox_mode,
+      configuration: row.configuration,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  } catch (error) {
+    console.error('Erro ao atualizar gateway de pagamento:', error);
+    throw error;
   }
-  
-  const row = result.rows[0];
-  return {
-    id: row.id,
-    gateway: row.gateway,
-    name: row.name,
-    isActive: row.is_active,
-    isDefault: row.is_default,
-    apiKey: row.api_key,
-    apiSecret: row.api_secret,
-    apiEndpoint: row.api_endpoint,
-    sandboxMode: row.sandbox_mode,
-    configuration: row.configuration,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
-  };
 }
 
 /**
  * Remove uma configuração de gateway de pagamento
  */
 export async function deletePaymentGatewaySetting(id: number): Promise<boolean> {
-  const result = await db.execute(`
-    DELETE FROM payment_gateway_settings
-    WHERE id = $1
-    RETURNING id
-  `, [id]);
-  
-  return result.rows.length > 0;
+  try {
+    const result = await db.execute(`
+      DELETE FROM payment_gateway_settings
+      WHERE id = ${id}
+      RETURNING id
+    `);
+    
+    return result.rows.length > 0;
+  } catch (error) {
+    console.error('Erro ao excluir gateway de pagamento:', error);
+    throw error;
+  }
 }
