@@ -16,6 +16,7 @@ import { registerPaymentRoutes } from "./routes.payment";
 import { registerWhatsAppRoutes } from "./routes.whatsapp";
 import { registerAdminWhatsAppRoutes } from "./routes.admin.whatsapp";
 import { registerWhatsappTemplateRoutes } from "./routes.whatsapp.templates";
+import { registerWhatsappMessageRoutes } from "./routes.whatsapp.messages";
 // Importar novas rotas avançadas
 import { registerEvolutionApiRoutes } from "./routes.evolution";
 import { registerOcrRoutes } from "./routes.ocr";
@@ -173,6 +174,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Registrar rotas de templates do WhatsApp
   registerWhatsappTemplateRoutes(app, isAuthenticated);
+  
+  // Registrar rotas de mensagens do WhatsApp
+  registerWhatsappMessageRoutes(app, isAuthenticated);
   
   // Registrar novas rotas avançadas
   registerEvolutionApiRoutes(app, isAuthenticated);
