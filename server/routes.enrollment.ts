@@ -1,6 +1,12 @@
 import { Request, Response, Express } from "express";
 import { storage } from "./storage";
-import { insertEnrollmentSchema, insertAnswerSchema } from "@shared/schema";
+import { enrollmentSchema as insertEnrollmentSchema } from "@shared/schema";
+// Temporário até implementarmos o schema completo
+const insertAnswerSchema = z.object({
+  enrollmentId: z.number(),
+  questionId: z.number(),
+  answer: z.string(),
+});
 import { z } from "zod";
 import { sendSchoolNotification, sendUserNotification } from "./pusher";
 

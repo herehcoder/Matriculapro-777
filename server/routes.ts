@@ -35,23 +35,60 @@ import { db } from "./db";
 import { and, desc, eq, gte, lt, lte, sql } from "drizzle-orm";
 import { cacheService } from "./services/cacheService";
 import {
-  insertUserSchema,
-  insertSchoolSchema,
-  insertLeadSchema,
-  insertStudentSchema,
-  insertCourseSchema,
-  insertEnrollmentSchema,
-  insertChatHistorySchema,
-  insertQuestionSchema,
-  insertNotificationSchema,
-  insertMessageSchema,
-  // Adicionar tabelas para consultas SQL
+  // Schemas atuais 
+  userSchema as insertUserSchema,
+  schoolSchema as insertSchoolSchema,
+  enrollmentSchema as insertEnrollmentSchema,
+  notificationSchema as insertNotificationSchema,
+  messageSchema as insertMessageSchema,
+  // Tabelas para consultas SQL
   schools,
-  students,
-  leads,
   users,
   enrollments
 } from "@shared/schema";
+
+// Schemas temporários até implementação completa
+const insertLeadSchema = z.object({
+  fullName: z.string(),
+  email: z.string().email().optional(),
+  phone: z.string().optional(),
+  schoolId: z.number(),
+  source: z.string().optional(),
+  status: z.string().optional(),
+});
+
+const insertStudentSchema = z.object({
+  userId: z.number(),
+  schoolId: z.number(),
+  cpf: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+});
+
+const insertCourseSchema = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+  schoolId: z.number(),
+  price: z.number().optional(),
+  duration: z.string().optional(),
+});
+
+const insertChatHistorySchema = z.object({
+  userId: z.number().optional(),
+  schoolId: z.number(),
+  leadId: z.number().optional(),
+  content: z.string(),
+  isBot: z.boolean().default(false),
+});
+
+const insertQuestionSchema = z.object({
+  schoolId: z.number(),
+  question: z.string(),
+  questionType: z.string(),
+  required: z.boolean().default(false),
+  section: z.string().optional(),
+  options: z.array(z.string()).optional(),
+});
 import pusher, { 
   sendUserNotification, 
   sendGlobalNotification, 

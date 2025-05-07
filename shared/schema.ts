@@ -1,468 +1,228 @@
-import { pgTable, text, serial, integer, boolean, timestamp, varchar, primaryKey, json, pgEnum } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
+/**
+ * Arquivo de definição do schema do banco de dados
+ * 
+ * Este arquivo contém as definições das tabelas do banco de dados, schemas Zod
+ * para validação e tipos TypeScript correspondentes.
+ */
+import { pgTable, serial, text, boolean, timestamp, integer, jsonb } from 'drizzle-orm/pg-core';
+import { createInsertSchema } from 'drizzle-zod';
+import { z } from 'zod';
 
-// Enums
-export const userRoleEnum = pgEnum('user_role', ['admin', 'school', 'attendant', 'student']);
-export const enrollmentStatusEnum = pgEnum('enrollment_status', ['started', 'personal_info', 'course_info', 'document_verification', 'document_pending', 'document_approved', 'payment', 'completed', 'abandoned']);
-export const leadSourceEnum = pgEnum('lead_source', ['whatsapp', 'website', 'social_media', 'referral', 'other']);
-export const leadStatusEnum = pgEnum('lead_status', ['new', 'contacted', 'interested', 'converted', 'lost']);
-export const chatStatusEnum = pgEnum('chat_status', ['active', 'closed']);
-export const notificationTypeEnum = pgEnum('notification_type', ['message', 'enrollment', 'lead', 'system', 'payment']);
-export const messageStatusEnum = pgEnum('message_status', ['sent', 'delivered', 'read']);
-export const paymentStatusEnum = pgEnum('payment_status', ['pending', 'completed', 'failed', 'refunded', 'canceled']);
-export const paymentMethodEnum = pgEnum('payment_method', ['credit-card', 'debit-card', 'pix', 'bank-transfer', 'other']);
-export const logLevelEnum = pgEnum('log_level', ['info', 'warning', 'error']);
+// Re-export das entidades de configurações de usuário
+export * from './schema.user-settings';
 
-// Users table
+// Tabela de notificações
+export const notifications = pgTable('notifications', {
+  id: serial('id').primaryKey(),
+  title: text('title').notNull(),
+  message: text('message').notNull(),
+  type: text('type', { 
+    enum: ['message', 'enrollment', 'lead', 'system', 'payment'] 
+  }).notNull(),
+  userId: integer('user_id').notNull(),
+  schoolId: integer('school_id'),
+  read: boolean('read').default(false),
+  data: jsonb('data'),
+  relatedId: integer('related_id'),
+  relatedType: text('related_type'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Schema Zod para notificações
+export const notificationSchema = createInsertSchema(notifications, {
+  title: z.string().min(1, 'Título é obrigatório'),
+  message: z.string().min(1, 'Mensagem é obrigatória'),
+  type: z.enum(['message', 'enrollment', 'lead', 'system', 'payment']),
+  userId: z.number(),
+  schoolId: z.number().optional(),
+  read: z.boolean().optional(),
+  data: z.any().optional(),
+  relatedId: z.number().optional(),
+  relatedType: z.string().optional(),
+}).omit({ id: true, createdAt: true, updatedAt: true });
+
+// Tipos TypeScript para notificações
+export type Notification = typeof notifications.$inferSelect;
+export type InsertNotification = z.infer<typeof notificationSchema>;
+
+// Tabela de mensagens
+export const messages = pgTable('messages', {
+  id: serial('id').primaryKey(),
+  content: text('content').notNull(),
+  senderId: integer('sender_id').notNull(),
+  receiverId: integer('receiver_id').notNull(),
+  status: text('status', { 
+    enum: ['sent', 'delivered', 'read'] 
+  }).default('sent'),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Schema Zod para mensagens
+export const messageSchema = createInsertSchema(messages, {
+  content: z.string().min(1, 'Conteúdo é obrigatório'),
+  senderId: z.number(),
+  receiverId: z.number(),
+  status: z.enum(['sent', 'delivered', 'read']).optional(),
+  metadata: z.any().optional(),
+}).omit({ id: true, createdAt: true, updatedAt: true });
+
+// Tipos TypeScript para mensagens
+export type Message = typeof messages.$inferSelect;
+export type InsertMessage = z.infer<typeof messageSchema>;
+
+// Tabela de usuários
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
   username: text('username').notNull().unique(),
   email: text('email').notNull().unique(),
   password: text('password').notNull(),
   fullName: text('full_name').notNull(),
-  role: userRoleEnum('role').notNull(),
-  schoolId: integer('school_id').references(() => schools.id),
+  role: text('role', { enum: ['admin', 'school', 'attendant', 'student'] }).notNull(),
   phone: text('phone'),
+  schoolId: integer('school_id'),
   profileImage: text('profile_image'),
   supabaseId: text('supabase_id'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
-// Schools table
+// Schema Zod para usuários
+export const userSchema = createInsertSchema(users, {
+  username: z.string().min(3, 'Nome de usuário deve ter pelo menos 3 caracteres'),
+  email: z.string().email('Email inválido'),
+  password: z.string().min(6, 'Senha deve ter pelo menos 6 caracteres'),
+  fullName: z.string().min(3, 'Nome completo deve ter pelo menos 3 caracteres'),
+  role: z.enum(['admin', 'school', 'attendant', 'student']),
+  phone: z.string().optional().nullable(),
+  schoolId: z.number().optional().nullable(),
+  profileImage: z.string().optional().nullable(),
+  supabaseId: z.string().optional().nullable(),
+}).omit({ id: true, createdAt: true, updatedAt: true });
+
+// Tipos TypeScript
+export type User = typeof users.$inferSelect;
+export type InsertUser = z.infer<typeof userSchema>;
+
+// Tabela de escolas
 export const schools = pgTable('schools', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
-  logo: text('logo'),
-  email: text('email').notNull(),
-  phone: text('phone').notNull(),
-  address: text('address'),
-  city: text('city').notNull(),
-  state: text('state').notNull(),
-  zipCode: text('zip_code'),
-  mainCourse: text('main_course'),
-  description: text('description'),
-  whatsappNumber: text('whatsapp_number'),
-  whatsappEnabled: boolean('whatsapp_enabled').default(false),
-  apiKey: text('api_key'),
-  webhookUrl: text('webhook_url'),
-  active: boolean('active').default(true),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
-
-// Attendants table
-export const attendants = pgTable('attendants', {
-  id: serial('id').primaryKey(),
-  userId: integer('user_id').notNull().references(() => users.id),
-  schoolId: integer('school_id').notNull().references(() => schools.id),
-  department: text('department'),
-  active: boolean('active').default(true),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
-
-// Students table
-export const students = pgTable('students', {
-  id: serial('id').primaryKey(),
-  userId: integer('user_id').notNull().references(() => users.id),
-  schoolId: integer('school_id').notNull().references(() => schools.id),
-  cpf: text('cpf'),
-  birthdate: timestamp('birthdate'),
-  gender: text('gender'),
+  logoUrl: text('logo_url'),
   address: text('address'),
   city: text('city'),
   state: text('state'),
   zipCode: text('zip_code'),
-  parentName: text('parent_name'),
-  parentRelationship: text('parent_relationship'),
-  parentEmail: text('parent_email'),
-  parentPhone: text('parent_phone'),
+  phone: text('phone'),
+  email: text('email'),
+  website: text('website'),
   active: boolean('active').default(true),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  settings: jsonb('settings'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
-// Leads table
-export const leads = pgTable('leads', {
-  id: serial('id').primaryKey(),
-  fullName: text('full_name').notNull(),
-  email: text('email').notNull(),
-  phone: text('phone').notNull(),
-  schoolId: integer('school_id').notNull().references(() => schools.id),
-  source: leadSourceEnum('source').default('website'),
-  status: leadStatusEnum('status').default('new'),
-  notes: text('notes'),
-  utmSource: text('utm_source'),
-  utmMedium: text('utm_medium'),
-  utmCampaign: text('utm_campaign'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+// Schema Zod para escolas
+export const schoolSchema = createInsertSchema(schools, {
+  name: z.string().min(3, 'Nome da escola deve ter pelo menos 3 caracteres'),
+  logoUrl: z.string().optional(),
+  address: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  zipCode: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().email('Email inválido').optional(),
+  website: z.string().optional(),
+  active: z.boolean().optional(),
+  settings: z.any().optional(),
+}).omit({ id: true, createdAt: true, updatedAt: true });
 
-// Courses table
-export const courses = pgTable('courses', {
-  id: serial('id').primaryKey(),
-  name: text('name').notNull(),
-  description: text('description'),
-  schoolId: integer('school_id').notNull().references(() => schools.id),
-  price: integer('price'), // stored in cents
-  duration: text('duration'),
-  active: boolean('active').default(true),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+// Tipos TypeScript
+export type School = typeof schools.$inferSelect;
+export type InsertSchool = z.infer<typeof schoolSchema>;
 
-// Questions table for form questions
-export const questions = pgTable('questions', {
-  id: serial('id').primaryKey(),
-  schoolId: integer('school_id').notNull().references(() => schools.id),
-  question: text('question').notNull(),
-  questionType: text('question_type').notNull(), // text, select, radio, etc.
-  options: json('options'), // For select, radio, etc
-  required: boolean('required').default(false),
-  order: integer('order').notNull(),
-  formSection: text('form_section').notNull(), // personal_info, course_info, payment
-  active: boolean('active').default(true),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
-
-// Answers table for form answers
-export const answers = pgTable('answers', {
-  id: serial('id').primaryKey(),
-  questionId: integer('question_id').notNull().references(() => questions.id),
-  enrollmentId: integer('enrollment_id').notNull().references(() => enrollments.id),
-  answer: text('answer'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
-
-// Chat history table
-export const chatHistory = pgTable('chat_history', {
-  id: serial('id').primaryKey(),
-  schoolId: integer('school_id').notNull().references(() => schools.id),
-  userId: integer('user_id').references(() => users.id),
-  leadId: integer('lead_id').references(() => leads.id),
-  message: text('message').notNull(),
-  sentByUser: boolean('sent_by_user').notNull(),
-  status: chatStatusEnum('status').default('active'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
-
-// Enrollments table (Funnel stages)
+// Tabela de matrículas
 export const enrollments = pgTable('enrollments', {
   id: serial('id').primaryKey(),
-  schoolId: integer('school_id').notNull().references(() => schools.id),
-  studentId: integer('student_id').references(() => students.id),
-  leadId: integer('lead_id').references(() => leads.id),
-  courseId: integer('course_id').references(() => courses.id),
-  status: enrollmentStatusEnum('status').default('started'),
-  personalInfoCompleted: boolean('personal_info_completed').default(false),
-  courseInfoCompleted: boolean('course_info_completed').default(false),
-  paymentCompleted: boolean('payment_completed').default(false),
-  paymentAmount: integer('payment_amount'), // stored in cents
-  paymentMethod: text('payment_method'),
-  paymentReference: text('payment_reference'),
-  paymentStatus: text('payment_status').default('pending'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  studentId: integer('student_id').notNull(),
+  schoolId: integer('school_id').notNull(),
+  courseId: integer('course_id').notNull(),
+  status: text('status', { 
+    enum: ['pending', 'approved', 'rejected', 'canceled', 'completed'] 
+  }).default('pending'),
+  semester: text('semester'),
+  year: text('year'),
+  paymentStatus: text('payment_status', {
+    enum: ['pending', 'paid', 'partial', 'overdue', 'canceled', 'refunded']
+  }).default('pending'),
+  documents: jsonb('documents'),
+  metadata: jsonb('metadata'),
+  createdById: integer('created_by_id'),
+  updatedById: integer('updated_by_id'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
-// WhatsApp messages table
-export const whatsappMessages = pgTable('whatsapp_messages', {
-  id: serial('id').primaryKey(),
-  schoolId: integer('school_id').notNull().references(() => schools.id),
-  leadId: integer('lead_id').references(() => leads.id),
-  studentId: integer('student_id').references(() => students.id),
-  message: text('message').notNull(),
-  direction: text('direction').notNull(), // inbound or outbound
-  status: text('status').notNull(), // sent, delivered, read, failed
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+// Schema Zod para matrículas
+export const enrollmentSchema = createInsertSchema(enrollments, {
+  studentId: z.number(),
+  schoolId: z.number(),
+  courseId: z.number(),
+  status: z.enum(['pending', 'approved', 'rejected', 'canceled', 'completed']).optional(),
+  semester: z.string().optional(),
+  year: z.string().optional(),
+  paymentStatus: z.enum(['pending', 'paid', 'partial', 'overdue', 'canceled', 'refunded']).optional(),
+  documents: z.array(z.any()).optional(),
+  metadata: z.any().optional(),
+  createdById: z.number().optional(),
+  updatedById: z.number().optional(),
+}).omit({ id: true, createdAt: true, updatedAt: true });
 
-// Documents table
+// Tipos TypeScript
+export type Enrollment = typeof enrollments.$inferSelect;
+export type InsertEnrollment = z.infer<typeof enrollmentSchema>;
+
+// Tabela de documentos
 export const documents = pgTable('documents', {
   id: serial('id').primaryKey(),
-  enrollmentId: integer('enrollment_id').notNull().references(() => enrollments.id),
-  documentType: text('document_type').notNull(), // identityDocument, proofOfAddress, photo, schoolRecords
-  fileName: text('file_name').notNull(),
-  fileType: text('file_type').notNull(), // MIME type
-  filePath: text('file_path').notNull(),
-  fileUrl: text('file_url').notNull(),
-  fileSize: integer('file_size').notNull(),
-  uploadedAt: timestamp('uploaded_at').notNull(),
-  status: text('status').notNull().default('uploaded'), // uploaded, verified, needs_review, partial_match, mismatch, rejected
-  notes: text('notes'),
-  ocrData: json('ocr_data'), // JSON data containing all OCR extracted content
-  ocrQuality: integer('ocr_quality'), // 0-100 numeric value of OCR quality
-  verificationResult: json('verification_result'), // Results of comparing OCR data with user data
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
-
-// Metrics table for statistics
-export const metrics = pgTable('metrics', {
-  id: serial('id').primaryKey(),
-  schoolId: integer('school_id').notNull().references(() => schools.id),
-  metricType: text('metric_type').notNull(), // visits, leads, conversions, etc.
-  metricValue: integer('metric_value').notNull(),
-  source: text('source'),
-  date: timestamp('date').defaultNow().notNull(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
-
-// Real-time notifications table
-export const notifications = pgTable('notifications', {
-  id: serial('id').primaryKey(),
-  userId: integer('user_id').notNull().references(() => users.id),
-  schoolId: integer('school_id').references(() => schools.id),
+  enrollmentId: integer('enrollment_id'),
+  studentId: integer('student_id').notNull(),
+  type: text('type', {
+    enum: ['id', 'address', 'diploma', 'transcripts', 'photo', 'other']
+  }).notNull(),
   title: text('title').notNull(),
-  message: text('message').notNull(),
-  type: notificationTypeEnum('type').notNull(),
-  read: boolean('read').default(false),
-  data: json('data'), // Additional data related to notification
-  relatedId: integer('related_id'), // ID of the related resource (enrollment, lead, etc.)
-  relatedType: text('related_type'), // Type of the related resource
-  createdAt: timestamp('created_at').defaultNow().notNull(),
+  description: text('description'),
+  fileUrl: text('file_url').notNull(),
+  mimeType: text('mime_type'),
+  fileSize: integer('file_size'),
+  status: text('status', {
+    enum: ['pending', 'verified', 'rejected', 'expired']
+  }).default('pending'),
+  verifiedById: integer('verified_by_id'),
+  verifiedAt: timestamp('verified_at'),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
-// Real-time messages table
-export const messages = pgTable('messages', {
-  id: serial('id').primaryKey(),
-  senderId: integer('sender_id').notNull().references(() => users.id),
-  receiverId: integer('receiver_id').notNull().references(() => users.id),
-  schoolId: integer('school_id').references(() => schools.id),
-  content: text('content').notNull(),
-  status: messageStatusEnum('status').default('sent'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+// Schema Zod para documentos
+export const documentSchema = createInsertSchema(documents, {
+  enrollmentId: z.number().optional(),
+  studentId: z.number(),
+  type: z.enum(['id', 'address', 'diploma', 'transcripts', 'photo', 'other']),
+  title: z.string(),
+  description: z.string().optional(),
+  fileUrl: z.string(),
+  mimeType: z.string().optional(),
+  fileSize: z.number().optional(),
+  status: z.enum(['pending', 'verified', 'rejected', 'expired']).optional(),
+  verifiedById: z.number().optional(),
+  verifiedAt: z.date().optional(),
+  metadata: z.any().optional(),
+}).omit({ id: true, createdAt: true, updatedAt: true });
 
-// Password reset tokens table
-export const passwordResetTokens = pgTable('password_reset_tokens', {
-  id: serial('id').primaryKey(),
-  userId: integer('user_id').notNull().references(() => users.id),
-  token: text('token').notNull().unique(),
-  expiresAt: timestamp('expires_at').notNull(),
-  used: boolean('used').default(false),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
-
-// Audit logs table
-export const auditLogs = pgTable('audit_logs', {
-  id: serial('id').primaryKey(),
-  userId: integer('user_id').notNull().references(() => users.id),
-  action: text('action').notNull(),
-  resource: text('resource').notNull(),
-  resourceId: text('resource_id'),
-  details: json('details'),
-  level: logLevelEnum('level').default('info'),
-  ipAddress: text('ip_address'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
-
-// Schema for inserting a new user
-export const insertUserSchema = createInsertSchema(users).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-
-// Schema for inserting a new school
-export const insertSchoolSchema = createInsertSchema(schools).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-
-// Schema for inserting a new student
-export const insertStudentSchema = createInsertSchema(students).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-
-// Schema for inserting a new lead
-export const insertLeadSchema = createInsertSchema(leads).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-
-// Schema for inserting a new enrollment
-export const insertEnrollmentSchema = createInsertSchema(enrollments).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-
-// Schema for inserting a new course
-export const insertCourseSchema = createInsertSchema(courses).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-
-// Schema for inserting a new question
-export const insertQuestionSchema = createInsertSchema(questions).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-
-// Schema for inserting a new answer
-export const insertAnswerSchema = createInsertSchema(answers).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-
-// Schema for inserting a new chat message
-export const insertChatHistorySchema = createInsertSchema(chatHistory).omit({
-  id: true,
-  createdAt: true
-});
-
-// Schema for inserting a new WhatsApp message
-export const insertWhatsappMessageSchema = createInsertSchema(whatsappMessages).omit({
-  id: true,
-  createdAt: true
-});
-
-// Schema for inserting a new notification
-export const insertNotificationSchema = createInsertSchema(notifications).omit({
-  id: true,
-  createdAt: true
-});
-
-// Schema for inserting a new message
-export const insertMessageSchema = createInsertSchema(messages).omit({
-  id: true,
-  createdAt: true
-});
-
-// Schema for inserting a new metric
-export const insertMetricSchema = createInsertSchema(metrics).omit({
-  id: true,
-  createdAt: true
-});
-
-// Schema for inserting a new document
-export const insertDocumentSchema = createInsertSchema(documents).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-
-// Schema for inserting a new password reset token
-export const insertPasswordResetTokenSchema = createInsertSchema(passwordResetTokens).omit({
-  id: true,
-  createdAt: true
-});
-
-
-
-// Types for Drizzle ORM - All types consolidated in one place
-export type User = typeof users.$inferSelect;
-export type InsertUser = z.infer<typeof insertUserSchema>;
-
-export type School = typeof schools.$inferSelect;
-export type InsertSchool = z.infer<typeof insertSchoolSchema>;
-
-export type Attendant = typeof attendants.$inferSelect;
-export type Student = typeof students.$inferSelect;
-export type InsertStudent = z.infer<typeof insertStudentSchema>;
-
-export type Lead = typeof leads.$inferSelect;
-export type InsertLead = z.infer<typeof insertLeadSchema>;
-
-export type Course = typeof courses.$inferSelect;
-export type InsertCourse = z.infer<typeof insertCourseSchema>;
-
-export type Question = typeof questions.$inferSelect;
-export type InsertQuestion = z.infer<typeof insertQuestionSchema>;
-
-export type Answer = typeof answers.$inferSelect;
-export type InsertAnswer = z.infer<typeof insertAnswerSchema>;
-
-export type ChatMessage = typeof chatHistory.$inferSelect;
-export type InsertChatMessage = z.infer<typeof insertChatHistorySchema>;
-
-export type Enrollment = typeof enrollments.$inferSelect;
-export type InsertEnrollment = z.infer<typeof insertEnrollmentSchema>;
-
-export type WhatsappMessage = typeof whatsappMessages.$inferSelect;
-export type InsertWhatsappMessage = z.infer<typeof insertWhatsappMessageSchema>;
-
-export type Metric = typeof metrics.$inferSelect;
-export type InsertMetric = z.infer<typeof insertMetricSchema>;
-
-export type Notification = typeof notifications.$inferSelect;
-export type InsertNotification = z.infer<typeof insertNotificationSchema>;
-
-export type Message = typeof messages.$inferSelect;
-export type InsertMessage = z.infer<typeof insertMessageSchema>;
-
+// Tipos TypeScript
 export type Document = typeof documents.$inferSelect;
-export type InsertDocument = z.infer<typeof insertDocumentSchema>;
-
-export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
-export type InsertPasswordResetToken = z.infer<typeof insertPasswordResetTokenSchema>;
-
-// Payments table
-export const payments = pgTable('payments', {
-  id: serial('id').primaryKey(),
-  enrollmentId: integer('enrollment_id').notNull().references(() => enrollments.id),
-  amount: integer('amount').notNull(), // stored in cents
-  status: paymentStatusEnum('status').default('pending'),
-  paymentMethod: paymentMethodEnum('payment_method').default('credit-card'),
-  stripePaymentIntentId: text('stripe_payment_intent_id'),
-  stripeCustomerId: text('stripe_customer_id'),
-  completedAt: timestamp('completed_at'),
-  failureReason: text('failure_reason'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
-
-// Schema for inserting a new payment
-export const insertPaymentSchema = createInsertSchema(payments).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-  completedAt: true
-});
-
-// User settings table
-export const userSettings = pgTable('user_settings', {
-  id: serial('id').primaryKey(),
-  userId: integer('user_id').notNull().references(() => users.id).unique(),
-  notifications: json('notifications').notNull().default({
-    email: true,
-    push: false,
-    sms: true,
-    whatsapp: true,
-  }),
-  appearance: json('appearance').notNull().default({
-    darkMode: false,
-    compactMode: false,
-  }),
-  security: json('security').notNull().default({
-    twoFactorEnabled: false,
-  }),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
-
-// Schema for inserting user settings
-export const insertUserSettingsSchema = createInsertSchema(userSettings).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-
-export type UserSettings = typeof userSettings.$inferSelect;
-export type InsertUserSettings = z.infer<typeof insertUserSettingsSchema>;
-
-export type Payment = typeof payments.$inferSelect;
-export type InsertPayment = z.infer<typeof insertPaymentSchema>;
+export type InsertDocument = z.infer<typeof documentSchema>;

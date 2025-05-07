@@ -1,7 +1,16 @@
 import { Request, Response, Express } from "express";
 import { storage } from "./storage";
-import { insertQuestionSchema } from "@shared/schema";
 import { z } from "zod";
+
+// Schema temporário até implementação completa
+const insertQuestionSchema = z.object({
+  schoolId: z.number(),
+  question: z.string(),
+  questionType: z.string(),
+  required: z.boolean().default(false),
+  section: z.string().optional(),
+  options: z.array(z.string()).optional(),
+});
 
 export function registerQuestionRoutes(app: Express, isAuthenticated: any) {
   // Get questions for a school (optionally filtered by form section)

@@ -2,7 +2,35 @@ import { Request, Response, Express } from 'express';
 import { eq, and } from 'drizzle-orm';
 import { db } from './db';
 import { storage } from './storage';
-import { documents, students, enrollments, courses } from '../shared/schema';
+import { documents, enrollments } from '../shared/schema';
+// Declaração temporária para students e courses até implementação completa
+import { pgTable, serial, text, integer, timestamp, jsonb } from 'drizzle-orm/pg-core';
+
+// Referência temporária para a tabela de students
+const students = pgTable('students', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull(),
+  schoolId: integer('school_id').notNull(),
+  cpf: text('cpf'),
+  city: text('city'),
+  state: text('state'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+  metadata: jsonb('metadata')
+});
+
+// Referência temporária para a tabela de cursos
+const courses = pgTable('courses', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
+  schoolId: integer('school_id').notNull(),
+  price: text('price'),
+  duration: text('duration'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+  metadata: jsonb('metadata')
+});
 
 /**
  * Registra as rotas relacionadas a documentos de estudantes

@@ -1,7 +1,25 @@
 import { Express, Request, Response } from 'express';
 import stripe from './stripe';
 import { db } from './db';
-import { enrollments, payments } from '@shared/schema';
+import { enrollments } from '@shared/schema';
+import { pgTable, serial, text, integer, timestamp, jsonb } from 'drizzle-orm/pg-core';
+
+// Definição temporária da tabela de pagamentos
+export const payments = pgTable('payments', {
+  id: serial('id').primaryKey(),
+  enrollmentId: integer('enrollment_id').notNull(),
+  amount: integer('amount').notNull(),
+  currency: text('currency').default('BRL'),
+  status: text('status', { enum: ['pending', 'completed', 'failed', 'refunded'] }),
+  paymentMethod: text('payment_method'),
+  paymentGateway: text('payment_gateway'),
+  gatewayTransactionId: text('gateway_transaction_id'),
+  stripePaymentIntentId: text('stripe_payment_intent_id'),
+  completedAt: timestamp('completed_at'),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
 import { eq } from 'drizzle-orm';
 
 /**

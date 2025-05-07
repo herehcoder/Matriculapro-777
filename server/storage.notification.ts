@@ -1,5 +1,4 @@
-import { notifications, type Notification, type InsertNotification } from "@shared/schema";
-import { messages, type Message, type InsertMessage } from "@shared/schema";
+import { notifications, type Notification, type InsertNotification, messages, type Message, type InsertMessage } from "@shared/schema";
 import { eq, and, or, desc } from "drizzle-orm";
 import { db } from "./db";
 

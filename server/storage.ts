@@ -1,14 +1,30 @@
 import {
-  users, schools, attendants, students, leads, courses, questions, answers,
-  chatHistory, enrollments, metrics, notifications, messages, passwordResetTokens, userSettings,
+  users, schools, enrollments, 
+  notifications, messages, userSettings,
   type User, type InsertUser, type School, type InsertSchool,
-  type Attendant, type Student, type InsertStudent, type Lead, type InsertLead,
-  type Course, type InsertCourse, type Question, type InsertQuestion,
-  type Answer, type InsertAnswer, type ChatMessage, type InsertChatMessage,
-  type Enrollment, type InsertEnrollment, type Metric, type InsertMetric, 
+  type Enrollment, type InsertEnrollment, 
   type Notification, type InsertNotification, type Message, type InsertMessage, 
-  type PasswordResetToken, type InsertPasswordResetToken, type UserSettings, type InsertUserSettings
+  type UserSettings, type InsertUserSettings
 } from "@shared/schema";
+
+// Tipos temporários para implementação gradual
+type Attendant = any;
+type Student = any;
+type Lead = any;
+type Course = any;
+type Question = any;
+type Answer = any;
+type ChatMessage = any;
+type Metric = any;
+type PasswordResetToken = any;
+type InsertStudent = any;
+type InsertLead = any;
+type InsertCourse = any;
+type InsertQuestion = any;
+type InsertAnswer = any;
+type InsertChatMessage = any;
+type InsertMetric = any;
+type InsertPasswordResetToken = any;
 
 // Importando os novos schemas do WhatsApp
 import {

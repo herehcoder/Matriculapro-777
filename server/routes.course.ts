@@ -1,8 +1,16 @@
 import { Request, Response, Express } from "express";
 import { storage } from "./storage";
-import { insertCourseSchema } from "@shared/schema";
 import { z } from "zod";
 import { sendSchoolNotification } from "./pusher";
+
+// Definir schema temporário até implementação completa
+const insertCourseSchema = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+  schoolId: z.number(),
+  price: z.number().optional(),
+  duration: z.string().optional(),
+});
 
 export function registerCourseRoutes(app: Express, isAuthenticated: any) {
   // Get all courses

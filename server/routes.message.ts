@@ -1,6 +1,16 @@
 import { Express, Request, Response } from "express";
 import { storage } from "./storage";
-import { messages, insertMessageSchema, users } from "../shared/schema";
+import { messages, users } from "../shared/schema";
+import { z } from "zod";
+
+// Schema de mensagem temporário
+const insertMessageSchema = z.object({
+  senderId: z.number(),
+  receiverId: z.number(),
+  content: z.string(),
+  status: z.enum(["sent", "delivered", "read"]).optional(),
+  metadata: z.any().optional(),
+});
 import { sendPrivateMessage } from "./pusher";
 import { eq, desc, and, or } from "drizzle-orm";
 import { db } from "./db";
