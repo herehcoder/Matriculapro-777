@@ -21,6 +21,7 @@ import { registerWhatsappMessageRoutes } from "./routes.whatsapp.messages";
 import { registerEvolutionApiRoutes } from "./routes.evolution";
 import { registerOcrRoutes } from "./routes.ocr";
 import { registerEnhancedPaymentRoutes } from "./routes.payment.enhanced";
+import { registerAdminPaymentRoutes } from "./routes.admin.payment";
 // Importar rotas de integrações adicionais
 import integrationRoutes from "./routes/index";
 // Importar rotas de analytics e BI
