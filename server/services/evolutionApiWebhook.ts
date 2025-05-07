@@ -327,9 +327,18 @@ class EvolutionApiWebhookService {
             ) || documentContext.expectedDocumentType || 'other';
             
             // Processar o documento com OCR avançado
+            // Converter o tipo de documento para o tipo esperado pelo serviço OCR
+            const docTypeForOcr = (documentType === 'rg' || 
+                                  documentType === 'cpf' || 
+                                  documentType === 'address_proof' || 
+                                  documentType === 'school_certificate' || 
+                                  documentType === 'birth_certificate') 
+                                  ? documentType 
+                                  : 'other';
+            
             const processingResult = await advancedOcrService.processDocument(
               mediaBuffer,
-              documentType || 'other',
+              docTypeForOcr,
               0, // documentId será definido depois
               {
                 detectFraud: true,
@@ -590,46 +599,185 @@ class EvolutionApiWebhookService {
   }
   
   /**
-   * Determina o tipo de documento baseado em contexto e conteúdo
-   * @param contextType Tipo sugerido pelo contexto da conversa
-   * @param messageText Texto ou legenda da mensagem
-   * @returns Tipo de documento determinado
+   * Detecta o tipo de documento com base no texto da mensagem, legenda ou nome do arquivo
+   * @param messageText Texto da mensagem 
+   * @param caption Legenda da imagem/documento
+   * @param fileName Nome do arquivo
+   * @returns Tipo de documento detectado ou undefined
    */
-  private determineDocumentType(contextType?: string, messageText?: string): string | undefined {
-    // Se não temos contexto nem texto, não é possível determinar
-    if (!contextType && !messageText) {
+  private detectDocumentType(
+    messageText: string,
+    caption: string,
+    fileName: string
+  ): 'rg' | 'cpf' | 'address_proof' | 'school_certificate' | 'birth_certificate' | 'other' | undefined {
+    // Combinar todos os textos disponíveis para análise
+    const combinedText = [messageText, caption, fileName]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, ''); // Remove acentos
+    
+    if (!combinedText) {
       return undefined;
     }
     
-    // Normalizar o texto para análise
-    const normalizedText = messageText?.toLowerCase() || '';
-    
-    // Tipos de documentos e palavras-chave associadas
-    const documentTypeKeywords: Record<string, string[]> = {
-      'rg': ['rg', 'identidade', 'documento de identidade', 'carteira de identidade'],
-      'cpf': ['cpf', 'cadastro de pessoa física', 'receita federal'],
-      'address_proof': ['comprovante de residência', 'comprovante de endereço', 'conta de luz', 'conta de água', 'endereço'],
-      'school_certificate': ['certificado', 'histórico escolar', 'diploma', 'boletim', 'escola'],
-      'birth_certificate': ['certidão de nascimento', 'nascimento'],
-      'other': []
+    // Padrões de regex para cada tipo de documento
+    const documentPatterns = {
+      'rg': [
+        /\brg\b/,
+        /\bcarteira\s+de\s+identidade\b/,
+        /\bdocumento\s+de\s+identidade\b/,
+        /\bidentidade\b/,
+        /\bdocumento\s+oficial\s+com\s+foto\b/
+      ],
+      'cpf': [
+        /\bcpf\b/,
+        /\bcadastro\s+de\s+pessoa\s+fisica\b/,
+        /\bcadastro\s+de\s+pessoa\b/,
+        /\bcadastro\s+pessoa\s+fisica\b/,
+        /\breceita\s+federal\b/,
+        /\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/ // Formato CPF: 000.000.000-00
+      ],
+      'address_proof': [
+        /\bcomprovante\s+de\s+residencia\b/,
+        /\bcomprovante\s+de\s+endereco\b/,
+        /\bconta\s+(?:de|da)?\s+(?:luz|agua|gas|telefone|internet)\b/,
+        /\bfatura\s+(?:de|da)?\s+(?:luz|agua|gas|telefone|internet)\b/,
+        /\bboleto\s+(?:de|da)?\s+(?:luz|agua|gas|telefone|internet)\b/,
+        /\bendereco\b/,
+        /\bresidencia\b/
+      ],
+      'school_certificate': [
+        /\bcertificado\s+escolar\b/,
+        /\bhistorico\s+escolar\b/,
+        /\bdiploma\b/,
+        /\bboletim\b/,
+        /\bescola\b/,
+        /\bcolegio\b/,
+        /\btranscricao\b/,
+        /\btransferencia\s+escolar\b/,
+        /\bdeclaracao\s+de\s+matricula\b/,
+        /\bdeclaracao\s+escolar\b/
+      ],
+      'birth_certificate': [
+        /\bcertidao\s+de\s+nascimento\b/,
+        /\bcertidao\b/,
+        /\bnascimento\b/,
+        /\bregistro\s+de\s+nascimento\b/,
+        /\bcartorio\s+(?:de|do)\s+registro\s+civil\b/
+      ]
     };
     
-    // Se temos um tipo de contexto, verificar se é válido
-    if (contextType && Object.keys(documentTypeKeywords).includes(contextType)) {
-      return contextType;
-    }
+    // Verificar cada padrão e calcular uma pontuação para cada tipo
+    const scores: Record<string, number> = {
+      'rg': 0,
+      'cpf': 0,
+      'address_proof': 0,
+      'school_certificate': 0,
+      'birth_certificate': 0
+    };
     
-    // Se temos texto, verificar correspondências
-    if (normalizedText) {
-      for (const [docType, keywords] of Object.entries(documentTypeKeywords)) {
-        if (keywords.some(keyword => normalizedText.includes(keyword))) {
-          return docType;
+    // Calcular pontuações baseadas em padrões regex
+    for (const [docType, patterns] of Object.entries(documentPatterns)) {
+      for (const pattern of patterns) {
+        if (pattern.test(combinedText)) {
+          scores[docType] += 1;
         }
       }
     }
     
-    // Se não conseguirmos determinar um tipo específico, retornar 'other'
-    return 'other';
+    // Verificar palavras-chave específicas com pesos maiores
+    const keywordWeights: Record<string, Record<string, number>> = {
+      'rg': {
+        'meu rg': 3,
+        'foto do rg': 3,
+        'identidade': 2,
+        'documento com foto': 2
+      },
+      'cpf': {
+        'meu cpf': 3,
+        'foto do cpf': 3,
+        'receita': 2
+      },
+      'address_proof': {
+        'conta de luz': 3,
+        'comprovante de residencia': 3,
+        'comprovante de endereco': 3,
+        'conta de agua': 2,
+        'fatura': 2
+      },
+      'school_certificate': {
+        'historico escolar': 3,
+        'certificado escolar': 3,
+        'diploma': 3,
+        'boletim escolar': 2
+      },
+      'birth_certificate': {
+        'certidao de nascimento': 3,
+        'certidao nascimento': 3,
+        'registro nascimento': 2
+      }
+    };
+    
+    // Avaliar palavras-chave e frases específicas
+    for (const [docType, keywords] of Object.entries(keywordWeights)) {
+      for (const [keyword, weight] of Object.entries(keywords)) {
+        if (combinedText.includes(keyword)) {
+          scores[docType] += weight;
+        }
+      }
+    }
+    
+    // Encontrar o tipo com maior pontuação
+    let highestScore = 0;
+    let detectedType: string | undefined = undefined;
+    
+    for (const [docType, score] of Object.entries(scores)) {
+      if (score > highestScore) {
+        highestScore = score;
+        detectedType = docType;
+      }
+    }
+    
+    // Verificar arquivos por extensão
+    if (fileName && !detectedType) {
+      // Verificar se o nome do arquivo contém pistas sobre o tipo de documento
+      const lowerFileName = fileName.toLowerCase();
+      
+      if (/rg|identidade|identity/.test(lowerFileName)) {
+        detectedType = 'rg';
+      } else if (/cpf|cadastro/.test(lowerFileName)) {
+        detectedType = 'cpf';
+      } else if (/comprovante|endereco|residencia|address|conta|fatura/.test(lowerFileName)) {
+        detectedType = 'address_proof';
+      } else if (/escola|certificado|historico|diploma|school|certificate/.test(lowerFileName)) {
+        detectedType = 'school_certificate';
+      } else if (/nascimento|birth|certidao/.test(lowerFileName)) {
+        detectedType = 'birth_certificate';
+      }
+    }
+    
+    // Retornar o tipo detectado ou 'other' se a pontuação for muito baixa
+    return highestScore >= 1 
+      ? detectedType as 'rg' | 'cpf' | 'address_proof' | 'school_certificate' | 'birth_certificate' | 'other' 
+      : (detectedType as 'rg' | 'cpf' | 'address_proof' | 'school_certificate' | 'birth_certificate' | 'other') || 'other';
+  }
+  
+  /**
+   * Método legado de determinação de tipo de documento 
+   * Mantido para compatibilidade com código existente que possa fazer chamadas a ele
+   * @param contextType Tipo sugerido pelo contexto da conversa
+   * @param messageText Texto ou legenda da mensagem
+   * @returns Tipo de documento determinado
+   */
+  private legacyDetermineDocumentType(contextType?: string, messageText?: string): string | undefined {
+    // Delegar para o novo método mais avançado
+    return this.detectDocumentType(
+      messageText || '',
+      '',
+      ''
+    );
   }
   
   /**
