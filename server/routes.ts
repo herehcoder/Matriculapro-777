@@ -271,18 +271,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Buscar escolas diretamente do banco de dados
       const dbSchools = await db.select().from(schools);
       
-      // Mapear para o formato esperado pelo frontend (logoUrl -> logo)
+      // Mapear para o formato esperado pelo frontend
       const mappedSchools = dbSchools.map(school => ({
         id: school.id,
         name: school.name || '',
-        logo: school.logoUrl || 'https://via.placeholder.com/150', // mapear logoUrl para logo
+        logo: school.logo || '', // usando o campo "logo" diretamente, que é o nome real da coluna
         city: school.city || '',
         state: school.state || '',
         address: school.address || '',
         zipCode: school.zipCode || '',
         phone: school.phone || '',
         email: school.email || '',
-        website: school.website || '',
+        website: '', // este campo pode não existir na tabela
         active: school.active !== false,
         createdAt: school.createdAt || new Date(),
         updatedAt: school.updatedAt || new Date()
@@ -292,14 +292,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (mappedSchools.length === 0) {
         const newSchool = {
           name: 'Escola São Paulo',
-          logoUrl: 'https://via.placeholder.com/150',
+          logo: '', // usar o nome correto do campo
           city: 'São Paulo',
           state: 'SP',
           address: 'Av. Paulista, 1000',
-          zipCode: '01310-100',
+          zip_code: '01310-100', // usar o nome correto do campo conforme no banco de dados
           phone: '(11) 3000-1000',
           email: 'contato@escolasp.edu.br',
-          website: 'www.escolasp.edu.br',
           active: true
         };
         
@@ -309,14 +308,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const mappedInsertedSchool = insertedSchool.map(school => ({
           id: school.id,
           name: school.name || '',
-          logo: school.logoUrl || 'https://via.placeholder.com/150', // mapear logoUrl para logo
+          logo: school.logo || '', // usar o nome correto do campo
           city: school.city || '',
           state: school.state || '',
           address: school.address || '',
-          zipCode: school.zipCode || '',
+          zipCode: school.zip_code || '', // mapear do nome correto na tabela para o nome esperado no frontend
           phone: school.phone || '',
           email: school.email || '',
-          website: school.website || '',
+          website: '',
           active: school.active !== false,
           createdAt: school.createdAt || new Date(),
           updatedAt: school.updatedAt || new Date()
