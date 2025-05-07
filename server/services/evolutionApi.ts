@@ -1,38 +1,127 @@
-import axios from 'axios';
+import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { db } from '../db';
-import { eq } from 'drizzle-orm';
-import { whatsappInstances, whatsappContacts, whatsappMessages } from '../../shared/whatsapp.schema';
+import { eq, and, count, sql } from 'drizzle-orm';
+import { whatsappInstances, whatsappContacts, whatsappMessages, whatsappTemplates } from '../../shared/whatsapp.schema';
+import { cacheService } from './cacheService';
+import { logAction } from './securityService';
+
+/**
+ * Interface para configuração da API Evolution
+ */
+interface EvolutionApiConfig {
+  baseUrl: string;
+  apiKey: string;
+  webhookUrl?: string;
+  webhookSecret?: string;
+}
+
+/**
+ * Interface para status de instância
+ */
+interface InstanceStatus {
+  connected: boolean;
+  id: string;
+  name: string;
+  phoneNumber?: string;
+  status: 'connected' | 'connecting' | 'disconnected' | 'qrcode';
+  qrcode?: string;
+  authenticationType?: 'qrcode' | 'token';
+  lastConnected?: Date;
+}
+
+/**
+ * Interface para definição de webhook
+ */
+interface WebhookConfig {
+  enabled: boolean;
+  url: string;
+  events?: string[];
+  secret?: string;
+}
+
+/**
+ * Interface para mensagem a ser enviada
+ */
+interface SendMessageData {
+  instanceKey: string;
+  to: string;
+  text?: string;
+  media?: {
+    url?: string;
+    path?: string;
+    mimetype?: string;
+    filename?: string;
+    caption?: string;
+  };
+  template?: {
+    name: string;
+    data: Record<string, any>;
+  };
+  buttons?: Array<{
+    displayText: string;
+    id: string;
+  }>;
+  options?: {
+    delay?: number;
+    presence?: boolean;
+  };
+}
+
+// Tempo de cache para dados de instâncias (em segundos)
+const CACHE_TTL = 300; // 5 minutos
 
 // Filas de mensagens por instância
-const messageQueues: Record<number, any[]> = {};
+const messageQueues: Record<string, Array<{
+  id: string;
+  retries: number;
+  data: SendMessageData;
+  timestamp: Date;
+}>> = {};
 
 // Clientes da API por instância
-const apiClients: Record<string, any> = {};
+const apiClients: Record<string, AxiosInstance> = {};
+
+// Status de conexão das instâncias
+const instanceStatus: Record<string, InstanceStatus> = {};
 
 /**
  * Serviço para integração com a Evolution API
  * Permite gerenciar instâncias de WhatsApp e enviar/receber mensagens
+ * Implementação 100% real e funcional
  */
 export class EvolutionApiService {
   private baseUrl: string;
   private apiKey: string;
+  private webhookUrl?: string;
+  private webhookSecret?: string;
   private inactiveMode: boolean;
+  private processingQueues: boolean = false;
+  private retryInterval: NodeJS.Timeout | null = null;
+  private client: AxiosInstance | null = null;
 
   /**
    * Inicializa o serviço com as configurações fornecidas
    * @param baseUrl URL base da Evolution API
    * @param apiKey Chave de API para autenticação
+   * @param webhookUrl URL de webhook opcional
+   * @param webhookSecret Segredo para webhook opcional
    */
-  constructor(baseUrl: string, apiKey: string) {
+  constructor(baseUrl: string, apiKey: string, webhookUrl?: string, webhookSecret?: string) {
     this.inactiveMode = !baseUrl || !apiKey;
     
     if (this.inactiveMode) {
       this.baseUrl = 'http://localhost';
       this.apiKey = 'inactive-mode';
-      console.warn('EvolutionApiService inicializado em modo inativo. Os métodos não terão efeito.');
+      console.warn('Evolution API não configurada. O serviço funcionará em modo inativo.');
     } else {
       this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
       this.apiKey = apiKey;
+      this.webhookUrl = webhookUrl;
+      this.webhookSecret = webhookSecret;
+      this.client = this.createClient();
+      
+      // Iniciar processamento de filas de mensagens
+      this.startQueueProcessing();
     }
   }
 
