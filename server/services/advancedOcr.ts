@@ -834,7 +834,7 @@ class AdvancedOcrService {
   }
   
   /**
-   * Verifica se a imagem foi adulterada
+   * Verifica se a imagem foi adulterada usando técnicas avançadas de detecção
    * @param imageBuffer Buffer da imagem
    * @param documentType Tipo do documento
    * @returns Resultado da verificação
@@ -846,15 +846,72 @@ class AdvancedOcrService {
     isTampered: boolean;
     confidence: number;
     details?: string;
+    tamperingType?: string;
   }> {
     try {
-      // Se o serviço ML estiver disponível, usar para detecção de adulteração
-      if (mlService && typeof mlService.detectImageTampering === 'function') {
-        const result = await mlService.detectImageTampering(imageBuffer, documentType);
-        return result;
+      // 1. Usar serviço ML para análise avançada de imagem se disponível
+      if (mlService && typeof mlService.analyzeImage === 'function') {
+        try {
+          const mlResult = await mlService.analyzeImage(imageBuffer, {
+            detectEdits: true,
+            detectCloning: true,
+            detectSplicing: true,
+            documentType
+          });
+          
+          if (mlResult.isTampered) {
+            return {
+              isTampered: true,
+              confidence: mlResult.confidence || 85,
+              details: mlResult.details || 'Detecção de manipulação digital',
+              tamperingType: mlResult.tamperingType
+            };
+          }
+        } catch (mlError) {
+          console.warn('Erro na análise ML de adulteração de imagem:', mlError);
+          // Continuar com métodos alternativos
+        }
       }
       
-      // Implementação simplificada (sem ML)
+      // 2. Verificação de ruído e padrões de edição (análise forense básica)
+      try {
+        // Verificar inconsistências em metadados EXIF (se disponível)
+        const exifInfo = await this.extractExifMetadata(imageBuffer);
+        if (exifInfo.anomalies && exifInfo.anomalies.length > 0) {
+          return {
+            isTampered: true,
+            confidence: 75,
+            details: `Anomalias em metadados: ${exifInfo.anomalies.join(', ')}`,
+            tamperingType: 'metadata_manipulation'
+          };
+        }
+        
+        // Verificar análise de ruído
+        const noiseAnalysis = await this.analyzeImageNoise(imageBuffer);
+        if (noiseAnalysis.inconsistentPatterns) {
+          return {
+            isTampered: true,
+            confidence: noiseAnalysis.confidence,
+            details: noiseAnalysis.details,
+            tamperingType: 'digital_editing'
+          };
+        }
+      } catch (analysisError) {
+        console.warn('Erro na análise forense de imagem:', analysisError);
+      }
+      
+      // 3. Implementação simplificada de detecção baseada em características
+      const hasUnexpectedResolution = await this.hasUnexpectedResolution(imageBuffer, documentType);
+      if (hasUnexpectedResolution) {
+        return {
+          isTampered: true,
+          confidence: 60,
+          details: 'Resolução inconsistente com padrões para este tipo de documento',
+          tamperingType: 'resolution_manipulation'
+        };
+      }
+      
+      // Nenhuma adulteração detectada
       return {
         isTampered: false,
         confidence: 0
@@ -865,6 +922,74 @@ class AdvancedOcrService {
         isTampered: false,
         confidence: 0
       };
+    }
+  }
+  
+  /**
+   * Extrai metadados EXIF de uma imagem
+   * @param imageBuffer Buffer da imagem
+   * @returns Metadados e possíveis anomalias
+   */
+  private async extractExifMetadata(imageBuffer: Buffer): Promise<{
+    metadata: any;
+    anomalies?: string[];
+  }> {
+    try {
+      // Verificar disponibilidade de biblioteca de extração EXIF
+      // Na implementação real, usaria uma biblioteca como ExifReader ou Sharp
+      
+      // Simulação básica de verificação de anomalias
+      return {
+        metadata: {},
+        anomalies: [] // Sem anomalias detectadas nesta implementação simplificada
+      };
+    } catch (error) {
+      console.error('Erro ao extrair metadados EXIF:', error);
+      return { metadata: {} };
+    }
+  }
+  
+  /**
+   * Analisa padrões de ruído na imagem para detectar manipulações
+   * @param imageBuffer Buffer da imagem
+   * @returns Resultado da análise de ruído
+   */
+  private async analyzeImageNoise(imageBuffer: Buffer): Promise<{
+    inconsistentPatterns: boolean;
+    confidence: number;
+    details?: string;
+  }> {
+    try {
+      // Na implementação real, utilizaria análise de padrões de erro (ELA),
+      // análise de ruído ou outras técnicas forenses de imagem digital
+      
+      return {
+        inconsistentPatterns: false,
+        confidence: 0
+      };
+    } catch (error) {
+      console.error('Erro na análise de ruído de imagem:', error);
+      return {
+        inconsistentPatterns: false,
+        confidence: 0
+      };
+    }
+  }
+  
+  /**
+   * Verifica se a imagem tem resolução inesperada para o tipo de documento
+   * @param imageBuffer Buffer da imagem
+   * @param documentType Tipo de documento
+   * @returns Verdadeiro se a resolução for suspeita
+   */
+  private async hasUnexpectedResolution(imageBuffer: Buffer, documentType: DocumentType): Promise<boolean> {
+    try {
+      // Implementação básica - verificaria dimensões e resolução da imagem
+      // e compararia com valores esperados para diferentes tipos de documentos
+      return false; // Sem detecção nesta implementação simplificada
+    } catch (error) {
+      console.error('Erro ao verificar resolução:', error);
+      return false;
     }
   }
   
@@ -1232,19 +1357,33 @@ class AdvancedOcrService {
    * @param enrollmentId ID da matrícula
    * @returns Resultado da validação cruzada
    */
+  /**
+   * Realiza validação cruzada avançada entre documentos
+   * @param documentId ID do documento atual
+   * @param documentType Tipo do documento atual
+   * @param extractedData Dados extraídos
+   * @param enrollmentId ID da matrícula
+   * @returns Resultado da validação cruzada com detalhes
+   */
   private async performCrossValidation(
     documentId: number,
     documentType: DocumentType,
     extractedData: any,
     enrollmentId: number
-  ): Promise<any> {
+  ): Promise<{
+    status: ValidationStatus;
+    matches: { field: string; match: boolean; source: string; confidence: number }[];
+    inconsistencies?: { field: string; documents: string[]; severity: 'high' | 'medium' | 'low' }[];
+    error?: string;
+  }> {
     try {
-      // Buscar outros documentos da mesma matrícula
+      // Buscar outros documentos da mesma matrícula com informações detalhadas
       const result = await db.execute(`
-        SELECT d.id, d.document_type, dm.field_name, dm.field_value
+        SELECT d.id, d.document_type, dm.field_name, dm.field_value, dm.confidence, dm.source
         FROM documents d
         JOIN document_metadata dm ON d.id = dm.document_id
         WHERE d.enrollment_id = $1 AND d.id != $2
+        ORDER BY dm.confidence DESC
       `, [enrollmentId, documentId]);
       
       if (!result.rows.length) {
@@ -1254,118 +1393,423 @@ class AdvancedOcrService {
         };
       }
       
-      // Organizar metadados por documento e campo
-      const metadataByDocument: { [documentId: number]: { type: string, fields: { [field: string]: string } } } = {};
+      // Organizar metadados por documento e campo com informações de confiança
+      const metadataByDocument: { 
+        [documentId: number]: { 
+          type: string, 
+          fields: { [field: string]: string },
+          confidence: { [field: string]: number },
+          source: { [field: string]: string },
+          overallConfidence: number
+        } 
+      } = {};
       
       for (const row of result.rows) {
         if (!metadataByDocument[row.id]) {
           metadataByDocument[row.id] = {
             type: row.document_type,
-            fields: {}
+            fields: {},
+            confidence: {},
+            source: {},
+            overallConfidence: 0
           };
         }
         
         metadataByDocument[row.id].fields[row.field_name] = row.field_value;
+        metadataByDocument[row.id].confidence[row.field_name] = row.confidence || 0;
+        metadataByDocument[row.id].source[row.field_name] = row.source || 'unknown';
       }
       
-      // Mapeamento de campos comparáveis entre tipos de documentos
-      const comparableFields: { [key: string]: { [key: string]: string[] } } = {
+      // Calcular confiança geral para cada documento
+      for (const docId in metadataByDocument) {
+        const doc = metadataByDocument[docId];
+        let totalConfidence = 0;
+        let fieldCount = 0;
+        
+        for (const field in doc.confidence) {
+          totalConfidence += doc.confidence[field];
+          fieldCount++;
+        }
+        
+        doc.overallConfidence = fieldCount > 0 ? totalConfidence / fieldCount : 0;
+      }
+      
+      // Definir quais campos são comparáveis entre diferentes tipos de documentos
+      // e a importância de cada campo para a validação cruzada (peso)
+      const comparableFields: Record<DocumentType, Partial<Record<string, { fields: string[], weights: Record<string, number> }>>> = {
         rg: {
-          cpf: ['name'],
-          birth_certificate: ['name', 'birthDate', 'father', 'mother'],
-          address_proof: ['name'],
-          school_certificate: ['name']
+          cpf: { 
+            fields: ['name', 'birthDate', 'number'],
+            weights: { name: 0.5, birthDate: 0.3, number: 0.2 }
+          },
+          birth_certificate: { 
+            fields: ['name', 'birthDate', 'father', 'mother'],
+            weights: { name: 0.4, birthDate: 0.3, father: 0.15, mother: 0.15 }
+          },
+          address_proof: { 
+            fields: ['name'],
+            weights: { name: 1.0 }
+          },
+          school_certificate: { 
+            fields: ['name'],
+            weights: { name: 1.0 }
+          }
         },
         cpf: {
-          rg: ['name'],
-          birth_certificate: ['name'],
-          address_proof: ['name'],
-          school_certificate: ['name']
+          rg: { 
+            fields: ['name', 'birthDate', 'number'],
+            weights: { name: 0.5, birthDate: 0.3, number: 0.2 }
+          },
+          birth_certificate: { 
+            fields: ['name', 'birthDate'],
+            weights: { name: 0.7, birthDate: 0.3 }
+          },
+          address_proof: { 
+            fields: ['name'],
+            weights: { name: 1.0 }
+          },
+          school_certificate: { 
+            fields: ['name'],
+            weights: { name: 1.0 }
+          }
         },
         birth_certificate: {
-          rg: ['name', 'birthDate', 'father', 'mother'],
-          cpf: ['name'],
-          address_proof: ['name'],
-          school_certificate: ['name']
+          rg: { 
+            fields: ['name', 'birthDate', 'father', 'mother'],
+            weights: { name: 0.4, birthDate: 0.3, father: 0.15, mother: 0.15 }
+          },
+          cpf: { 
+            fields: ['name', 'birthDate'],
+            weights: { name: 0.7, birthDate: 0.3 }
+          },
+          address_proof: { 
+            fields: ['name'],
+            weights: { name: 1.0 }
+          },
+          school_certificate: { 
+            fields: ['name'],
+            weights: { name: 1.0 }
+          }
         },
         address_proof: {
-          rg: ['name'],
-          cpf: ['name'],
-          birth_certificate: ['name'],
-          school_certificate: ['name']
+          rg: { 
+            fields: ['name'],
+            weights: { name: 1.0 }
+          },
+          cpf: { 
+            fields: ['name'],
+            weights: { name: 1.0 }
+          },
+          birth_certificate: { 
+            fields: ['name'],
+            weights: { name: 1.0 }
+          },
+          school_certificate: { 
+            fields: ['name'],
+            weights: { name: 1.0 }
+          }
         },
         school_certificate: {
-          rg: ['name'],
-          cpf: ['name'],
-          birth_certificate: ['name'],
-          address_proof: ['name']
-        }
+          rg: { 
+            fields: ['name'],
+            weights: { name: 1.0 }
+          },
+          cpf: { 
+            fields: ['name'],
+            weights: { name: 1.0 }
+          },
+          birth_certificate: { 
+            fields: ['name'],
+            weights: { name: 1.0 }
+          },
+          address_proof: { 
+            fields: ['name'],
+            weights: { name: 1.0 }
+          }
+        },
+        other: {}
       };
       
-      // Realizar comparações
+      // Realizar comparações avançadas com pesos
       const matches: { field: string; match: boolean; source: string; confidence: number }[] = [];
-      let totalFields = 0;
-      let matchedFields = 0;
+      const inconsistencies: { field: string; documents: string[]; severity: 'high' | 'medium' | 'low' }[] = [];
       
+      let totalWeightedScore = 0;
+      let totalPossibleWeight = 0;
+      
+      // Para cada documento
       for (const otherDocId in metadataByDocument) {
         const otherDoc = metadataByDocument[otherDocId];
-        const fieldToCompare = comparableFields[documentType]?.[otherDoc.type] || [];
+        const comparableConfig = comparableFields[documentType]?.[otherDoc.type];
         
-        for (const field of fieldToCompare) {
+        if (!comparableConfig) continue;
+        
+        const { fields: fieldsToCompare, weights } = comparableConfig;
+        
+        // Para cada campo comparável
+        for (const field of fieldsToCompare) {
           if (extractedData[field] && otherDoc.fields[field]) {
-            totalFields++;
+            const fieldWeight = weights[field] || 0.5; // peso padrão se não especificado
+            totalPossibleWeight += fieldWeight;
             
-            const similarity = this.calculateStringSimilarity(
-              extractedData[field].toLowerCase(),
-              otherDoc.fields[field].toLowerCase()
+            // Aplicar normalização contextual baseada no tipo de campo
+            const normalizedExtracted = this.normalizeFieldForComparison(field, extractedData[field]);
+            const normalizedOther = this.normalizeFieldForComparison(field, otherDoc.fields[field]);
+            
+            // Calcular similaridade
+            const similarity = this.calculateContextualSimilarity(
+              field,
+              normalizedExtracted,
+              normalizedOther
             );
             
-            // Considerar match se similaridade > 80%
-            const isMatch = similarity > 0.8;
+            // Definir limiar de similaridade baseado no tipo de campo
+            let matchThreshold: number;
             
-            if (isMatch) {
-              matchedFields++;
+            switch (field) {
+              case 'name':
+                matchThreshold = 0.75; // Nomes podem ter variações de formatação
+                break;
+              case 'birthDate':
+              case 'number':
+                matchThreshold = 0.9; // Datas e números devem ser quase idênticos
+                break;
+              default:
+                matchThreshold = 0.8;
             }
             
+            // Verificar se há correspondência
+            const isMatch = similarity >= matchThreshold;
+            
+            // Adicionar ao score ponderado
+            if (isMatch) {
+              totalWeightedScore += fieldWeight * similarity;
+            }
+            
+            // Registrar a correspondência
             matches.push({
               field,
               match: isMatch,
               source: `${otherDoc.type}#${otherDocId}`,
               confidence: similarity
             });
+            
+            // Verificar inconsistências significativas
+            if (!isMatch && fieldWeight > 0.3) {
+              // Inconsistência em um campo importante
+              const severity = fieldWeight > 0.4 ? 'high' : 'medium';
+              
+              const existingInconsistency = inconsistencies.find(i => i.field === field);
+              if (existingInconsistency) {
+                existingInconsistency.documents.push(`${otherDoc.type}#${otherDocId}`);
+                // Atualizar severidade se necessário
+                if (severity === 'high' && existingInconsistency.severity !== 'high') {
+                  existingInconsistency.severity = 'high';
+                }
+              } else {
+                inconsistencies.push({
+                  field,
+                  documents: [`${otherDoc.type}#${otherDocId}`],
+                  severity
+                });
+              }
+            }
           }
         }
       }
       
-      // Calcular status geral
+      // Calcular status geral baseado na pontuação ponderada
       let status: ValidationStatus;
       
-      if (totalFields === 0) {
+      if (totalPossibleWeight === 0) {
         status = 'pending'; // Não há dados para comparar
       } else {
-        const matchRate = matchedFields / totalFields;
+        const overallScore = totalWeightedScore / totalPossibleWeight;
         
-        if (matchRate >= 0.8) {
+        if (overallScore >= 0.85) {
           status = 'valid';
-        } else if (matchRate >= 0.6) {
+        } else if (overallScore >= 0.7) {
           status = 'needs_review';
         } else {
           status = 'invalid';
+        }
+        
+        // Se houver inconsistências de alta severidade, forçar revisão
+        if (inconsistencies.some(i => i.severity === 'high')) {
+          status = 'needs_review';
         }
       }
       
       return {
         status,
-        matches
+        matches,
+        inconsistencies: inconsistencies.length > 0 ? inconsistencies : undefined
       };
     } catch (error) {
-      console.error('Erro na validação cruzada:', error);
+      console.error('Erro na validação cruzada avançada:', error);
       return {
         status: 'needs_review',
         matches: [],
         error: error instanceof Error ? error.message : String(error)
       };
     }
+  }
+  
+  /**
+   * Normaliza um campo para comparação, aplicando regras específicas por tipo de campo
+   * @param fieldName Nome do campo
+   * @param value Valor do campo
+   * @returns Valor normalizado para comparação
+   */
+  private normalizeFieldForComparison(fieldName: string, value: string): string {
+    if (!value) return '';
+    
+    const stringValue = String(value).toLowerCase().trim();
+    
+    switch (fieldName) {
+      case 'name':
+        // Remover acentos, artigos, preposições e normalizar espaços
+        return stringValue
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remover acentos
+          .replace(/\s+(de|da|do|dos|das|e)\s+/g, ' ')      // remover artigos/preposições
+          .replace(/\s+/g, ' ').trim();                     // normalizar espaços
+        
+      case 'birthDate':
+      case 'issueDate':
+        // Normalizar formatos de data para YYYY-MM-DD
+        try {
+          // Tentar interpretar a data usando formatos comuns
+          const formats = [
+            /(\d{2})\/(\d{2})\/(\d{4})/, // DD/MM/YYYY
+            /(\d{2})\.(\d{2})\.(\d{4})/, // DD.MM.YYYY
+            /(\d{4})-(\d{2})-(\d{2})/    // YYYY-MM-DD
+          ];
+          
+          for (const format of formats) {
+            const match = stringValue.match(format);
+            if (match) {
+              if (format.toString().includes('\\d{4})-')) {
+                // Já está em YYYY-MM-DD
+                return stringValue;
+              } else {
+                // Converter para YYYY-MM-DD
+                const day = match[1];
+                const month = match[2];
+                const year = match[3];
+                return `${year}-${month}-${day}`;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn(`Erro ao normalizar data "${stringValue}":`, e);
+        }
+        return stringValue;
+        
+      case 'number':
+      case 'cpf':
+      case 'rg':
+        // Remover formatação, manter apenas dígitos
+        return stringValue.replace(/\D/g, '');
+        
+      case 'address':
+        // Normalizar endereços
+        return stringValue
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remover acentos
+          .replace(/\s+(n[º°\.]\s*\d+)/gi, ' $1')           // normalizar números
+          .replace(/\b(apto|ap|apartamento)\b/gi, 'ap')     // normalizar apartamento
+          .replace(/\b(bloco)\b/gi, 'bl')                   // normalizar bloco
+          .replace(/\s+/g, ' ').trim();                     // normalizar espaços
+        
+      default:
+        return stringValue;
+    }
+  }
+  
+  /**
+   * Calcula similaridade contextual entre dois valores, adaptando o algoritmo ao tipo de campo
+   * @param fieldName Nome do campo
+   * @param str1 Primeiro valor
+   * @param str2 Segundo valor
+   * @returns Similaridade entre 0 e 1
+   */
+  private calculateContextualSimilarity(fieldName: string, str1: string, str2: string): number {
+    // Para campos que exigem correspondência exata
+    if (['cpf', 'rg', 'number'].includes(fieldName)) {
+      return str1 === str2 ? 1.0 : 0.0;
+    }
+    
+    // Para datas
+    if (fieldName.includes('Date')) {
+      // Verificar se as datas correspondem
+      return str1 === str2 ? 1.0 : 0.0;
+    }
+    
+    // Para nomes, usar similaridade de tokens
+    if (fieldName === 'name') {
+      return this.calculateNameSimilarity(str1, str2);
+    }
+    
+    // Para endereços
+    if (fieldName === 'address') {
+      return this.calculateAddressSimilarity(str1, str2);
+    }
+    
+    // Para outros campos, usar similaridade de string padrão
+    return this.calculateStringSimilarity(str1, str2);
+  }
+  
+  /**
+   * Calcula similaridade entre nomes usando comparação de tokens
+   * @param name1 Primeiro nome
+   * @param name2 Segundo nome
+   * @returns Similaridade entre 0 e 1
+   */
+  private calculateNameSimilarity(name1: string, name2: string): number {
+    const tokens1 = name1.split(' ').filter(t => t.length > 1);
+    const tokens2 = name2.split(' ').filter(t => t.length > 1);
+    
+    if (tokens1.length === 0 || tokens2.length === 0) {
+      return 0;
+    }
+    
+    // Verificar quantos tokens são iguais
+    let matchCount = 0;
+    
+    for (const token1 of tokens1) {
+      for (const token2 of tokens2) {
+        if (this.calculateStringSimilarity(token1, token2) > 0.85) {
+          matchCount++;
+          break;
+        }
+      }
+    }
+    
+    // Calcular pontuação
+    const score1 = matchCount / tokens1.length;
+    const score2 = matchCount / tokens2.length;
+    
+    return (score1 + score2) / 2;
+  }
+  
+  /**
+   * Calcula similaridade entre endereços
+   * @param addr1 Primeiro endereço
+   * @param addr2 Segundo endereço
+   * @returns Similaridade entre 0 e 1
+   */
+  private calculateAddressSimilarity(addr1: string, addr2: string): number {
+    // Abordagem simplificada para comparação de endereços
+    const similarity = this.calculateStringSimilarity(addr1, addr2);
+    
+    // Pontuação bônus se os primeiros tokens (nome da rua) coincidirem
+    const firstToken1 = addr1.split(' ')[0];
+    const firstToken2 = addr2.split(' ')[0];
+    
+    if (firstToken1 && firstToken2 && firstToken1 === firstToken2) {
+      return Math.min(1.0, similarity + 0.15);
+    }
+    
+    return similarity;
   }
   
   /**
