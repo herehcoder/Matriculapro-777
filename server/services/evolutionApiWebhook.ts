@@ -320,10 +320,11 @@ class EvolutionApiWebhookService {
             }
             
             // Determinar o possível tipo de documento baseado no contexto
-            const documentType = this.determineDocumentType(
-              documentContext.expectedDocumentType,
-              content.text || content.caption || ''
-            );
+            const documentType = this.detectDocumentType(
+              content.text || '',
+              content.caption || '',
+              content.fileName || ''
+            ) || documentContext.expectedDocumentType || 'other';
             
             // Processar o documento com OCR avançado
             const processingResult = await advancedOcrService.processDocument(
