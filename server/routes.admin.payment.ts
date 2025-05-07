@@ -258,11 +258,11 @@ export function registerAdminPaymentRoutes(app: Express, isAuthenticated: any) {
   });
 
   /**
-   * @route GET /api/admin/payment/gateways/types
+   * @route GET /api/admin/payment/gateway-types
    * @desc Listar tipos de gateways de pagamento disponíveis
    * @access Admin
    */
-  app.get('/api/admin/payment/gateways/types', isAuthenticated, isAdmin, async (req: Request, res: Response) => {
+  app.get('/api/admin/payment/gateway-types', isAuthenticated, isAdmin, async (req: Request, res: Response) => {
     try {
       const gatewayTypes = [
         {

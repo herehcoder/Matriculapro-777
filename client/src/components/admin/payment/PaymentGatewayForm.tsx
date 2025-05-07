@@ -86,10 +86,10 @@ export default function PaymentGatewayForm({ gateway, onSave }: PaymentGatewayFo
 
   // Buscar tipos de gateways disponíveis
   const { data, isLoading: isLoadingTypes } = useQuery({
-    queryKey: ['/api/admin/payment/gateways/types'],
+    queryKey: ['/api/admin/payment/gateway-types'],
     queryFn: async () => {
       try {
-        const response = await apiRequest('GET', '/api/admin/payment/gateways/types');
+        const response = await apiRequest('GET', '/api/admin/payment/gateway-types');
         const responseData = await response.json();
         
         // Garantir que temos um array, mesmo se a API retornar um objeto ou estrutura diferente
