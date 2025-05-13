@@ -26,26 +26,14 @@ import { Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 
-const registerSchema = z.object({
+// Criação do schema básico
+const baseRegisterSchema = z.object({
   username: z.string().min(3, "Username deve ter no mínimo 3 caracteres"),
   email: z.string().email("Email inválido"),
   password: z.string().min(6, "Senha deve ter no mínimo 6 caracteres"),
   fullName: z.string().min(3, "Nome completo é obrigatório"),
   role: z.string().min(1, "Selecione um tipo de usuário"),
-  schoolId: z.number().optional().refine(
-    (val, ctx) => {
-      // Se for um estudante, o schoolId é obrigatório
-      const formValues = ctx.path ? ctx.path[0] : undefined;
-      if (!formValues || typeof formValues !== 'object' || !('role' in formValues)) {
-        return true; // Não podemos validar sem o contexto completo
-      }
-      const role = (formValues as any).role;
-      return role !== 'student' || (val != null && val > 0);
-    },
-    {
-      message: "Selecionar uma escola é obrigatório para estudantes",
-    }
-  ),
+  schoolId: z.number().optional(),
 });
 
 export default function Register() {
@@ -54,6 +42,21 @@ export default function Register() {
   const [showSchoolField, setShowSchoolField] = useState(false);
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  
+  // Criar schema completo com validação customizada para schoolId
+  const registerSchema = baseRegisterSchema.extend({
+    schoolId: z.number().optional().refine(
+      (val, ctx) => {
+        const role = ctx.path && ctx.path.length > 1 ? ctx.path[1] : null;
+        // Verificar se o tipo de usuário é estudante
+        return role !== "student" || (val != null && val > 0);
+      },
+      {
+        message: "Selecionar uma escola é obrigatório para estudantes",
+        path: ["schoolId"]
+      }
+    )
+  });
   
   const form = useForm<z.infer<typeof registerSchema>>({
     resolver: zodResolver(registerSchema),
@@ -65,6 +68,7 @@ export default function Register() {
       role: "school",
       schoolId: undefined,
     },
+    mode: "onChange", // Validação em tempo real
   });
 
   // Buscar escolas para o dropdown
@@ -100,7 +104,7 @@ export default function Register() {
 
   const { registerMutation } = useAuth();
   
-  const onSubmit = async (values: z.infer<typeof registerSchema>) => {
+  const onSubmit = async (values: z.infer<typeof baseRegisterSchema>) => {
     setError(null);
     setIsLoading(true);
     
