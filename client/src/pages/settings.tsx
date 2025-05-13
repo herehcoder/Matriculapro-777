@@ -226,9 +226,8 @@ export default function SettingsPage() {
       </div>
 
       <Tabs defaultValue="account" className="space-y-6">
-        <TabsList className="grid w-full md:w-auto grid-cols-3 md:inline-flex">
+        <TabsList className="grid w-full md:w-auto grid-cols-2 md:inline-flex">
           <TabsTrigger value="account">Conta</TabsTrigger>
-          <TabsTrigger value="appearance">Aparência</TabsTrigger>
           <TabsTrigger value="notifications">Notificações</TabsTrigger>
         </TabsList>
 
@@ -345,54 +344,7 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
 
-        {/* Tab de Aparência */}
-        <TabsContent value="appearance" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Aparência</CardTitle>
-              <CardDescription>
-                Personalize a aparência da interface do sistema.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  {appearanceSettings.darkMode ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
-                  <div>
-                    <Label htmlFor="dark-mode">Tema Escuro</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Alterna entre os temas claro e escuro.
-                    </p>
-                  </div>
-                </div>
-                <Switch 
-                  id="dark-mode" 
-                  checked={appearanceSettings.darkMode} 
-                  onCheckedChange={(value) => handleAppearanceChange('darkMode', value)}
-                  disabled={updateSettingsMutation.isPending}
-                />
-              </div>
-              
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  <MonitorSmartphone className="h-5 w-5" />
-                  <div>
-                    <Label htmlFor="compact-mode">Modo compacto</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Reduz o espaçamento e tamanho dos elementos.
-                    </p>
-                  </div>
-                </div>
-                <Switch 
-                  id="compact-mode"
-                  checked={appearanceSettings.compactMode}
-                  onCheckedChange={(value) => handleAppearanceChange('compactMode', value)}
-                  disabled={updateSettingsMutation.isPending}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+        {/* A aba Aparência foi removida porque a troca de tema já está disponível na barra superior */}
 
         {/* Tab de Notificações */}
         <TabsContent value="notifications" className="space-y-6">
