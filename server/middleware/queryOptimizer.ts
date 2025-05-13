@@ -244,8 +244,19 @@ export async function createPerformanceIndices() {
           AND table_name = '${tableName}'
         ) as "exists"`;
         
-        const result = await db.execute(query);
-        return result[0]?.exists === true;
+        try {
+          // Substituímos temporariamente o execute com outra função que não causa erro
+          // em ambiente sem banco de dados
+          if (typeof db.execute !== 'function') {
+            console.log(`Mock: Verificação simulada da tabela ${tableName}`);
+            return false;
+          }
+          const result = await db.execute(query);
+          return result[0]?.exists === true;
+        } catch (err) {
+          console.log(`Erro na execução da verificação da tabela ${tableName}:`, err);
+          return false;
+        }
       } catch (error) {
         console.warn(`Erro ao verificar existência da tabela ${tableName}:`, error);
         return false;
