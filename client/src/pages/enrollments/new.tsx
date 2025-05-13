@@ -105,16 +105,29 @@ export default function NewEnrollmentPage() {
       return;
     }
     
+    if (!selectedCourse) {
+      toast({
+        title: "Curso não selecionado",
+        description: "Por favor selecione um curso. O curso é obrigatório para a matrícula.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsCreating(true);
     try {
       // Create a new enrollment
       const newEnrollment = await createEnrollment({
         schoolId: parseInt(selectedSchool),
-        courseId: selectedCourse ? parseInt(selectedCourse) : null,
+        courseId: parseInt(selectedCourse), // Curso sempre obrigatório
         status: "started",
       });
       
-      // Navigate to the enrollment form
+      if (!newEnrollment || !newEnrollment.id) {
+        throw new Error("Resposta inválida do servidor ao criar matrícula");
+      }
+      
+      // Notificar usuário
       toast({
         title: "Matrícula iniciada",
         description: "A matrícula foi iniciada com sucesso!",
@@ -126,7 +139,7 @@ export default function NewEnrollmentPage() {
       console.error("Error creating enrollment:", error);
       toast({
         title: "Erro ao criar matrícula",
-        description: "Não foi possível iniciar a matrícula.",
+        description: error instanceof Error ? error.message : "Não foi possível iniciar a matrícula.",
         variant: "destructive",
       });
     } finally {
@@ -183,7 +196,7 @@ export default function NewEnrollmentPage() {
           
           {/* Course selection (enabled after school is selected) */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">Curso (opcional)</label>
+            <label className="text-sm font-medium">Curso <span className="text-red-500">*</span></label>
             <div className="flex items-center space-x-4">
               <Users className="text-neutral-500" size={20} />
               <Select
@@ -192,20 +205,26 @@ export default function NewEnrollmentPage() {
                 disabled={!selectedSchool || courses.length === 0}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Selecione um curso (opcional)" />
+                  <SelectValue placeholder="Selecione um curso" />
                 </SelectTrigger>
                 <SelectContent>
-                  {courses.map((course) => (
-                    <SelectItem key={course.id} value={course.id.toString()}>
-                      {course.name}
-                    </SelectItem>
-                  ))}
+                  {courses.length > 0 ? (
+                    courses.map((course) => (
+                      <SelectItem key={course.id} value={course.id.toString()}>
+                        {course.name}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem value="no-courses" disabled>Nenhum curso disponível</SelectItem>
+                  )}
                 </SelectContent>
               </Select>
             </div>
-            <p className="text-xs text-neutral-500 mt-1">
-              O curso pode ser selecionado durante o processo de matrícula.
-            </p>
+            {courses.length === 0 && selectedSchool && (
+              <p className="text-xs text-red-500 mt-1">
+                Não há cursos disponíveis para esta escola. Por favor, contate o administrador.
+              </p>
+            )}
           </div>
           
           <div className="pt-4 flex justify-end space-x-3">
@@ -217,7 +236,7 @@ export default function NewEnrollmentPage() {
             </Button>
             <Button
               onClick={handleCreateEnrollment}
-              disabled={!selectedSchool || isCreating}
+              disabled={!selectedSchool || !selectedCourse || isCreating}
               className="flex items-center"
             >
               {isCreating ? (
