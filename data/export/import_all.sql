@@ -1,0 +1,37 @@
+-- Script principal de importação
+
+\i users.sql
+\i schools.sql
+\i courses.sql
+\i students.sql
+\i enrollments.sql
+\i documents.sql
+\i whatsapp_instances.sql
+\i notifications.sql
+\i payment_gateways.sql
+\i attendants.sql
+\i metrics.sql
+\i messages.sql
+\i leads.sql
+\i questions.sql
+\i chat_history.sql
+\i whatsapp_messages.sql
+\i answers.sql
+\i sessions.sql
+\i password_reset_tokens.sql
+\i user_settings.sql
+\i whatsapp_contacts.sql
+\i whatsapp_api_configs.sql
+\i whatsapp_logs.sql
+\i document_validations.sql
+\i document_metadata.sql
+\i reports.sql
+\i action_logs.sql
+\i analytics_enrollment_facts.sql
+\i analytics_date_dimension.sql
+\i encrypted_fields.sql
+\i analytics_payment_facts.sql
+\i metric_alerts.sql
+\i payment_gateway_settings.sql
+\i payments.sql
+\i payment_transactions.sql
