@@ -43,20 +43,8 @@ export default function Register() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   
-  // Criar schema completo com validação customizada para schoolId
-  const registerSchema = baseRegisterSchema.extend({
-    schoolId: z.number().optional().refine(
-      (val, ctx) => {
-        const role = ctx.path && ctx.path.length > 1 ? ctx.path[1] : null;
-        // Verificar se o tipo de usuário é estudante
-        return role !== "student" || (val != null && val > 0);
-      },
-      {
-        message: "Selecionar uma escola é obrigatório para estudantes",
-        path: ["schoolId"]
-      }
-    )
-  });
+  // Criar um schema simplificado para o formulário
+  const registerSchema = baseRegisterSchema;
   
   const form = useForm<z.infer<typeof registerSchema>>({
     resolver: zodResolver(registerSchema),
@@ -109,6 +97,13 @@ export default function Register() {
     setIsLoading(true);
     
     try {
+      // Validação manual para estudantes sem escola selecionada
+      if (values.role === 'student' && (!values.schoolId || values.schoolId <= 0)) {
+        setError("Selecionar uma escola é obrigatório para estudantes");
+        setIsLoading(false);
+        return;
+      }
+      
       await registerMutation.mutateAsync(values);
       // Navegação e toast são manipulados pelo hook auth
     } catch (err: any) {
