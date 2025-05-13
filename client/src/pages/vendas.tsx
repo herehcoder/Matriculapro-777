@@ -268,17 +268,17 @@ interface FaqItemProps {
 const FaqItem: React.FC<FaqItemProps> = ({ faq, isOpen, toggleFaq }) => (
   <div className="border-b border-gray-200 py-4">
     <button
-      className="flex justify-between items-center w-full text-left font-medium"
+      className="flex justify-between items-center w-full text-left font-medium text-black" 
       onClick={toggleFaq}
     >
-      <span>{faq.question}</span>
+      <span className="text-lg">{faq.question}</span>
       <ChevronDown 
         className={`w-5 h-5 text-gray-500 transform transition-transform ${isOpen ? 'rotate-180' : ''}`}
       />
     </button>
     {isOpen && (
-      <div className="mt-2 text-gray-600">
-        <p>{faq.answer}</p>
+      <div className="mt-2 text-black bg-gray-50 p-4 rounded-lg">
+        <p className="leading-relaxed">{faq.answer}</p>
       </div>
     )}
   </div>
@@ -682,7 +682,7 @@ export default function VendasPage() {
             <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
               Perguntas Frequentes
             </motion.h2>
-            <motion.p variants={itemVariants} className="text-xl text-gray-600">
+            <motion.p variants={itemVariants} className="text-xl text-gray-800 font-medium">
               Tire suas dúvidas sobre o Matricula
             </motion.p>
           </motion.div>
