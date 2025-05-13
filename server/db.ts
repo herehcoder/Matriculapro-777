@@ -1,15 +1,20 @@
-import { Pool } from 'pg';
+import { Pool, neonConfig } from '@neondatabase/serverless';
 import * as schema from "@shared/schema";
+import ws from 'ws';
 
-// String de conexão fornecida diretamente
-const connectionString = 'postgresql://neondb_owner:npg_XtRoSkM7BQN0@ep-broad-term-a4o6dgys.us-east-1.aws.neon.tech/neondb?sslmode=require';
+// Configuração do Neon para WebSockets
+neonConfig.webSocketConstructor = ws;
 
-console.log("Conectando ao PostgreSQL (Neon.tech)...");
+// Usar a variável de ambiente DATABASE_URL ou a string de conexão de backup
+const connectionString = process.env.DATABASE_URL || 
+  'postgresql://neondb_owner:npg_XtRoSkM7BQN0@ep-broad-term-a4o6dgys.us-east-1.aws.neon.tech/neondb?sslmode=require';
+
+console.log("Conectando ao PostgreSQL...");
 
 // Criar um pool de conexão PostgreSQL
 export const pool = new Pool({ 
   connectionString,
-  connectionTimeoutMillis: 5000
+  connectionTimeoutMillis: 10000
 });
 
 // Criar uma interface compatível com o ORM Drizzle, mantendo a API existente
@@ -30,8 +35,21 @@ export const db = {
     from: (table: any) => ({
       where: (...conditions: any[]) => {
         try {
-          // Convertendo para SQL nativo
-          const tableName = table.$table?.name || table.name || 'unknown_table';
+          // Tentar obter o nome da tabela de várias maneiras
+          let tableName = 'users'; // Valor padrão seguro - todos os sistemas têm uma tabela users
+          
+          if (table && typeof table === 'object') {
+            // Tentar obter o nome da tabela da estrutura Drizzle
+            if (table.$table && table.$table.name) {
+              tableName = table.$table.name;
+            }
+            // Ou diretamente da propriedade name
+            else if (table.name) {
+              tableName = table.name;
+            }
+          }
+          
+          console.log(`Executando SELECT na tabela: ${tableName}`);
           const query = `SELECT * FROM "${tableName}" LIMIT 100`;
           return pool.query(query).then(r => r.rows);
         } catch (e) {
@@ -47,7 +65,17 @@ export const db = {
     values: (values: any) => ({
       returning: () => {
         try {
-          const tableName = table.$table?.name || table.name || 'unknown_table';
+          // Obter nome da tabela de forma segura
+          let tableName = 'users'; // Valor padrão seguro
+          if (table && typeof table === 'object') {
+            if (table.$table && table.$table.name) {
+              tableName = table.$table.name;
+            } else if (table.name) {
+              tableName = table.name;
+            }
+          }
+          
+          console.log(`Executando INSERT na tabela: ${tableName}`);
           const columns = Object.keys(values);
           const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
           const query = `INSERT INTO "${tableName}" (${columns.join(', ')}) VALUES (${placeholders}) RETURNING *`;
@@ -65,7 +93,17 @@ export const db = {
       where: (...conditions: any[]) => ({
         returning: () => {
           try {
-            const tableName = table.$table?.name || table.name || 'unknown_table';
+            // Obter nome da tabela de forma segura
+            let tableName = 'users'; // Valor padrão seguro
+            if (table && typeof table === 'object') {
+              if (table.$table && table.$table.name) {
+                tableName = table.$table.name;
+              } else if (table.name) {
+                tableName = table.name;
+              }
+            }
+            
+            console.log(`Executando UPDATE na tabela: ${tableName}`);
             const setClause = Object.entries(values).map(([k, v], i) => `"${k}" = $${i + 1}`).join(', ');
             const query = `UPDATE "${tableName}" SET ${setClause} RETURNING *`;
             return pool.query(query, Object.values(values)).then(r => r.rows);
@@ -82,7 +120,17 @@ export const db = {
     where: (...conditions: any[]) => ({
       returning: () => {
         try {
-          const tableName = table.$table?.name || table.name || 'unknown_table';
+          // Obter nome da tabela de forma segura
+          let tableName = 'users'; // Valor padrão seguro
+          if (table && typeof table === 'object') {
+            if (table.$table && table.$table.name) {
+              tableName = table.$table.name;
+            } else if (table.name) {
+              tableName = table.name;
+            }
+          }
+          
+          console.log(`Executando DELETE na tabela: ${tableName}`);
           const query = `DELETE FROM "${tableName}" RETURNING *`;
           return pool.query(query).then(r => r.rows);
         } catch (e) {

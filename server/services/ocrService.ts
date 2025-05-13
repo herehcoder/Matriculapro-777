@@ -1,6 +1,7 @@
 /**
  * Serviço de OCR para processamento de imagens e documentos
  * Usado pelo webhook da Evolution API para análise de documentos enviados por WhatsApp
+ * Suporta múltiplos providers de OCR: Optiic e Mistral AI
  */
 
 import Optiic from 'optiic';
@@ -9,6 +10,10 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { cacheService } from './cacheService';
+import { MistralOcrService } from './mistralOcr';
+
+// Tipo de OCR provider
+type OcrProvider = 'optiic' | 'mistral';
 
 // Diretório para armazenar imagens temporárias
 const TEMP_DIR = join(process.cwd(), 'tmp', 'ocr');
@@ -23,9 +28,11 @@ if (!existsSync(TEMP_DIR)) {
  */
 class OcrService {
   private optiic: any;
+  private mistralOcr: MistralOcrService | null = null;
   private model: any;
   private initialized: boolean = false;
   private initializing: boolean = false;
+  private activeProvider: OcrProvider = 'mistral'; // Default para Mistral, mais leve e gratuito
 
   /**
    * Inicializa o serviço de OCR
@@ -37,17 +44,22 @@ class OcrService {
     this.initializing = true;
     
     try {
-      console.log('Inicializando serviço OCR com Optiic...');
-      
-      // Verificar API Key do Optiic
-      if (!process.env.OPTIIC_API_KEY) {
-        throw new Error('OPTIIC_API_KEY não configurada no ambiente');
+      // Determinar qual provider utilizar
+      if (process.env.MISTRAL_API_KEY) {
+        console.log('Inicializando serviço OCR com Mistral AI...');
+        this.activeProvider = 'mistral';
+        this.mistralOcr = new MistralOcrService(process.env.MISTRAL_API_KEY);
+      } 
+      else if (process.env.OPTIIC_API_KEY) {
+        console.log('Inicializando serviço OCR com Optiic...');
+        this.activeProvider = 'optiic';
+        this.optiic = new Optiic({
+          apiKey: process.env.OPTIIC_API_KEY
+        });
       }
-      
-      // Inicializar Optiic
-      this.optiic = new Optiic({
-        apiKey: process.env.OPTIIC_API_KEY
-      });
+      else {
+        throw new Error('Nenhuma API key configurada para serviços OCR (MISTRAL_API_KEY ou OPTIIC_API_KEY)');
+      }
       
       // Inicializar modelo TensorFlow para detecção
       try {
@@ -58,7 +70,7 @@ class OcrService {
       
       this.initialized = true;
       this.initializing = false;
-      console.log('Serviço OCR com Optiic inicializado com sucesso');
+      console.log(`Serviço OCR com ${this.activeProvider === 'mistral' ? 'Mistral AI' : 'Optiic'} inicializado com sucesso`);
     } catch (error) {
       this.initializing = false;
       console.error('Erro ao inicializar serviço OCR:', error);
@@ -76,6 +88,7 @@ class OcrService {
     language?: 'por' | 'eng' | 'por+eng';
     detectDocument?: boolean;
     confidence?: number;
+    provider?: OcrProvider; // Permite forçar um provider específico
   } = {}): Promise<{
     text: string;
     confidence: number;
@@ -83,6 +96,7 @@ class OcrService {
     documentDetected?: boolean;
     documentType?: string;
     processingTime: number;
+    provider: OcrProvider;
   }> {
     if (!this.initialized) {
       await this.initialize();
@@ -91,6 +105,9 @@ class OcrService {
     const startTime = Date.now();
     
     try {
+      // Usar provider especificado ou o ativo
+      const provider = options.provider || this.activeProvider;
+      
       // Gerar nome de arquivo aleatório
       const randomId = randomBytes(8).toString('hex');
       const imagePath = join(TEMP_DIR, `${randomId}.jpg`);
@@ -112,20 +129,29 @@ class OcrService {
         }
       }
       
-      console.log('Processando imagem com Optiic API...');
+      let extractedText = '';
+      let confidence = 75; // valor padrão
       
-      // Executar OCR com Optiic
-      const optiicResult = await this.optiic.process({
-        image: imagePath,
-        mode: 'ocr'
-      });
+      // Utilizar o provider correto
+      if (provider === 'mistral' && this.mistralOcr) {
+        console.log('Processando imagem com Mistral OCR API...');
+        extractedText = await this.mistralOcr.processFile(imagePath);
+      } else if (provider === 'optiic' && this.optiic) {
+        console.log('Processando imagem com Optiic API...');
+        const optiicResult = await this.optiic.process({
+          image: imagePath,
+          mode: 'ocr'
+        });
+        extractedText = optiicResult.text;
+      } else {
+        throw new Error(`Provider OCR "${provider}" não está disponível ou configurado`);
+      }
       
-      // Como o Optiic não retorna palavras individuais, vamos criar uma representação simplificada
-      // Dividindo o texto em palavras para compatibilidade com código existente
-      const words = optiicResult.text.split(/\s+/).map(word => ({
+      // Dividir o texto em palavras para compatibilidade com código existente
+      const words = extractedText.split(/\s+/).map(word => ({
         text: word,
-        confidence: 75, // Optiic não retorna confiança por palavra, valor padrão
-        bbox: null // Optiic não retorna bounding boxes
+        confidence: confidence, // valor padrão
+        bbox: null // não temos bounding boxes
       }));
       
       // Filtrar palavras por tamanho (assumindo que palavras muito curtas podem ser ruído)
@@ -134,12 +160,13 @@ class OcrService {
       
       // Preparar resultado
       const result = {
-        text: optiicResult.text,
-        confidence: 75, // Optiic não retorna confiança, valor padrão
+        text: extractedText,
+        confidence: confidence,
         words: filteredWords,
         documentDetected,
         documentType,
-        processingTime: Date.now() - startTime
+        processingTime: Date.now() - startTime,
+        provider
       };
       
       return result;
@@ -344,10 +371,14 @@ class OcrService {
    * Finaliza o serviço de OCR
    */
   async terminate() {
-    // O Optiic é baseado em API, não precisa de finalização específica
-    // Mas marcamos como não inicializado para garantir
+    // Marcar como não inicializado
     this.initialized = false;
+    
+    // Limpar recursos do Optiic se necessário
     this.optiic = null;
+    
+    // Limpar recursos do Mistral se necessário
+    this.mistralOcr = null;
     
     // Liberar modelo TensorFlow se necessário
     if (this.model) {
