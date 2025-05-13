@@ -31,21 +31,9 @@ import {
   type WhatsappContact, type InsertWhatsappContact,
   type WhatsappMessage, type InsertWhatsappMessage
 } from "../shared/whatsapp.schema";
-// Importação do mockup do db para permitir que a aplicação inicie
-// sem dependência de banco de dados PostgreSQL
+// Importação do db para operações no banco de dados
 import { db } from "./db";
-// Criamos versões simuladas dos operadores Drizzle para evitar erros
-const eq = () => true;
-const and = () => true;
-const gte = () => true;
-const lte = () => true;
-const desc = () => ({});
-const asc = () => ({});
-const sql = {
-  raw: () => ({ "exec": () => 0 })
-};
-const or = () => true;
-const lt = () => true;
+import { eq, and, or, gt, gte, lt, lte, desc, asc, sql } from "drizzle-orm";
 
 // Interface for the storage
 export interface IStorage {
