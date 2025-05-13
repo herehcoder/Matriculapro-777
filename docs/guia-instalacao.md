@@ -91,7 +91,19 @@ O servidor estará disponível em `http://localhost:5000` e o frontend em desenv
 
 ## Implantação em Produção
 
-### Opção 1: Replit
+### Opção 1: Vercel (Recomendado)
+
+O projeto está otimizado para deploy na Vercel:
+
+1. Conecte o repositório à sua conta Vercel
+2. Configure as variáveis de ambiente no painel da Vercel
+3. Selecione Node.js como framework preset
+4. Para o banco de dados, configure o Neon PostgreSQL como serviço integrado
+5. A Vercel fará build e deploy automático do projeto
+
+Importante: Para o banco de dados, recomenda-se usar o Neon PostgreSQL, que tem excelente integração com a Vercel e oferece um plano gratuito generoso.
+
+### Opção 2: Replit
 
 1. Crie um novo Repl e importe o código do repositório
 2. Configure as variáveis de ambiente nas configurações do Repl
@@ -104,19 +116,7 @@ O servidor estará disponível em `http://localhost:5000` e o frontend em desenv
    npm start
    ```
 
-### Opção 2: Vercel
-
-O projeto está estruturado como um monorepo para facilitar a implantação na Vercel:
-
-1. Conecte o repositório à sua conta Vercel
-2. Configure as variáveis de ambiente no painel da Vercel
-3. A Vercel detectará automaticamente a configuração do monorepo
-4. O frontend será implantado em `/apps/web`
-5. A API será implantada como funções serverless em `/apps/api`
-
-Importante: Para o banco de dados, recomenda-se usar o Neon PostgreSQL, que tem boa integração com a Vercel.
-
-### Opção 3: Servidor Próprio (VPS)
+### Opção 3: Servidor Próprio
 
 1. Clone o repositório em seu servidor
 2. Instale as dependências:
@@ -243,11 +243,11 @@ Configure backups automáticos do PostgreSQL:
 **Sintoma**: Falhas no processamento de documentos
 
 **Solução**:
-1. Verifique se as dependências do Tesseract estão instaladas:
-   ```bash
-   apt-get install -y tesseract-ocr libtesseract-dev
+1. Verifique se a chave da API do Optiic está corretamente configurada no ambiente:
    ```
-2. Verifique se os arquivos de dados de idioma estão presentes
+   OPTIIC_API_KEY=sua_chave_api
+   ```
+2. Verifique os limites de uso da sua conta Optiic (quotas da API)
 
 ### Problemas com Envio de Email
 

@@ -87,13 +87,14 @@ EduMatrik AI é uma plataforma SaaS (Software as a Service) desenvolvida para au
 - **ShadCN UI**: Componentes acessíveis e reutilizáveis
 
 ### Serviços Integrados
-- **Tesseract.js**: OCR (Reconhecimento Óptico de Caracteres)
 - **Stripe**: Gateway de pagamento seguro
 - **Evolution API**: Integração oficial com WhatsApp
 - **Pusher**: Sistema de notificações em tempo real
+- **Optiic**: Serviço de processamento de imagens (OCR)
 
 ### DevOps e Infraestrutura
-- **Replit**: Ambiente de desenvolvimento e hospedagem
+- **Vercel**: Plataforma principal de deploy e hospedagem
+- **Replit**: Ambiente de desenvolvimento colaborativo
 - **REST API**: Comunicação padronizada entre serviços
 - **WebSockets**: Comunicação em tempo real
 
@@ -114,7 +115,7 @@ O sistema é baseado em uma arquitetura modular com os seguintes componentes pri
 
 ### Pré-requisitos
 - Node.js 18.x ou superior
-- PostgreSQL 14.x ou superior
+- PostgreSQL 14.x ou superior (ou Neon Database para deploy na Vercel)
 - Conta Stripe para pagamentos (opcional)
 - Instância da Evolution API para WhatsApp (opcional)
 
