@@ -44,11 +44,19 @@ class OcrService {
     this.initializing = true;
     
     try {
-      // Determinar qual provider utilizar
+      // Determinar qual provider utilizar (prioridade para Mistral AI por ser gratuito)
       if (process.env.MISTRAL_API_KEY) {
         console.log('Inicializando serviço OCR com Mistral AI...');
         this.activeProvider = 'mistral';
         this.mistralOcr = new MistralOcrService(process.env.MISTRAL_API_KEY);
+        
+        // Também inicializar Optiic como fallback se disponível
+        if (process.env.OPTIIC_API_KEY) {
+          console.log('Inicializando Optiic como fallback...');
+          this.optiic = new Optiic({
+            apiKey: process.env.OPTIIC_API_KEY
+          });
+        }
       } 
       else if (process.env.OPTIIC_API_KEY) {
         console.log('Inicializando serviço OCR com Optiic...');
@@ -61,16 +69,17 @@ class OcrService {
         throw new Error('Nenhuma API key configurada para serviços OCR (MISTRAL_API_KEY ou OPTIIC_API_KEY)');
       }
       
-      // Inicializar modelo TensorFlow para detecção
+      // Inicializar modelo TensorFlow para detecção, se disponível
       try {
         this.model = await tf.loadLayersModel('file://./models/document_detection/model.json');
+        console.log('Modelo de detecção de documentos carregado com sucesso');
       } catch (error) {
         console.warn('Modelo de detecção de documentos não encontrado, usando OCR básico apenas');
       }
       
       this.initialized = true;
       this.initializing = false;
-      console.log(`Serviço OCR com ${this.activeProvider === 'mistral' ? 'Mistral AI' : 'Optiic'} inicializado com sucesso`);
+      console.log(`Serviço OCR inicializado com ${this.activeProvider === 'mistral' ? 'Mistral AI' : 'Optiic'} como provider principal`);
     } catch (error) {
       this.initializing = false;
       console.error('Erro ao inicializar serviço OCR:', error);

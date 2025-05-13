@@ -1203,6 +1203,67 @@ export function registerOcrRoutes(app: Express, isAuthenticated: any) {
       });
     }
   });
+
+  /**
+   * @route POST /api/ocr/test-mistral
+   * @desc Teste do serviço OCR Mistral AI
+   * @access Admin
+   */
+  app.post('/api/ocr/test-mistral', isAuthenticated, isAdminOrSchool, upload.single('file'), async (req: Request, res: Response) => {
+    try {
+      // Importar serviço OCR básico para usar Mistral AI
+      const { ocrService } = require('./services/ocrService');
+      
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          error: 'Nenhum arquivo enviado'
+        });
+      }
+      
+      // Inicializar OCR se ainda não estiver inicializado
+      if (!ocrService.initialized) {
+        await ocrService.initialize();
+      }
+      
+      // Ler arquivo do disco
+      const fileBuffer = fs.readFileSync(req.file.path);
+      
+      // Processar imagem com Mistral AI como provider
+      const result = await ocrService.processImage(fileBuffer, {
+        provider: 'mistral',
+        detectDocument: true
+      });
+      
+      // Registrar ação
+      await logAction(
+        req.user.id,
+        'test_mistral_ocr',
+        'ocr',
+        undefined,
+        { filename: req.file.originalname },
+        'info',
+        req.ip
+      );
+      
+      // Retornar resultados do OCR
+      res.json({
+        success: true,
+        provider: result.provider,
+        text: result.text,
+        processingTime: result.processingTime,
+        documentDetected: result.documentDetected,
+        documentType: result.documentType,
+        wordCount: result.words.length
+      });
+    } catch (error) {
+      console.error('Erro ao processar OCR com Mistral AI:', error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
+    }
+  });
 }
 
 // Import para SQL
