@@ -3,7 +3,7 @@
  * Implementa reconhecimento, extração e verificação de documentos
  */
 
-import { createWorker, Worker, ImageLike } from 'tesseract.js';
+import Optiic from 'optiic';
 import { db } from '../db';
 import path from 'path';
 import fs from 'fs';
@@ -132,15 +132,13 @@ interface OCRServiceConfig {
 }
 
 class AdvancedOcrService {
-  private workers: Worker[] = [];
-  private numWorkers: number = 2;
+  private optiic: any;
   private languages: string[] = ['por'];
   private dataPath: string;
   private ready: boolean = false;
   private inactiveMode: boolean = false;
   
   constructor(config?: OCRServiceConfig) {
-    this.numWorkers = config?.workers || 2;
     this.languages = config?.languages || ['por'];
     this.dataPath = config?.dataPath || path.join(process.cwd());
     this.inactiveMode = config?.inactiveMode || false;
@@ -150,26 +148,31 @@ class AdvancedOcrService {
    * Inicializa o serviço de OCR
    */
   async initialize(): Promise<void> {
-    console.log('Inicializando serviço de OCR avançado...');
+    console.log('Inicializando serviço de OCR avançado com Optiic...');
     
     try {
       // Garantir que as tabelas existem
       await this.ensureTables();
       
-      // Se estiver em modo inativo, não inicializar workers
+      // Se estiver em modo inativo, não inicializar Optiic
       if (this.inactiveMode) {
-        console.log('OCR em modo inativo. Workers não serão inicializados.');
+        console.log('OCR em modo inativo. Optiic não será inicializado.');
         this.ready = true;
         return;
       }
       
-      // Inicializar workers do Tesseract
-      for (let i = 0; i < this.numWorkers; i++) {
-        await this.initWorker(i);
+      // Verificar se temos a chave da API Optiic
+      if (!process.env.OPTIIC_API_KEY) {
+        throw new Error('OPTIIC_API_KEY não configurada');
       }
       
+      // Inicializar Optiic
+      this.optiic = new Optiic({
+        apiKey: process.env.OPTIIC_API_KEY
+      });
+      
       this.ready = true;
-      console.log('Serviço de OCR avançado inicializado com sucesso!');
+      console.log('Serviço de OCR avançado com Optiic inicializado com sucesso!');
     } catch (error) {
       console.error('Erro ao inicializar serviço OCR:', error);
       
@@ -197,37 +200,39 @@ class AdvancedOcrService {
   }
   
   /**
+   * Retorna a contagem de workers (Para compatibilidade com código que usa Tesseract)
+   * @returns Sempre retorna 1 para Optiic (API) se estiver inicializado, 0 caso contrário
+   */
+  getWorkerCount(): number {
+    // Optiic é baseado em API e não usa workers como Tesseract,
+    // retorna 1 para compatibilidade com código existente
+    return this.optiic ? 1 : 0;
+  }
+  
+  /**
+   * Verifica se o serviço está inicializado
+   * @returns Status de inicialização
+   */
+  isInitialized(): boolean {
+    return this.ready;
+  }
+  
+  /**
    * Obtém o status atual do serviço
    * @returns Status do serviço OCR
    */
   getStatus(): {
     ready: boolean;
-    workers: number;
     inactiveMode: boolean;
     languages: string[];
+    apiProvider: string;
   } {
     return {
       ready: this.ready,
-      workers: this.workers.length,
       inactiveMode: this.inactiveMode,
-      languages: this.languages
+      languages: this.languages,
+      apiProvider: 'Optiic'
     };
-  }
-  
-  /**
-   * Inicializa um worker do Tesseract
-   * @param index Índice do worker
-   */
-  private async initWorker(index: number): Promise<void> {
-    console.log(`Criando worker OCR #${index + 1}...`);
-    
-    // Criar worker sem logger customizado para evitar erro de serialização
-    const worker = await createWorker();
-    
-    // Tesseract.js 4.0 removeu os métodos de loadLanguage/initialize
-    // Apenas adicionamos o worker criado à lista
-    
-    this.workers.push(worker);
   }
   
   /**
@@ -342,15 +347,29 @@ class AdvancedOcrService {
       // Calcular hash da imagem para detecção de duplicatas e validação
       const imageHash = this.calculateImageHash(imageBuffer);
       
-      // Selecionar worker disponível (round-robin simples)
-      const workerIndex = documentId % this.workers.length;
-      const worker = this.workers[workerIndex];
+      // Preparar imagem para o Optiic (converter para base64 se for buffer)
+      let imagePath = '';
+      if (typeof imagePathOrBuffer === 'string') {
+        imagePath = imagePathOrBuffer;
+      } else {
+        // Se for um buffer, precisamos salvar temporariamente ou usar base64
+        // Por simplicidade, vamos usar o caminho original que foi convertido para buffer
+        imagePath = typeof imagePathOrBuffer === 'string' ? imagePathOrBuffer : path.join(this.dataPath, `temp-${Date.now()}.png`);
+        if (!fs.existsSync(imagePath)) {
+          fs.writeFileSync(imagePath, imageBuffer);
+        }
+      }
       
-      // Executar OCR
-      const result = await worker.recognize(imageBuffer);
+      // Executar OCR com Optiic
+      console.log('Processando imagem com Optiic API...');
+      const result = await this.optiic.process({
+        image: imagePath,
+        mode: 'ocr'
+      });
       
-      // Dados extraídos e confiança
-      const { text, confidence } = result.data;
+      // Dados extraídos
+      const text = result.text;
+      const confidence = 75; // Optiic não retorna confiança, usando valor padrão
       
       // Estruturar dados baseado no tipo de documento
       const extractedData = await this.extractDocumentData(text, documentType);

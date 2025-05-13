@@ -3,7 +3,7 @@
  * Usado pelo webhook da Evolution API para análise de documentos enviados por WhatsApp
  */
 
-import { createWorker } from 'tesseract.js';
+import Optiic from 'optiic';
 import * as tf from '@tensorflow/tfjs-node';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
@@ -22,7 +22,7 @@ if (!existsSync(TEMP_DIR)) {
  * Classe principal do serviço OCR
  */
 class OcrService {
-  private worker: any;
+  private optiic: any;
   private model: any;
   private initialized: boolean = false;
   private initializing: boolean = false;
@@ -37,25 +37,16 @@ class OcrService {
     this.initializing = true;
     
     try {
-      console.log('Inicializando serviço OCR...');
+      console.log('Inicializando serviço OCR com Optiic...');
       
-      // Inicializar worker do Tesseract
-      this.worker = await createWorker({
-        langPath: process.cwd(),
-        logger: m => {
-          if (m.status === 'recognizing text') {
-            console.log(`OCR progresso: ${(m.progress * 100).toFixed(2)}%`);
-          }
-        }
-      });
+      // Verificar API Key do Optiic
+      if (!process.env.OPTIIC_API_KEY) {
+        throw new Error('OPTIIC_API_KEY não configurada no ambiente');
+      }
       
-      // Carregar idiomas português e inglês
-      await this.worker.loadLanguage('por+eng');
-      await this.worker.initialize('por+eng');
-      await this.worker.setParameters({
-        tessedit_ocr_engine_mode: 1, // modo de velocidade normal
-        preserve_interword_spaces: 1,
-        page_separator: '',
+      // Inicializar Optiic
+      this.optiic = new Optiic({
+        apiKey: process.env.OPTIIC_API_KEY
       });
       
       // Inicializar modelo TensorFlow para detecção
@@ -67,7 +58,7 @@ class OcrService {
       
       this.initialized = true;
       this.initializing = false;
-      console.log('Serviço OCR inicializado com sucesso');
+      console.log('Serviço OCR com Optiic inicializado com sucesso');
     } catch (error) {
       this.initializing = false;
       console.error('Erro ao inicializar serviço OCR:', error);
@@ -121,28 +112,30 @@ class OcrService {
         }
       }
       
-      // Configurar idioma
-      if (options.language && options.language !== 'por+eng') {
-        await this.worker.loadLanguage(options.language);
-        await this.worker.initialize(options.language);
-      }
+      console.log('Processando imagem com Optiic API...');
       
-      // Executar OCR
-      const { data } = await this.worker.recognize(imagePath);
+      // Executar OCR com Optiic
+      const optiicResult = await this.optiic.process({
+        image: imagePath,
+        mode: 'ocr'
+      });
       
-      // Filtrar palavras por confiança
+      // Como o Optiic não retorna palavras individuais, vamos criar uma representação simplificada
+      // Dividindo o texto em palavras para compatibilidade com código existente
+      const words = optiicResult.text.split(/\s+/).map(word => ({
+        text: word,
+        confidence: 75, // Optiic não retorna confiança por palavra, valor padrão
+        bbox: null // Optiic não retorna bounding boxes
+      }));
+      
+      // Filtrar palavras por tamanho (assumindo que palavras muito curtas podem ser ruído)
       const confidenceThreshold = options.confidence || 60;
-      const filteredWords = data.words.filter(word => word.confidence > confidenceThreshold);
-      
-      // Calcular confiança média
-      const avgConfidence = filteredWords.length > 0
-        ? filteredWords.reduce((sum, word) => sum + word.confidence, 0) / filteredWords.length
-        : 0;
+      const filteredWords = words.filter(word => word.text.length > 1);
       
       // Preparar resultado
       const result = {
-        text: data.text,
-        confidence: avgConfidence,
+        text: optiicResult.text,
+        confidence: 75, // Optiic não retorna confiança, valor padrão
         words: filteredWords,
         documentDetected,
         documentType,
@@ -351,9 +344,19 @@ class OcrService {
    * Finaliza o serviço de OCR
    */
   async terminate() {
-    if (this.worker) {
-      await this.worker.terminate();
-      this.initialized = false;
+    // O Optiic é baseado em API, não precisa de finalização específica
+    // Mas marcamos como não inicializado para garantir
+    this.initialized = false;
+    this.optiic = null;
+    
+    // Liberar modelo TensorFlow se necessário
+    if (this.model) {
+      try {
+        this.model.dispose();
+      } catch (error) {
+        console.error('Erro ao liberar modelo TensorFlow:', error);
+      }
+      this.model = null;
     }
   }
 }

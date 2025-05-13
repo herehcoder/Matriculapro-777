@@ -58,27 +58,27 @@ export function registerOcrRoutes(app: Express, isAuthenticated: any) {
   
   // Tentar inicializar serviço de OCR
   try {
-    // Verificar se temos as dependências necessárias para OCR
-    const hasRequiredDeps = fs.existsSync('./node_modules/tesseract.js');
+    // Verificar se temos a chave da API Optiic configurada
+    const hasOptiicApiKey = !!process.env.OPTIIC_API_KEY;
     
-    if (!hasRequiredDeps) {
-      console.warn('Tesseract.js não encontrado. O serviço OCR funcionará em modo inativo.');
+    if (!hasOptiicApiKey) {
+      console.warn('OPTIIC_API_KEY não encontrada. O serviço OCR funcionará em modo inativo.');
       // Definir modo inativo
       advancedOcrService.setInactiveMode(true);
     } else {
-      console.log('Inicializando serviço OCR...');
-      // Inicializar OCR com 2 workers em modo assíncrono
-      advancedOcrService.initialize(2)
+      console.log('Inicializando serviço OCR com Optiic...');
+      // Inicializar OCR com modo assíncrono
+      advancedOcrService.initialize()
         .then(() => {
-          console.log('Serviço OCR inicializado com sucesso');
+          console.log('Serviço OCR com Optiic inicializado com sucesso');
         })
         .catch(error => {
-          console.error('Erro ao inicializar OCR, usando modo inativo:', error);
+          console.error('Erro ao inicializar OCR com Optiic, usando modo inativo:', error);
           advancedOcrService.setInactiveMode(true);
         });
     }
   } catch (error) {
-    console.error('Erro ao configurar OCR, usando modo inativo:', error);
+    console.error('Erro ao configurar OCR com Optiic, usando modo inativo:', error);
     advancedOcrService.setInactiveMode(true);
   }
   
@@ -109,11 +109,12 @@ export function registerOcrRoutes(app: Express, isAuthenticated: any) {
         });
       }
       
-      // Verificar status do serviço
+      // Verificar status do serviço (adaptado para Optiic)
       const status = {
         initialized: advancedOcrService.isInitialized(),
         inactiveMode: advancedOcrService.isInactiveMode(),
-        workerCount: advancedOcrService.getWorkerCount()
+        apiAvailable: Boolean(process.env.OPTIIC_API_KEY),
+        serviceType: 'Optiic Cloud OCR'
       };
       
       res.json({

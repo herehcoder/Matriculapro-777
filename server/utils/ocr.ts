@@ -1,4 +1,4 @@
-import { createWorker, createScheduler, OEM, PSM, Worker } from 'tesseract.js';
+import Optiic from 'optiic';
 import path from 'path';
 import fs from 'fs';
 
@@ -32,55 +32,49 @@ export interface FieldValidation {
   reason?: string; // Explanation for validation result
 }
 
-// Cache para workers do Tesseract
-let workerCache: Worker | null = null;
-let initializationPromise: Promise<Worker> | null = null;
+// Inicializa a instância do Optiic
+console.log('Inicializando Optiic OCR com chave da API');
+const optiic = new Optiic({
+  apiKey: process.env.OPTIIC_API_KEY // Opcional, mas recomendado para evitar limites
+});
+console.log('Instância Optiic inicializada com sucesso');
 
 /**
- * Inicializa um worker do Tesseract.js para reconhecimento de texto
- * @returns Worker inicializado
+ * Detecta o tipo de documento com base no texto reconhecido
+ * @param text Texto completo do documento
+ * @returns Tipo de documento detectado
  */
-async function initializeWorker(): Promise<Worker> {
-  if (workerCache) {
-    return workerCache;
-  }
-
-  if (initializationPromise) {
-    return initializationPromise;
-  }
-
-  console.log('Inicializando worker do Tesseract.js...');
+function detectDocumentType(text: string): string {
+  const textLower = text.toLowerCase();
   
-  // Armazenar a promessa para evitar inicializações paralelas
-  initializationPromise = (async () => {
-    try {
-      const worker = await createWorker({
-        logger: m => console.log(m),
-      });
-      
-      // Carregar idioma português
-      await worker.loadLanguage('por');
-      await worker.initialize('por');
-      
-      // Configurar para melhor reconhecimento de documentos
-      await worker.setParameters({
-        tessedit_ocr_engine_mode: OEM.LSTM_ONLY,
-        tessedit_pageseg_mode: PSM.AUTO,
-        preserve_interword_spaces: '1',
-      });
-      
-      console.log('Worker do Tesseract.js inicializado com sucesso');
-      workerCache = worker;
-      return worker;
-    } catch (error) {
-      console.error('Erro ao inicializar worker do Tesseract.js:', error);
-      throw error;
-    } finally {
-      initializationPromise = null;
-    }
-  })();
+  // Verificar padrões para RG
+  if (
+    (textLower.includes('identidade') || textLower.includes('rg')) &&
+    (textLower.includes('república federativa') || textLower.includes('brasil'))
+  ) {
+    return 'rg';
+  }
   
-  return initializationPromise;
+  // Verificar padrões para CPF
+  if (
+    textLower.includes('cpf') &&
+    (textLower.includes('receita federal') || textLower.includes('ministério da fazenda'))
+  ) {
+    return 'cpf';
+  }
+  
+  // Verificar padrões para comprovante de residência
+  if (
+    (textLower.includes('conta') || textLower.includes('fatura')) &&
+    (textLower.includes('energia') || textLower.includes('água') || 
+     textLower.includes('luz') || textLower.includes('telefone') ||
+     textLower.includes('internet'))
+  ) {
+    return 'address_proof';
+  }
+  
+  // Não foi possível determinar o tipo
+  return 'unknown';
 }
 
 /**
@@ -205,45 +199,7 @@ function extractAddressProofData(text: string): Record<string, string> {
 }
 
 /**
- * Detecta o tipo de documento com base no texto reconhecido
- * @param text Texto completo do documento
- * @returns Tipo de documento detectado
- */
-function detectDocumentType(text: string): string {
-  const textLower = text.toLowerCase();
-  
-  // Verificar padrões para RG
-  if (
-    (textLower.includes('identidade') || textLower.includes('rg')) &&
-    (textLower.includes('república federativa') || textLower.includes('brasil'))
-  ) {
-    return 'rg';
-  }
-  
-  // Verificar padrões para CPF
-  if (
-    textLower.includes('cpf') &&
-    (textLower.includes('receita federal') || textLower.includes('ministério da fazenda'))
-  ) {
-    return 'cpf';
-  }
-  
-  // Verificar padrões para comprovante de residência
-  if (
-    (textLower.includes('conta') || textLower.includes('fatura')) &&
-    (textLower.includes('energia') || textLower.includes('água') || 
-     textLower.includes('luz') || textLower.includes('telefone') ||
-     textLower.includes('internet'))
-  ) {
-    return 'address_proof';
-  }
-  
-  // Não foi possível determinar o tipo
-  return 'unknown';
-}
-
-/**
- * Analisa um documento de identificação por OCR
+ * Analisa um documento de identificação usando Optiic OCR
  * @param filePath Caminho para o arquivo do documento
  * @param formFields Dados informados pelo usuário no formulário para validação cruzada (opcional)
  * @returns Resultados da análise OCR
@@ -261,12 +217,39 @@ export async function analyzeDocument(
       };
     }
     
-    // Obter o worker do Tesseract
-    const worker = await initializeWorker();
+    console.log(`Processando OCR com Optiic para o arquivo: ${filePath}`);
+    console.log(`Usando API key: ${process.env.OPTIIC_API_KEY ? 'Configurada' : 'Não configurada'}`);
     
-    // Realizar OCR no documento
-    const result = await worker.recognize(filePath);
-    const text = result.data.text;
+    let text = "";
+    
+    try {
+      // Realizar OCR no documento usando Optiic
+      console.log('Enviando solicitação para API Optiic...');
+      const result = await optiic.process({
+        image: filePath,
+        mode: 'ocr'
+      });
+      
+      console.log('Resposta recebida da API Optiic:', JSON.stringify(result, null, 2));
+      
+      // Verificar se temos um resultado válido
+      if (!result || !result.text) {
+        console.error('Falha no OCR: Resposta sem texto');
+        return {
+          success: false,
+          error: 'Falha ao extrair texto da imagem'
+        };
+      }
+      
+      text = result.text;
+      console.log('Texto extraído com sucesso:', text);
+    } catch (apiError) {
+      console.error('Erro na API Optiic:', apiError);
+      return {
+        success: false,
+        error: `Erro na API Optiic: ${apiError instanceof Error ? apiError.message : 'Erro desconhecido'}`
+      };
+    }
     
     // Detectar o tipo de documento
     const documentType = detectDocumentType(text);
@@ -291,13 +274,16 @@ export async function analyzeDocument(
         };
     }
     
+    // Atribuir uma confiança padrão (Optiic não fornece um score de confiança)
+    const confidence = 90; // Valor padrão relativamente alto
+    
     // Construir resposta básica
     const response: OcrResult = {
       success: true,
       data: {
         documentType,
         fields,
-        confidence: result.data.confidence
+        confidence
       }
     };
     
@@ -311,7 +297,6 @@ export async function analyzeDocument(
     }
     
     return response;
-    
   } catch (error) {
     console.error('Erro na análise do documento:', error);
     return {
@@ -403,6 +388,44 @@ function stringSimilarity(s1: string, s2: string): number {
   
   // Retorna 1 - distance/maxLength para ter um valor onde 1 é uma correspondência exata
   return 1 - (track[s2.length][s1.length] / maxLength);
+}
+
+/**
+ * Verifica se um CPF é válido utilizando o algoritmo de validação padrão
+ * @param cpf Número do CPF a ser validado
+ * @returns Verdadeiro se o CPF for válido, falso caso contrário
+ */
+function validateCPF(cpf: string): boolean {
+  // Remover caracteres não numéricos
+  cpf = cpf.replace(/\D/g, '');
+  
+  // Verificar se tem 11 dígitos
+  if (cpf.length !== 11) return false;
+  
+  // Verificar se todos os dígitos são iguais
+  if (/^(\d)\1+$/.test(cpf)) return false;
+  
+  // Validação do primeiro dígito verificador
+  let sum = 0;
+  for (let i = 0; i < 9; i++) {
+    sum += parseInt(cpf.charAt(i)) * (10 - i);
+  }
+  
+  let remainder = 11 - (sum % 11);
+  if (remainder === 10 || remainder === 11) remainder = 0;
+  if (remainder !== parseInt(cpf.charAt(9))) return false;
+  
+  // Validação do segundo dígito verificador
+  sum = 0;
+  for (let i = 0; i < 10; i++) {
+    sum += parseInt(cpf.charAt(i)) * (11 - i);
+  }
+  
+  remainder = 11 - (sum % 11);
+  if (remainder === 10 || remainder === 11) remainder = 0;
+  if (remainder !== parseInt(cpf.charAt(10))) return false;
+  
+  return true;
 }
 
 /**
@@ -502,108 +525,31 @@ export function validateDocumentAgainstForm(
         normalizedExtracted,
         normalizedExpected: normalizedForm,
         reason: isValid 
-          ? `Valor extraído corresponde ao informado (${confidence}% de confiança)` 
-          : `Valor extraído diferente do informado (${confidence}% de confiança)`
+          ? `Valor extraído corresponde ao informado (${confidence}% de similaridade)`
+          : `Valor extraído não corresponde ao informado (${confidence}% de similaridade)`
       };
       
-      validFieldsCount++;
-    } else if (formFields[fieldName]) {
-      // Campo não encontrado, mas esperado
-      fieldValidations[fieldName] = {
-        isValid: false,
-        confidence: 0,
-        extractedValue: '',
-        expectedValue: formFields[fieldName],
-        reason: 'Campo não encontrado no documento'
-      };
+      // Contar campos válidos
+      if (isValid) {
+        validFieldsCount++;
+      }
     }
   }
   
-  // Normalizar a pontuação total para escala 0-100
-  const finalScore = validFieldsCount > 0 ? Math.round(totalScore / validFieldsCount) : 0;
+  // Calcular pontuação total
+  const validatedFieldsCount = Object.keys(fieldValidations).length;
   
-  // Determinar a validade geral do documento
-  // Um documento é considerado válido se tiver pelo menos 70 pontos
-  // E nenhum campo essencial for inválido (exemplo: CPF ou RG)
-  let isValid = finalScore >= 70;
+  // Determinar se o documento é válido (todos os campos validados devem ser válidos)
+  const isDocumentValid = validatedFieldsCount > 0 && validFieldsCount === validatedFieldsCount;
   
-  // Verificar campos críticos específicos por tipo de documento
-  if (documentType === 'rg' && fieldValidations.rg && !fieldValidations.rg.isValid) {
-    isValid = false;
-  } else if (documentType === 'cpf' && fieldValidations.cpf && !fieldValidations.cpf.isValid) {
-    isValid = false;
-  } else if (documentType === 'address_proof' && fieldValidations.address && !fieldValidations.address.isValid) {
-    isValid = false;
-  }
+  // Normalizar pontuação total para escala 0-100
+  const normalizedScore = validatedFieldsCount > 0 
+    ? Math.round(totalScore * (100 / validatedFieldsCount))
+    : 0;
   
   return {
-    isValid,
+    isValid: isDocumentValid,
     fieldValidations,
-    score: finalScore
+    score: normalizedScore
   };
-}
-
-/**
- * Valida um número de CPF
- * @param cpf Número do CPF a ser validado
- * @returns Verdadeiro se o CPF for válido
- */
-function validateCPF(cpf: string): boolean {
-  // Remover caracteres não numéricos
-  cpf = cpf.replace(/[^\d]/g, '');
-  
-  // CPF deve ter 11 dígitos
-  if (cpf.length !== 11) {
-    return false;
-  }
-  
-  // Verificar se todos os dígitos são iguais (caso inválido)
-  if (/^(\d)\1+$/.test(cpf)) {
-    return false;
-  }
-  
-  // Validar os dígitos verificadores
-  let sum = 0;
-  let remainder;
-  
-  // Primeiro dígito verificador
-  for (let i = 1; i <= 9; i++) {
-    sum += parseInt(cpf.charAt(i - 1)) * (11 - i);
-  }
-  
-  remainder = (sum * 10) % 11;
-  if (remainder === 10 || remainder === 11) {
-    remainder = 0;
-  }
-  
-  if (remainder !== parseInt(cpf.charAt(9))) {
-    return false;
-  }
-  
-  // Segundo dígito verificador
-  sum = 0;
-  for (let i = 1; i <= 10; i++) {
-    sum += parseInt(cpf.charAt(i - 1)) * (12 - i);
-  }
-  
-  remainder = (sum * 10) % 11;
-  if (remainder === 10 || remainder === 11) {
-    remainder = 0;
-  }
-  
-  if (remainder !== parseInt(cpf.charAt(10))) {
-    return false;
-  }
-  
-  return true;
-}
-
-/**
- * Finaliza o worker do Tesseract quando não for mais necessário
- */
-export async function terminateOCR(): Promise<void> {
-  if (workerCache) {
-    await workerCache.terminate();
-    workerCache = null;
-  }
 }
