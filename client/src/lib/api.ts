@@ -84,10 +84,19 @@ export const verifyDocumentData = async (documentId: number, userData: Record<st
 
 // Schools
 export const getSchools = () => {
-  return fetch("/api/schools", { credentials: "include" }).then(res => {
-    if (!res.ok) throw new Error("Failed to fetch schools");
-    return res.json();
-  });
+  return fetch("/api/schools", { credentials: "include" })
+    .then(res => {
+      if (!res.ok) throw new Error("Failed to fetch schools");
+      return res.json();
+    })
+    .then(data => {
+      console.log("Escolas obtidas do API:", data);
+      return data || [];
+    })
+    .catch(error => {
+      console.error("Erro ao buscar escolas:", error);
+      throw error;
+    });
 };
 
 export const getSchool = (id: number) => {

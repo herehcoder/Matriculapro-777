@@ -29,11 +29,23 @@ export default function NewEnrollmentPage() {
       try {
         // For admin users, load all schools
         if (isAdmin) {
+          console.log("Carregando escolas para admin");
           const schoolsData = await getSchools();
-          setSchools(schoolsData);
+          console.log("Dados de escolas carregados:", schoolsData);
+          
+          if (Array.isArray(schoolsData) && schoolsData.length > 0) {
+            setSchools(schoolsData);
+          } else {
+            console.warn("Nenhuma escola encontrada ou formato inválido:", schoolsData);
+            toast({
+              title: "Aviso",
+              description: "Nenhuma escola encontrada. Por favor, crie uma escola primeiro.",
+            });
+          }
         } 
         // For school users, set the school and load its courses
         else if (user?.schoolId) {
+          console.log("Carregando escola e cursos para usuário de escola:", user.schoolId);
           setSelectedSchool(user.schoolId.toString());
           const coursesData = await getCoursesBySchool(user.schoolId);
           setCourses(coursesData);

@@ -270,28 +270,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // School routes
   app.get("/api/schools", async (req, res, next) => {
     try {
-      // Executar SQL diretamente para buscar escolas
-      const schoolsResult = await pool.query('SELECT * FROM schools');
-      const dbSchools = schoolsResult.rows || [];
+      // Primeiramente, vamos verificar se conseguimos acessar o banco
+      try {
+        const checkConnection = await pool.query('SELECT 1 as check_connection');
+        console.log("Conexão com banco OK:", checkConnection.rows);
+      } catch (dbError) {
+        console.error("Erro na conexão com o banco:", dbError);
+        return res.status(500).json({ message: "Erro na conexão com o banco de dados" });
+      }
       
+      // Agora vamos buscar as escolas de forma direta
+      const schoolsQuery = await pool.query('SELECT * FROM schools');
+      console.log("Resultado da consulta:", schoolsQuery);
+      
+      // Garantir que temos um array de escolas
+      if (!schoolsQuery.rows || !Array.isArray(schoolsQuery.rows)) {
+        console.error("Resposta inesperada do banco:", schoolsQuery);
+        return res.status(500).json({ message: "Formato de resposta inesperado do banco" });
+      }
+      
+      const dbSchools = schoolsQuery.rows;
       console.log("Escolas encontradas:", dbSchools.length);
       
-      // Mapear para o formato esperado pelo frontend
-      const mappedSchools = dbSchools.map(school => ({
-        id: school.id,
-        name: school.name || '',
-        logo: school.logo || '',
-        city: school.city || '',
-        state: school.state || '',
-        address: school.address || '',
-        zipCode: school.zip_code || '', // usar a nomenclatura correta do banco
-        phone: school.phone || '',
-        email: school.email || '',
-        website: '', // este campo pode não existir na tabela
-        active: school.active !== false,
-        createdAt: school.created_at || new Date(),
-        updatedAt: school.updated_at || new Date()
-      }));
+      // Verificar o formato de cada escola antes de mapear
+      if (dbSchools.length > 0) {
+        console.log("Exemplo de escola:", JSON.stringify(dbSchools[0]));
+      }
+      
+      // Mapear para o formato esperado pelo frontend com verificações de segurança
+      const mappedSchools = [];
+      
+      for (const school of dbSchools) {
+        mappedSchools.push({
+          id: school.id || 0,
+          name: school.name || '',
+          logo: school.logo || '',
+          city: school.city || '',
+          state: school.state || '',
+          address: school.address || '',
+          zipCode: school.zip_code || '', 
+          phone: school.phone || '',
+          email: school.email || '',
+          website: '',
+          active: Boolean(school.active),
+          createdAt: school.created_at ? new Date(school.created_at) : new Date(),
+          updatedAt: school.updated_at ? new Date(school.updated_at) : new Date()
+        });
+      }
       
       console.log("Escolas mapeadas:", mappedSchools.length);
       
@@ -311,41 +336,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
           active: true
         };
         
-        // Inserir diretamente no banco
-        const insertResult = await pool.query(
-          `INSERT INTO schools (name, logo, city, state, address, zip_code, phone, email, active) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
-           RETURNING *`,
-          [newSchool.name, newSchool.logo, newSchool.city, newSchool.state, 
-           newSchool.address, newSchool.zip_code, newSchool.phone, newSchool.email, newSchool.active]
-        );
-        
-        const insertedSchool = insertResult.rows[0];
-        console.log("Escola criada:", insertedSchool);
-        
-        // Mapear a escola inserida para o formato esperado pelo frontend
-        const mappedInsertedSchool = [{
-          id: insertedSchool.id,
-          name: insertedSchool.name || '',
-          logo: insertedSchool.logo || '',
-          city: insertedSchool.city || '',
-          state: insertedSchool.state || '',
-          address: insertedSchool.address || '',
-          zipCode: insertedSchool.zip_code || '',
-          phone: insertedSchool.phone || '',
-          email: insertedSchool.email || '',
-          website: '',
-          active: insertedSchool.active !== false,
-          createdAt: insertedSchool.created_at || new Date(),
-          updatedAt: insertedSchool.updated_at || new Date()
-        }];
-        
-        res.json(mappedInsertedSchool);
-        return;
+        try {
+          // Inserir diretamente no banco
+          const insertResult = await pool.query(
+            `INSERT INTO schools (name, logo, city, state, address, zip_code, phone, email, active) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+             RETURNING *`,
+            [newSchool.name, newSchool.logo, newSchool.city, newSchool.state, 
+             newSchool.address, newSchool.zip_code, newSchool.phone, newSchool.email, newSchool.active]
+          );
+          
+          if (insertResult.rows && insertResult.rows.length > 0) {
+            const insertedSchool = insertResult.rows[0];
+            console.log("Escola criada:", insertedSchool);
+            
+            // Mapear a escola inserida para o formato esperado pelo frontend
+            const mappedInsertedSchool = [{
+              id: insertedSchool.id || 0,
+              name: insertedSchool.name || '',
+              logo: insertedSchool.logo || '',
+              city: insertedSchool.city || '',
+              state: insertedSchool.state || '',
+              address: insertedSchool.address || '',
+              zipCode: insertedSchool.zip_code || '',
+              phone: insertedSchool.phone || '',
+              email: insertedSchool.email || '',
+              website: '',
+              active: Boolean(insertedSchool.active),
+              createdAt: insertedSchool.created_at ? new Date(insertedSchool.created_at) : new Date(),
+              updatedAt: insertedSchool.updated_at ? new Date(insertedSchool.updated_at) : new Date()
+            }];
+            
+            return res.json(mappedInsertedSchool);
+          } else {
+            console.error("Erro ao criar escola padrão: Nenhuma escola retornada");
+            return res.status(500).json({ message: "Erro ao criar escola padrão" });
+          }
+        } catch (insertError) {
+          console.error("Erro ao inserir escola padrão:", insertError);
+          return res.status(500).json({ message: "Erro ao criar escola padrão" });
+        }
       }
       
       // Retornar as escolas mapeadas
-      res.json(mappedSchools);
+      return res.json(mappedSchools);
     } catch (error) {
       console.error("Erro ao buscar escolas:", error);
       res.status(500).json({ message: error.message });
